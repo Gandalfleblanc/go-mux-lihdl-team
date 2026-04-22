@@ -996,6 +996,9 @@
     gap: 10px; margin-top: 8px;
   }
   .video-dropdowns label { font-size: 11px; color: var(--text3); display: flex; flex-direction: column; gap: 4px; }
+  .video-dropdowns select, .video-dropdowns input[type="text"] {
+    width: 100%; box-sizing: border-box;
+  }
   .track-preview { font-size: 12px; color: var(--green); margin-top: 8px; }
 
   .track-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }

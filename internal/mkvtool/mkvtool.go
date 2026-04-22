@@ -12,9 +12,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -22,20 +22,29 @@ import (
 
 // Locate trouve le chemin du binaire mkvmerge selon la priorité suivante :
 //  1. override explicite (depuis la config)
-//  2. binaire téléchargé dans le dossier de l'app (auto-download au 1er run)
-//  3. binaire système sur PATH
+//  2. binaire embarqué dans l'app (extrait à appBinDir au 1er run)
+//  3. binaire téléchargé dans le dossier de l'app
+//  4. binaire système sur PATH
 func Locate(configOverride, appBinDir string) (string, error) {
 	if configOverride != "" {
 		if _, err := exec.LookPath(configOverride); err == nil {
 			return configOverride, nil
 		}
 	}
-	if appBinDir != "" {
-		name := "mkvmerge"
-		if runtime.GOOS == "windows" {
-			name = "mkvmerge.exe"
+	// Embedded binary : extrait à appBinDir si non présent et que embed non vide.
+	if appBinDir != "" && len(embeddedBinary) > 0 {
+		candidate := filepath.Join(appBinDir, embeddedName)
+		if _, err := os.Stat(candidate); err != nil {
+			// Pas encore extrait → on l'écrit.
+			if werr := os.WriteFile(candidate, embeddedBinary, 0755); werr == nil {
+				return candidate, nil
+			}
+		} else {
+			return candidate, nil
 		}
-		candidate := filepath.Join(appBinDir, name)
+	}
+	if appBinDir != "" {
+		candidate := filepath.Join(appBinDir, embeddedName)
 		if _, err := exec.LookPath(candidate); err == nil {
 			return candidate, nil
 		}
@@ -43,7 +52,7 @@ func Locate(configOverride, appBinDir string) (string, error) {
 	if p, err := exec.LookPath("mkvmerge"); err == nil {
 		return p, nil
 	}
-	return "", errors.New("mkvmerge introuvable (ni override, ni téléchargé, ni sur PATH)")
+	return "", errors.New("mkvmerge introuvable (ni override, ni embarqué, ni sur PATH)")
 }
 
 // Info est la vue simplifiée du résultat de "mkvmerge -J file.mkv".

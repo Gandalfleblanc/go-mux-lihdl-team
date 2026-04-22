@@ -16,6 +16,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Install MKVToolNix + embed mkvmerge
+        run: |
+          brew install mkvtoolnix
+          cp "$(which mkvmerge)" internal/mkvtool/binaries/mkvmerge
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
       - name: Build
@@ -39,6 +43,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Install MKVToolNix + embed mkvmerge
+        run: |
+          brew install mkvtoolnix
+          cp "$(which mkvmerge)" internal/mkvtool/binaries/mkvmerge
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
       - name: Build
@@ -62,10 +70,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Install system dependencies
+      - name: Install system dependencies + mkvmerge
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev mkvtoolnix
+          cp "$(which mkvmerge)" internal/mkvtool/binaries/mkvmerge
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
       - name: Build
@@ -85,6 +94,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Download MKVToolNix + embed mkvmerge.exe
+        shell: bash
+        run: |
+          curl -L -o mkv.7z https://mkvtoolnix.download/windows/releases/98.0/mkvtoolnix-64-bit-98.0.7z
+          7z x mkv.7z -o./mkv-extract
+          cp ./mkv-extract/mkvtoolnix/mkvmerge.exe internal/mkvtool/binaries/mkvmerge.exe
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
       - name: Build
