@@ -1,11 +1,15 @@
 package main
 
 import (
+	"archive/zip"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -66,7 +70,11 @@ func (a *App) startup(ctx context.Context) {
 
 // --- Version ---
 
-func (a *App) GetVersion() string { return "1.0.0" }
+// AppVersion est lue par le frontend (pill dans le header) et utilisée pour
+// comparer avec la dernière release GitHub lors du check de mise à jour.
+const AppVersion = "v2.0.0"
+
+func (a *App) GetVersion() string { return AppVersion }
 
 // --- Config ---
 
@@ -350,3 +358,284 @@ func itoa(n int) string {
 	}
 	return string(buf[i:])
 }
+
+// ============================================================================
+// Auto-update : check + download + install via GitHub Releases (repo public).
+// ============================================================================
+
+const updateRepo = "Gandalfleblanc/go-mux-lihdl-team"
+
+// UpdateInfo décrit une mise à jour disponible.
+type UpdateInfo struct {
+	Available bool   `json:"available"`
+	Version   string `json:"version"`
+	URL       string `json:"url"`
+	Notes     string `json:"notes"`
+}
+
+type ghAssetPub struct {
+	Name               string `json:"name"`
+	BrowserDownloadURL string `json:"browser_download_url"`
+	Size               int64  `json:"size"`
+}
+
+type ghReleasePub struct {
+	TagName    string       `json:"tag_name"`
+	HTMLURL    string       `json:"html_url"`
+	Body       string       `json:"body"`
+	Draft      bool         `json:"draft"`
+	Prerelease bool         `json:"prerelease"`
+	Assets     []ghAssetPub `json:"assets"`
+}
+
+func fetchLatestReleasePublic() (*ghReleasePub, error) {
+	req, err := http.NewRequest("GET", "https://api.github.com/repos/"+updateRepo+"/releases/latest", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, errMkvErr("HTTP " + resp.Status)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	var rel ghReleasePub
+	if err := json.Unmarshal(raw, &rel); err != nil {
+		return nil, err
+	}
+	return &rel, nil
+}
+
+func platformAssetName() string {
+	switch runtime.GOOS + "/" + runtime.GOARCH {
+	case "darwin/arm64":
+		return "GO-Mux-LiHDL-Team-macos-arm64.zip"
+	case "darwin/amd64":
+		return "GO-Mux-LiHDL-Team-macos-amd64.zip"
+	case "windows/amd64":
+		return "GO-Mux-LiHDL-Team-windows-amd64.zip"
+	case "linux/amd64":
+		return "GO-Mux-LiHDL-Team-linux-amd64.tar.gz"
+	}
+	return ""
+}
+
+// CheckUpdate retourne les infos de la dernière release si une version plus
+// récente est disponible. Silencieux sur erreur (retourne UpdateInfo{}).
+func (a *App) CheckUpdate() UpdateInfo {
+	rel, err := fetchLatestReleasePublic()
+	if err != nil || rel.Draft || rel.Prerelease || rel.TagName == "" {
+		return UpdateInfo{}
+	}
+	if !isVersionNewer(rel.TagName, AppVersion) {
+		return UpdateInfo{}
+	}
+	return UpdateInfo{
+		Available: true,
+		Version:   rel.TagName,
+		URL:       rel.HTMLURL,
+		Notes:     rel.Body,
+	}
+}
+
+// InstallUpdate télécharge la dernière release, extrait, remplace le binaire
+// en place et relance l'app. Supporté sur macOS et Windows. Linux : ouvre la
+// page release (fallback manuel).
+func (a *App) InstallUpdate() error {
+	if runtime.GOOS == "linux" {
+		wr.BrowserOpenURL(a.ctx, "https://github.com/"+updateRepo+"/releases")
+		return errMkvErr("auto-install non supporté sur Linux — page ouverte")
+	}
+	rel, err := fetchLatestReleasePublic()
+	if err != nil {
+		return err
+	}
+	wantName := platformAssetName()
+	var asset *ghAssetPub
+	for i := range rel.Assets {
+		if rel.Assets[i].Name == wantName {
+			asset = &rel.Assets[i]
+			break
+		}
+	}
+	if asset == nil {
+		return errMkvErr("asset " + wantName + " introuvable dans " + rel.TagName)
+	}
+	wr.EventsEmit(a.ctx, "log", "⬇️ Téléchargement "+asset.Name+"…")
+	tmpDir := filepath.Join(os.TempDir(), "go-mux-lihdl-update")
+	_ = os.RemoveAll(tmpDir)
+	if err := os.MkdirAll(tmpDir, 0755); err != nil {
+		return err
+	}
+	archivePath := filepath.Join(tmpDir, asset.Name)
+	if err := downloadTo(asset.BrowserDownloadURL, archivePath); err != nil {
+		return err
+	}
+	execPath, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	switch runtime.GOOS {
+	case "darwin":
+		return a.installDarwin(tmpDir, archivePath, execPath)
+	case "windows":
+		return a.installWindows(tmpDir, archivePath, execPath)
+	}
+	return errMkvErr("plateforme non supportée")
+}
+
+func (a *App) installDarwin(tmpDir, zipPath, execPath string) error {
+	wr.EventsEmit(a.ctx, "log", "📦 Extraction…")
+	if out, err := exec.Command("unzip", "-q", zipPath, "-d", tmpDir).CombinedOutput(); err != nil {
+		return errMkvErr("unzip : " + string(out))
+	}
+	newApp := filepath.Join(tmpDir, "GO Mux LiHDL Team.app")
+	if _, err := os.Stat(newApp); err != nil {
+		return errMkvErr("'" + newApp + "' introuvable après unzip")
+	}
+	currentApp := filepath.Dir(filepath.Dir(filepath.Dir(execPath)))
+	if !strings.HasSuffix(currentApp, ".app") {
+		return errMkvErr("bundle courant introuvable")
+	}
+	scriptPath := filepath.Join(tmpDir, "install.sh")
+	script := "#!/bin/sh\nsleep 1\nrm -rf \"" + currentApp + "\"\nmv \"" + newApp + "\" \"" + currentApp + "\"\nxattr -cr \"" + currentApp + "\" 2>/dev/null || true\nopen \"" + currentApp + "\"\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+		return err
+	}
+	wr.EventsEmit(a.ctx, "log", "🔄 Installation, l'app va redémarrer…")
+	cmd := exec.Command("/bin/sh", scriptPath)
+	cmd.SysProcAttr = detachedProcAttr()
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		wr.Quit(a.ctx)
+	}()
+	return nil
+}
+
+func (a *App) installWindows(tmpDir, zipPath, execPath string) error {
+	wr.EventsEmit(a.ctx, "log", "📦 Extraction…")
+	if err := unzipTo(zipPath, tmpDir); err != nil {
+		return err
+	}
+	newExe := filepath.Join(tmpDir, "GO Mux LiHDL Team.exe")
+	if _, err := os.Stat(newExe); err != nil {
+		return errMkvErr("'" + newExe + "' introuvable après unzip")
+	}
+	batPath := filepath.Join(tmpDir, "install.bat")
+	bat := "@echo off\nping -n 3 127.0.0.1 > nul\ndel /f /q \"" + execPath + "\"\nmove /y \"" + newExe + "\" \"" + execPath + "\"\nstart \"\" \"" + execPath + "\"\n"
+	if err := os.WriteFile(batPath, []byte(bat), 0755); err != nil {
+		return err
+	}
+	wr.EventsEmit(a.ctx, "log", "🔄 Installation, l'app va redémarrer…")
+	cmd := exec.Command("cmd.exe", "/C", "start", "/B", "", batPath)
+	cmd.SysProcAttr = detachedProcAttr()
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		wr.Quit(a.ctx)
+	}()
+	return nil
+}
+
+// --- helpers updater ---
+
+func downloadTo(url, dest string) error {
+	resp, err := (&http.Client{Timeout: 5 * time.Minute}).Get(url)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return errMkvErr("HTTP " + resp.Status)
+	}
+	f, err := os.Create(dest)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = io.Copy(f, resp.Body)
+	return err
+}
+
+func unzipTo(zipPath, destDir string) error {
+	r, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+	for _, f := range r.File {
+		fpath := filepath.Join(destDir, f.Name)
+		if !strings.HasPrefix(fpath, filepath.Clean(destDir)+string(os.PathSeparator)) {
+			return errMkvErr("chemin zip non sûr : " + fpath)
+		}
+		if f.FileInfo().IsDir() {
+			_ = os.MkdirAll(fpath, f.Mode())
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(fpath), 0755); err != nil {
+			return err
+		}
+		out, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+		if err != nil {
+			return err
+		}
+		rc, err := f.Open()
+		if err != nil {
+			out.Close()
+			return err
+		}
+		_, err = io.Copy(out, rc)
+		out.Close()
+		rc.Close()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// isVersionNewer retourne true si tag a est strictement supérieure à tag b.
+func isVersionNewer(a, b string) bool {
+	pa := parseVersion(a)
+	pb := parseVersion(b)
+	for i := 0; i < 3; i++ {
+		if pa[i] > pb[i] {
+			return true
+		}
+		if pa[i] < pb[i] {
+			return false
+		}
+	}
+	return false
+}
+
+func parseVersion(v string) [3]int {
+	v = strings.TrimPrefix(v, "v")
+	parts := strings.Split(v, ".")
+	var out [3]int
+	for i := 0; i < 3 && i < len(parts); i++ {
+		n := 0
+		for _, c := range parts[i] {
+			if c >= '0' && c <= '9' {
+				n = n*10 + int(c-'0')
+			} else {
+				break
+			}
+		}
+		out[i] = n
+	}
+	return out
+}
+
+func errMkvErr(s string) error { return &mkvErr{msg: s} }
+

@@ -7,6 +7,7 @@
     SelectMkvFile, SelectSubFiles, SelectOutputDir, LocateMkvmerge,
     AnalyzeMkv, SearchTmdb, TestTmdbKey, FileSize,
     Mux, CancelMux,
+    CheckUpdate, InstallUpdate,
   } from '../wailsjs/go/main/App.js';
   import { EventsOn } from '../wailsjs/runtime/runtime.js';
 
@@ -508,6 +509,43 @@
   }
 
   let tmdbTest = { running: false, ok: null, message: '' };
+
+  // Auto-update state.
+  let updateInfo = null;       // {version, url, notes} si dispo
+  let checkingUpdate = false;
+  let installingUpdate = false;
+
+  async function checkForUpdate() {
+    if (checkingUpdate) return;
+    checkingUpdate = true;
+    updateInfo = null;
+    appendLog('🔍 Recherche de mise à jour…');
+    try {
+      const info = await CheckUpdate();
+      if (info && info.available) {
+        updateInfo = info;
+        appendLog('🎉 Mise à jour disponible : ' + info.version);
+      } else {
+        appendLog('✓ Déjà à jour (v' + appVersion + ')');
+      }
+    } catch (e) {
+      appendLog('❌ Check MAJ : ' + String(e));
+    } finally {
+      checkingUpdate = false;
+    }
+  }
+
+  async function doInstallUpdate() {
+    if (installingUpdate) return;
+    installingUpdate = true;
+    try {
+      await InstallUpdate();
+      // L'app va quitter et relancer la nouvelle version.
+    } catch (e) {
+      appendLog('❌ Install MAJ : ' + String(e));
+      installingUpdate = false;
+    }
+  }
   async function doTestTmdbKey() {
     tmdbTest = { running: true, ok: null, message: '' };
     try {
@@ -600,6 +638,15 @@
     } else {
       appendLog('ℹ mkvmerge : ' + mkvmergePath);
     }
+
+    // Check silencieux au démarrage : si MAJ dispo, le bouton devient vert.
+    try {
+      const info = await CheckUpdate();
+      if (info && info.available) {
+        updateInfo = info;
+        appendLog('🎉 Mise à jour disponible : ' + info.version);
+      }
+    } catch {}
   });
 </script>
 
@@ -613,10 +660,18 @@
       </div>
     </div>
     <div class="topbar-right">
-      <div class="version-pill">
-        <span class="version-icon">⟳</span>
-        <span class="version-label">v{appVersion}</span>
-      </div>
+      {#if updateInfo}
+        <button class="update-pill available" on:click={doInstallUpdate} disabled={installingUpdate}
+                title="Installer {updateInfo.version}">
+          {installingUpdate ? '⟳ Installation…' : '⬇ Installer ' + updateInfo.version}
+        </button>
+      {:else}
+        <button class="update-pill" on:click={checkForUpdate} disabled={checkingUpdate}
+                title="Rechercher une mise à jour">
+          <span class="version-icon" class:spin={checkingUpdate}>⟳</span>
+          <span class="version-label">{appVersion}</span>
+        </button>
+      {/if}
       <button class="settings-btn" on:click={() => screen = 'reglages'}>
         <span class="gear">⚙</span>
         <span class="settings-label">SETTINGS</span>
@@ -994,16 +1049,37 @@
 
   .topbar-right { display: flex; align-items: center; gap: 10px; }
 
-  .version-pill {
+  .update-pill {
     display: inline-flex; align-items: center; gap: 7px;
     padding: 7px 13px; border-radius: 10px;
     background: rgba(0, 180, 216, 0.08);
     border: 1px solid rgba(0, 180, 216, 0.35);
     color: var(--blue-hot);
-    font-size: 12px; font-weight: 700;
+    font: inherit; font-size: 12px; font-weight: 700;
     letter-spacing: 0.5px;
+    cursor: pointer; transition: all 150ms;
   }
-  .version-icon { opacity: 0.7; }
+  .update-pill:hover:not(:disabled) {
+    background: rgba(0, 180, 216, 0.18);
+    border-color: rgba(0, 180, 216, 0.55);
+  }
+  .update-pill:disabled { cursor: wait; opacity: 0.7; }
+  .update-pill.available {
+    background: rgba(126, 240, 192, 0.12);
+    border-color: rgba(126, 240, 192, 0.5);
+    color: var(--green);
+    animation: pulse-available 2s infinite;
+  }
+  .update-pill.available:hover:not(:disabled) {
+    background: rgba(126, 240, 192, 0.22);
+  }
+  @keyframes pulse-available {
+    0%,100% { box-shadow: 0 0 0 0 rgba(126, 240, 192, 0.3); }
+    50%     { box-shadow: 0 0 0 6px rgba(126, 240, 192, 0); }
+  }
+  .version-icon { opacity: 0.7; display: inline-block; }
+  .version-icon.spin { animation: spin-icon 1s linear infinite; }
+  @keyframes spin-icon { to { transform: rotate(360deg); } }
   .version-label { font-variant-numeric: tabular-nums; }
 
   .settings-btn {
