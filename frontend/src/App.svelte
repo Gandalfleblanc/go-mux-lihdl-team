@@ -43,7 +43,9 @@
     sourceTeam: '',                 // team de la source (ex: Alkaline) — éditable
     team: 'LiHDL',                  // team de sortie (dans le filename)
   };
-  let target = { title: '', year: '', resolution: '1080p', source: 'HDLight', video_codec: '' };
+  let target = { title: '', year: '', resolution: '1080p', source: 'HDLight', video_codec: '', lang: 'auto' };
+  // Dernière fiche TMDB sélectionnée — permet de basculer VF/VO sans re-chercher.
+  let lastTmdbResult = null;
 
   // Dropdowns pour le filename (ordre : résolution.source).
   const RESOLUTION_OPTIONS = ['720p', '1080p', '2160p'];
@@ -480,14 +482,27 @@
     return '';
   }
 
-  // Construit le titre "Titre (Année)" en choisissant FR ou VO selon la langue
-  // du fichier source.
-  function composeTmdbTitle(r, isFrench) {
-    const base = isFrench
+  // Construit le titre "Titre (Année)" selon target.lang :
+  //   'vf'   → TitreFR forcé
+  //   'vo'   → TitreVO forcé
+  //   'auto' → selon looksFrench(sourcePath)
+  function composeTmdbTitle(r, _unused) {
+    let useFR;
+    if (target.lang === 'vf')      useFR = true;
+    else if (target.lang === 'vo') useFR = false;
+    else                           useFR = looksFrench(sourcePath);
+    const base = useFR
       ? (r.titre_fr || r.titre_vo || '')
       : (r.titre_vo || r.titre_fr || '');
     const year = r.annee_fr || '';
     return year ? (base + ' (' + year + ')') : base;
+  }
+
+  // Rejoue le calcul du titre quand on bascule VF/VO dans le dropdown.
+  function refreshTitleFromLang() {
+    if (!lastTmdbResult) return;
+    target.title = composeTmdbTitle(lastTmdbResult);
+    target.year = lastTmdbResult.annee_fr || '';
   }
 
   async function maybeAutoFillTitle(path) {
@@ -498,8 +513,8 @@
       const r = await SearchTmdb(name);
       tmdbResults = r || [];
       if (r && r.length === 1) {
-        const isFrench = looksFrench(path);
-        target.title = composeTmdbTitle(r[0], isFrench);
+        lastTmdbResult = r[0];
+        target.title = composeTmdbTitle(r[0]);
         target.year  = r[0].annee_fr || '';
         appendLog('✓ TMDB : ' + target.title);
       } else if (r && r.length > 1) {
@@ -527,8 +542,8 @@
   }
 
   function pickTmdb(r) {
-    const isFrench = looksFrench(sourcePath);
-    target.title = composeTmdbTitle(r, isFrench);
+    lastTmdbResult = r;
+    target.title = composeTmdbTitle(r);
     target.year  = r.annee_fr || '';
     tmdbResults = [];
     screen = 'cible';
@@ -697,7 +712,7 @@
     <div class="brand">
       <img class="logo" src={logo} alt="LiHDL" />
       <div class="brand-text">
-        <div class="app-title">GO MUX LIHDL TEAM</div>
+        <div class="app-title">GO MUX <span class="brand-lihdl">LiHDL</span> TEAM</div>
         <div class="app-subtitle">BY GANDALF</div>
       </div>
     </div>
@@ -893,8 +908,15 @@
 
       <div class="card">
         <div class="section-title">Titre cible</div>
-        {#if target.title || target.year}
-          <div class="tmdb-preview mono">{target.title}{target.year ? ' (' + target.year + ')' : ''}</div>
+        {#if target.title}
+          <div class="tmdb-preview mono">{target.title}</div>
+        {/if}
+        {#if lastTmdbResult}
+          <div class="lang-toggle">
+            <button class:active={target.lang === 'auto'} on:click={() => { target.lang = 'auto'; refreshTitleFromLang(); }}>Auto</button>
+            <button class:active={target.lang === 'vf'}   on:click={() => { target.lang = 'vf';   refreshTitleFromLang(); }}>VF</button>
+            <button class:active={target.lang === 'vo'}   on:click={() => { target.lang = 'vo';   refreshTitleFromLang(); }}>VO</button>
+          </div>
         {/if}
         <div class="field-row">
           <div class="field" style:flex="3"><label>Titre</label>
@@ -941,7 +963,7 @@
 
     {:else if screen === 'reglages'}
       <div class="card">
-        <div class="section-title">TMDB / index serveurperso</div>
+        <div class="section-title">TMDB</div>
         <div class="field"><label>Clé API TMDB (optionnelle)</label>
           <div class="field-row">
             <input type="password" bind:value={config.tmdb_key} placeholder="laisse vide si tu utilises juste serveurperso" />
@@ -953,7 +975,7 @@
             <div class="result-badge {tmdbTest.ok ? 'ok' : 'err'}">{tmdbTest.message}</div>
           {/if}
         </div>
-        <div class="field"><label>URL de l'index serveurperso</label>
+        <div class="field"><label>URL de l'index</label>
           <input type="text" bind:value={config.serveurperso_url} />
         </div>
       </div>
@@ -1088,6 +1110,8 @@
     background-clip: text;
     color: transparent;
   }
+  /* LiHDL garde sa casse d'origine (L majuscule, i minuscule, HDL majuscule). */
+  .brand-lihdl { letter-spacing: 1.5px; }
   .app-subtitle {
     display: inline-block; align-self: flex-start;
     padding: 2px 8px; border-radius: 10px;
@@ -1211,6 +1235,10 @@
   .video-dropdowns label { font-size: 11px; color: var(--text3); display: flex; flex-direction: column; gap: 4px; }
   .video-dropdowns select, .video-dropdowns input[type="text"] {
     width: 100%; box-sizing: border-box;
+    height: 34px; line-height: 1.2;
+    padding: 0 11px;
+    margin: 0;
+    appearance: none; -webkit-appearance: none;
   }
   .track-preview { font-size: 12px; color: var(--green); margin-top: 8px; }
 
@@ -1337,6 +1365,23 @@
     background: rgba(126, 240, 192, 0.06);
     border: 1px solid rgba(126, 240, 192, 0.2);
     border-radius: 8px; font-size: 13px; color: var(--green);
+  }
+
+  .lang-toggle {
+    display: inline-flex; gap: 2px; margin: 0 0 12px;
+    padding: 3px; border-radius: 8px; border: 1px solid var(--border);
+    background: rgba(0,0,0,0.25);
+  }
+  .lang-toggle button {
+    padding: 5px 12px; border: none; border-radius: 6px;
+    background: transparent; color: var(--text2);
+    font: inherit; font-size: 11px; font-weight: 700; letter-spacing: 0.5px;
+    cursor: pointer; transition: all 120ms;
+  }
+  .lang-toggle button:hover { color: var(--text); }
+  .lang-toggle button.active {
+    background: rgba(230, 57, 70, 0.2);
+    color: var(--red-hot);
   }
 
   .result-badge {
