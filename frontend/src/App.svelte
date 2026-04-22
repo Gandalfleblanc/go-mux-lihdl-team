@@ -499,10 +499,14 @@
   }
 
   // Rejoue le calcul du titre quand on bascule VF/VO dans le dropdown.
+  // Reassign complet pour forcer la réactivité Svelte (sinon la preview
+  // filename ne se mettait pas à jour).
   function refreshTitleFromLang() {
     if (!lastTmdbResult) return;
-    target.title = composeTmdbTitle(lastTmdbResult);
-    target.year = lastTmdbResult.annee_fr || '';
+    const newTitle = composeTmdbTitle(lastTmdbResult);
+    const newYear = lastTmdbResult.annee_fr || '';
+    target = { ...target, title: newTitle, year: newYear };
+    appendLog('✓ Titre ' + (target.lang || 'auto').toUpperCase() + ' : ' + newTitle);
   }
 
   async function maybeAutoFillTitle(path) {
