@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import banner from './assets/images/banner.png';
+  import logo from './assets/images/logo.png';
   import {
     GetVersion, GetConfig, SaveConfig, GetLihdlOptions,
     SelectMkvFile, SelectSubFiles, SelectOutputDir, LocateMkvmerge,
@@ -604,10 +605,22 @@
 
 <main>
   <header class="topbar">
-    <img class="banner" src={banner} alt="LiHDL" />
+    <div class="brand">
+      <img class="logo" src={logo} alt="LiHDL" />
+      <div class="brand-text">
+        <div class="app-title">GO MUX LIHDL TEAM</div>
+        <div class="app-subtitle">BY GANDALF</div>
+      </div>
+    </div>
     <div class="topbar-right">
-      <span class="version">v{appVersion}</span>
-      <button class="btn-icon" on:click={() => screen = 'reglages'} title="Réglages">⚙</button>
+      <div class="version-pill">
+        <span class="version-icon">⟳</span>
+        <span class="version-label">v{appVersion}</span>
+      </div>
+      <button class="settings-btn" on:click={() => screen = 'reglages'}>
+        <span class="gear">⚙</span>
+        <span class="settings-label">SETTINGS</span>
+      </button>
     </div>
   </header>
 
@@ -915,7 +928,7 @@
   :global(body) {
     color: var(--text);
     background:
-      radial-gradient(1200px 700px at 50% -200px, rgba(230, 57, 70, 0.08), transparent 60%),
+      radial-gradient(1400px 900px at 50% 30%, rgba(230, 57, 70, 0.07), transparent 70%),
       var(--bg);
   }
 
@@ -924,27 +937,90 @@
     flex-direction: column;
     min-height: 100vh;
     text-align: left;
+    position: relative;
+    isolation: isolate;
   }
 
+  /* Banner en watermark de fond, centré, opacité réduite */
+  main::before {
+    content: '';
+    position: fixed;
+    inset: 100px 0 180px 0;
+    background-image: url(./assets/images/banner.png);
+    background-repeat: no-repeat;
+    background-position: center center;
+    background-size: clamp(500px, 70%, 1100px) auto;
+    opacity: 0.10;
+    pointer-events: none;
+    z-index: -1;
+  }
+
+  /* ---- Topbar (header style LiHDL Post Discord v3) ---- */
   .topbar {
     display: flex;
     align-items: center;
     justify-content: space-between;
     padding: 14px 20px;
     border-bottom: 1px solid var(--border);
-    background: rgba(13, 10, 16, 0.8);
+    background: rgba(13, 10, 16, 0.65);
+    backdrop-filter: blur(12px) saturate(140%);
+    -webkit-backdrop-filter: blur(12px) saturate(140%);
   }
-  .banner { height: 36px; object-fit: contain; }
-  .topbar-right { display: flex; align-items: center; gap: 10px; }
-  .version { color: var(--text3); font-size: 11px; font-variant-numeric: tabular-nums; }
-  .btn-icon {
-    width: 34px; height: 34px; border-radius: 8px;
+  .brand {
+    display: flex; align-items: center; gap: 14px;
+  }
+  .logo {
+    width: 48px; height: 48px; border-radius: 10px;
+    object-fit: contain;
+    box-shadow: 0 0 24px rgba(230, 57, 70, 0.35);
+  }
+  .brand-text { display: flex; flex-direction: column; gap: 3px; line-height: 1; }
+  .app-title {
+    font-size: 15px; font-weight: 800;
+    letter-spacing: 2.5px;
+    background: linear-gradient(90deg, #ff5a4a 0%, #ffd60a 35%, #7ef0c0 70%, #48cae4 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .app-subtitle {
+    display: inline-block; align-self: flex-start;
+    padding: 2px 8px; border-radius: 10px;
+    font-size: 10px; font-weight: 700; letter-spacing: 1.8px;
+    background: rgba(255,255,255,0.06);
     border: 1px solid var(--border);
-    background: rgba(255,255,255,0.03);
-    color: var(--text2); font-size: 16px; cursor: pointer;
-    transition: all 150ms;
+    color: var(--text2);
   }
-  .btn-icon:hover { background: rgba(255,255,255,0.08); color: var(--text); }
+
+  .topbar-right { display: flex; align-items: center; gap: 10px; }
+
+  .version-pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 7px 13px; border-radius: 10px;
+    background: rgba(0, 180, 216, 0.08);
+    border: 1px solid rgba(0, 180, 216, 0.35);
+    color: var(--blue-hot);
+    font-size: 12px; font-weight: 700;
+    letter-spacing: 0.5px;
+  }
+  .version-icon { opacity: 0.7; }
+  .version-label { font-variant-numeric: tabular-nums; }
+
+  .settings-btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 7px 13px; border-radius: 10px;
+    border: 1px solid var(--border);
+    background: rgba(255,255,255,0.04);
+    color: var(--text2);
+    font: inherit; font-size: 11px; font-weight: 700;
+    letter-spacing: 1.5px;
+    cursor: pointer; transition: all 150ms;
+  }
+  .settings-btn:hover {
+    background: rgba(255,255,255,0.08);
+    color: var(--text); border-color: var(--border-strong);
+  }
+  .gear { font-size: 14px; }
 
   .tabs {
     display: flex; gap: 2px; padding: 0 20px;

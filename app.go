@@ -66,7 +66,7 @@ func (a *App) startup(ctx context.Context) {
 
 // --- Version ---
 
-func (a *App) GetVersion() string { return "0.1.0-dev" }
+func (a *App) GetVersion() string { return "1.0.0" }
 
 // --- Config ---
 
