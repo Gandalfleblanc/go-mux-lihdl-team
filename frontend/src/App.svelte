@@ -171,6 +171,18 @@
       .replace(/\.+/g, '.');
   }
 
+  // Détecte si le fichier source contient une piste française (FRENCH, VOF,
+  // VFF, VFQ, VFi, MULTi, TRUEFRENCH). Sinon → version anglaise uniquement.
+  function looksFrench(path) {
+    const n = String(path || '').toUpperCase();
+    return /\b(FRENCH|TRUEFRENCH|VOF|VFF|VFQ|VFI|MULTI)\b/.test(n);
+  }
+
+  // Retire un suffixe " (YYYY)" du titre pour générer le filename proprement.
+  function stripYearSuffix(title) {
+    return String(title || '').replace(/\s*\(\d{4}\)\s*$/, '').trim();
+  }
+
   // Auto-détection de la team de la source depuis le nom de fichier.
   // Pattern : ...-TeamName.mkv → "TeamName"
   function extractSourceTeam(path) {
@@ -201,8 +213,13 @@
   function buildFilenameClient() {
     if (!sourceInfo) return '';
     const parts = [];
-    if (target.title) parts.push(dotify(target.title));
-    if (target.year)  parts.push(target.year);
+    // Strip le " (YYYY)" final du titre pour garder le filename propre.
+    const cleanTitle = stripYearSuffix(target.title);
+    if (cleanTitle) parts.push(dotify(cleanTitle));
+    // Année : soit depuis le champ, soit extraite du titre si absent.
+    const yearMatch = String(target.title || '').match(/\((\d{4})\)\s*$/);
+    const year = target.year || (yearMatch ? yearMatch[1] : '');
+    if (year) parts.push(year);
     parts.push(langFlagClient(keptAudioLabels()));
     if (target.resolution) parts.push(target.resolution);
     if (target.source) parts.push(target.source);
@@ -462,6 +479,16 @@
     return '';
   }
 
+  // Construit le titre "Titre (Année)" en choisissant FR ou VO selon la langue
+  // du fichier source.
+  function composeTmdbTitle(r, isFrench) {
+    const base = isFrench
+      ? (r.titre_fr || r.titre_vo || '')
+      : (r.titre_vo || r.titre_fr || '');
+    const year = r.annee_fr || '';
+    return year ? (base + ' (' + year + ')') : base;
+  }
+
   async function maybeAutoFillTitle(path) {
     const name = path.split('/').pop().replace(/\.[^.]+$/, '');
     tmdbQuery = name;
@@ -470,9 +497,10 @@
       const r = await SearchTmdb(name);
       tmdbResults = r || [];
       if (r && r.length === 1) {
-        target.title = r[0].titre_fr || r[0].titre_vo || '';
+        const isFrench = looksFrench(path);
+        target.title = composeTmdbTitle(r[0], isFrench);
         target.year  = r[0].annee_fr || '';
-        appendLog('✓ TMDB : ' + target.title + ' (' + target.year + ')');
+        appendLog('✓ TMDB : ' + target.title);
       } else if (r && r.length > 1) {
         appendLog('ℹ ' + r.length + ' résultats TMDB — choisis dans Cible');
       }
@@ -498,7 +526,8 @@
   }
 
   function pickTmdb(r) {
-    target.title = r.titre_fr || r.titre_vo || '';
+    const isFrench = looksFrench(sourcePath);
+    target.title = composeTmdbTitle(r, isFrench);
     target.year  = r.annee_fr || '';
     tmdbResults = [];
     screen = 'cible';
