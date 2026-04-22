@@ -393,6 +393,18 @@
   // Chaque piste a un champ `order` (initialisé à son index d'arrivée).
   // L'UI affiche les sous-titres triés par order avec des flèches ↑↓.
 
+  // Fait monter/descendre une piste audio (idx dans le tableau trié par order).
+  function moveAudio(idx, dir) {
+    const audio = tracks.filter(t => t.type === 'audio').slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    const newIdx = idx + dir;
+    if (newIdx < 0 || newIdx >= audio.length) return;
+    const cur = audio[idx], oth = audio[newIdx];
+    const tmp = cur.order ?? 0;
+    cur.order = oth.order ?? 0;
+    oth.order = tmp;
+    tracks = [...tracks];
+  }
+
   function moveTrack(kind, idx, dir) {
     // kind = 'internal' | 'external' ; dir = -1 (up) / +1 (down)
     const subs = [...tracks.filter(t => t.type === 'subtitles'), ...externalSubs];
@@ -739,14 +751,22 @@
 
         <!-- Audio -->
         {#if tracks.some(t => t.type === 'audio')}
+          {@const audioSorted = tracks.filter(t => t.type === 'audio').slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0))}
           <div class="card">
             <div class="section-title">Pistes audio</div>
-            {#each tracks.filter(t => t.type === 'audio') as t}
-              <div class="track-row">
+            {#each audioSorted as t, i (t.id)}
+              <div class="track-row" class:dropped={!t.keep}>
                 <div class="track-meta">
                   <span class="badge audio">AUDIO</span>
                   <span class="mono">#{t.id} · {t.codec} · {t.lang || '??'} · {t.channels || '?'}ch</span>
                   {#if t.name}<span class="track-current">« {t.name} »</span>{/if}
+                  <div class="order-ctrls">
+                    <button class="btn-arrow" title="Monter" on:click={() => moveAudio(i, -1)}>↑</button>
+                    <button class="btn-arrow" title="Descendre" on:click={() => moveAudio(i, +1)}>↓</button>
+                    <button class="btn-arrow danger" title="Exclure du mux" on:click={() => (t.keep = !t.keep)}>
+                      {t.keep ? '✕' : '↩'}
+                    </button>
+                  </div>
                 </div>
                 <div class="track-controls">
                   <select bind:value={t.label}>
@@ -1149,7 +1169,10 @@
   .track-row {
     padding: 10px 0;
     border-top: 1px dashed var(--border);
+    transition: opacity 150ms;
   }
+  .track-row.dropped { opacity: 0.38; }
+  .track-row.dropped .track-meta { text-decoration: line-through; }
   .track-row:first-child { border-top: none; }
   .track-row.video .video-dropdowns {
     display: grid; grid-template-columns: repeat(4, 1fr);
