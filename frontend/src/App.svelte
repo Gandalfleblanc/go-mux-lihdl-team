@@ -1056,7 +1056,15 @@
   .drop-target {
     border: 2px dashed rgba(230, 57, 70, 0.3);
     text-align: center;
-    padding: 36px 20px;
+    padding: 48px 28px;
+    max-width: 640px;
+    margin-left: auto;
+    margin-right: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
   }
   .drop-icon { font-size: 42px; margin-bottom: 10px; }
   .drop-title { font-size: 15px; font-weight: 700; color: var(--text); }
