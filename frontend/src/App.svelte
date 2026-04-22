@@ -171,11 +171,12 @@
       .replace(/\.+/g, '.');
   }
 
-  // Détecte si le fichier source contient une piste française (FRENCH, VOF,
-  // VFF, VFQ, VFi, MULTi, TRUEFRENCH). Sinon → version anglaise uniquement.
+  // Version FR uniquement si FRENCH / TRUEFRENCH / VOF apparaissent.
+  // MULTi → le film d'origine est étranger → titre VO (anglais).
+  // VFF / VFQ seuls sont des métadonnées de pistes, pas de la version du film.
   function looksFrench(path) {
     const n = String(path || '').toUpperCase();
-    return /\b(FRENCH|TRUEFRENCH|VOF|VFF|VFQ|VFI|MULTI)\b/.test(n);
+    return /\b(FRENCH|TRUEFRENCH|VOF)\b/.test(n);
   }
 
   // Retire un suffixe " (YYYY)" du titre pour générer le filename proprement.
