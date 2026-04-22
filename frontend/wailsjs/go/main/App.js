@@ -14,6 +14,10 @@ export function CancelMux() {
   return window['go']['main']['App']['CancelMux']();
 }
 
+export function FileSize(arg1) {
+  return window['go']['main']['App']['FileSize'](arg1);
+}
+
 export function GetConfig() {
   return window['go']['main']['App']['GetConfig']();
 }
@@ -48,6 +52,14 @@ export function SelectMkvFile() {
 
 export function SelectOutputDir() {
   return window['go']['main']['App']['SelectOutputDir']();
+}
+
+export function SelectSubFiles() {
+  return window['go']['main']['App']['SelectSubFiles']();
+}
+
+export function TestTmdbKey(arg1) {
+  return window['go']['main']['App']['TestTmdbKey'](arg1);
 }
 
 export function VideoTrackName(arg1, arg2, arg3, arg4) {

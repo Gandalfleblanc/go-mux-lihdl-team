@@ -11,6 +11,8 @@ export function BuildFilename(arg1:naming.FilenameParams):Promise<string>;
 
 export function CancelMux():Promise<void>;
 
+export function FileSize(arg1:string):Promise<number>;
+
 export function GetConfig():Promise<config.Config>;
 
 export function GetLihdlOptions():Promise<main.LihdlOptions>;
@@ -28,5 +30,9 @@ export function SearchTmdb(arg1:string):Promise<Array<tmdb.Result>>;
 export function SelectMkvFile():Promise<string>;
 
 export function SelectOutputDir():Promise<string>;
+
+export function SelectSubFiles():Promise<Array<string>>;
+
+export function TestTmdbKey(arg1:string):Promise<main.TmdbTestResult>;
 
 export function VideoTrackName(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;

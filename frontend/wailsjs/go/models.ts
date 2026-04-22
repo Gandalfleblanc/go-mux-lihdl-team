@@ -58,6 +58,7 @@ export namespace main {
 	    output_path: string;
 	    title: string;
 	    tracks: mkvtool.TrackSpec[];
+	    external_subs: mkvtool.ExternalSub[];
 	
 	    static createFrom(source: any = {}) {
 	        return new MuxRequest(source);
@@ -69,6 +70,7 @@ export namespace main {
 	        this.output_path = source["output_path"];
 	        this.title = source["title"];
 	        this.tracks = this.convertValues(source["tracks"], mkvtool.TrackSpec);
+	        this.external_subs = this.convertValues(source["external_subs"], mkvtool.ExternalSub);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -89,11 +91,47 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class TmdbTestResult {
+	    ok: boolean;
+	    message: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new TmdbTestResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ok = source["ok"];
+	        this.message = source["message"];
+	    }
+	}
 
 }
 
 export namespace mkvtool {
 	
+	export class ExternalSub {
+	    Path: string;
+	    Name: string;
+	    Language: string;
+	    Default: boolean;
+	    Forced: boolean;
+	    Order: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExternalSub(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Path = source["Path"];
+	        this.Name = source["Name"];
+	        this.Language = source["Language"];
+	        this.Default = source["Default"];
+	        this.Forced = source["Forced"];
+	        this.Order = source["Order"];
+	    }
+	}
 	export class TrackSpec {
 	    ID: number;
 	    Type: string;
@@ -102,6 +140,7 @@ export namespace mkvtool {
 	    Language: string;
 	    Default: boolean;
 	    Forced: boolean;
+	    Order: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new TrackSpec(source);
@@ -116,6 +155,7 @@ export namespace mkvtool {
 	        this.Language = source["Language"];
 	        this.Default = source["Default"];
 	        this.Forced = source["Forced"];
+	        this.Order = source["Order"];
 	    }
 	}
 

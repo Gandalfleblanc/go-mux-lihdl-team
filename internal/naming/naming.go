@@ -20,6 +20,11 @@ var AudioLabels = []string{
 	"FR VFi : AC3 5.1",
 	"FR VFi : AC3 2.0",
 	"FR VFi : AC3 1.0",
+	"FR AD : AC3 5.1",
+	"FR AD : AC3 2.0",
+	"FR AD : AC3 1.0",
+	"FR AD : EAC3 5.1",
+	"FR AD : EAC3 2.0",
 	"ENG VO : AC3 5.1",
 	"ENG VO : AC3 2.0",
 	"ENG VO : AC3 1.0",
@@ -249,14 +254,14 @@ func joinDot(parts []string) string {
 }
 
 // MapCodecToLiHDL convertit un codec vidéo brut (de mkvmerge) vers la
-// nomenclature LiHDL : V_MPEG4/ISO/AVC → AVC, V_MPEGH/ISO/HEVC → HEVC, AV1 → AV1.
+// nomenclature LiHDL : H264 / H265 / AV1.
 func MapCodecToLiHDL(codecID, codec string) string {
 	c := codecID + " " + codec
 	switch {
 	case containsAny(c, "AVC", "MPEG4", "H.264", "H264", "h264"):
-		return "AVC"
+		return "H264"
 	case containsAny(c, "HEVC", "MPEGH", "H.265", "H265", "h265"):
-		return "HEVC"
+		return "H265"
 	case containsAny(c, "AV1", "av01"):
 		return "AV1"
 	}

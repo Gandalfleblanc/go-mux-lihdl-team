@@ -3,9 +3,12 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	wr "github.com/wailsapp/wails/v2/pkg/runtime"
 
@@ -32,20 +35,32 @@ func NewApp() *App {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 
-	// Drop-zone : .mkv glissés dans l'app → émis au frontend via "file:dropped".
+	// Drop-zone : .mkv → "file:dropped" (on prend le 1er) ; subs externes →
+	// "subs:dropped" (tous ceux reconnus). Les deux types peuvent être droppés
+	// ensemble, on dispatche chacun.
+	subExts := map[string]bool{
+		".srt": true, ".sup": true, ".ass": true,
+		".ssa": true, ".sub": true, ".idx": true,
+	}
 	wr.OnFileDrop(ctx, func(x, y int, paths []string) {
-		var mkvs []string
+		var mkvs, subs []string
 		for _, p := range paths {
-			if strings.EqualFold(filepath.Ext(p), ".mkv") {
+			ext := strings.ToLower(filepath.Ext(p))
+			if ext == ".mkv" {
 				mkvs = append(mkvs, p)
+			} else if subExts[ext] {
+				subs = append(subs, p)
 			}
 		}
-		if len(mkvs) == 0 {
-			wr.EventsEmit(ctx, "log", "⚠ Aucun fichier .mkv détecté dans le drop")
-			return
+		if len(mkvs) > 0 {
+			wr.EventsEmit(ctx, "file:dropped", mkvs[0])
 		}
-		// Pour le MVP on traite le 1er .mkv déposé. Batch à ajouter plus tard.
-		wr.EventsEmit(ctx, "file:dropped", mkvs[0])
+		if len(subs) > 0 {
+			wr.EventsEmit(ctx, "subs:dropped", subs)
+		}
+		if len(mkvs) == 0 && len(subs) == 0 {
+			wr.EventsEmit(ctx, "log", "⚠ Aucun fichier .mkv ou sous-titre détecté dans le drop")
+		}
 	})
 }
 
@@ -82,6 +97,17 @@ func (a *App) GetLihdlOptions() LihdlOptions {
 	}
 }
 
+// --- Helpers fichier ---
+
+// FileSize retourne la taille du fichier en octets, ou -1 si erreur.
+func (a *App) FileSize(path string) int64 {
+	info, err := os.Stat(path)
+	if err != nil {
+		return -1
+	}
+	return info.Size()
+}
+
 // --- Dialogs système ---
 
 func (a *App) SelectMkvFile() (string, error) {
@@ -95,6 +121,17 @@ func (a *App) SelectMkvFile() (string, error) {
 		return "", err
 	}
 	return path, nil
+}
+
+// SelectSubFiles ouvre un dialog multi-sélection pour les subs externes.
+func (a *App) SelectSubFiles() ([]string, error) {
+	return wr.OpenMultipleFilesDialog(a.ctx, wr.OpenDialogOptions{
+		Title: "Choisir un ou plusieurs fichiers de sous-titres",
+		Filters: []wr.FileFilter{
+			{DisplayName: "Sous-titres (*.srt *.sup *.ass *.ssa *.sub *.idx)",
+				Pattern: "*.srt;*.sup;*.ass;*.ssa;*.sub;*.idx"},
+		},
+	})
 }
 
 func (a *App) SelectOutputDir() (string, error) {
@@ -177,6 +214,33 @@ func (a *App) SearchTmdb(query string) ([]tmdb.Result, error) {
 	return tmdb.Search(c.ServeurPersoURL, query)
 }
 
+// TestTmdbKey teste la clé API TMDB en appelant /3/configuration.
+// Retourne un message de succès ou l'erreur.
+type TmdbTestResult struct {
+	OK      bool   `json:"ok"`
+	Message string `json:"message"`
+}
+
+func (a *App) TestTmdbKey(key string) TmdbTestResult {
+	if strings.TrimSpace(key) == "" {
+		return TmdbTestResult{OK: false, Message: "clé vide"}
+	}
+	url := "https://api.themoviedb.org/3/configuration?api_key=" + key
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return TmdbTestResult{OK: false, Message: err.Error()}
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == 200 {
+		return TmdbTestResult{OK: true, Message: "clé valide ✓"}
+	}
+	if resp.StatusCode == 401 {
+		return TmdbTestResult{OK: false, Message: "clé invalide (401)"}
+	}
+	return TmdbTestResult{OK: false, Message: "HTTP " + resp.Status}
+}
+
 // --- Build filename preview ---
 
 func (a *App) BuildFilename(p naming.FilenameParams) string {
@@ -191,10 +255,11 @@ func (a *App) VideoTrackName(quality, encoder, source, team string) string {
 
 // MuxRequest est ce que le frontend envoie pour déclencher le mux.
 type MuxRequest struct {
-	InputPath  string              `json:"input_path"`
-	OutputPath string              `json:"output_path"`
-	Title      string              `json:"title"`
-	Tracks     []mkvtool.TrackSpec `json:"tracks"`
+	InputPath    string                `json:"input_path"`
+	OutputPath   string                `json:"output_path"`
+	Title        string                `json:"title"`
+	Tracks       []mkvtool.TrackSpec   `json:"tracks"`
+	ExternalSubs []mkvtool.ExternalSub `json:"external_subs"`
 }
 
 func (a *App) Mux(req MuxRequest) error {
@@ -212,10 +277,11 @@ func (a *App) Mux(req MuxRequest) error {
 
 	wr.EventsEmit(a.ctx, "log", "🔧 Lancement mkvmerge → "+filepath.Base(req.OutputPath))
 	err := mkvtool.Mux(ctx, binary, mkvtool.MuxParams{
-		InputPath:  req.InputPath,
-		OutputPath: req.OutputPath,
-		Title:      req.Title,
-		Tracks:     req.Tracks,
+		InputPath:    req.InputPath,
+		OutputPath:   req.OutputPath,
+		Title:        req.Title,
+		Tracks:       req.Tracks,
+		ExternalSubs: req.ExternalSubs,
 	},
 		func(p mkvtool.MuxProgress) {
 			wr.EventsEmit(a.ctx, "mux:progress", p)

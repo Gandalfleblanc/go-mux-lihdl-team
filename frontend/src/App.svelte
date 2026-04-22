@@ -3,9 +3,8 @@
   import banner from './assets/images/banner.png';
   import {
     GetVersion, GetConfig, SaveConfig, GetLihdlOptions,
-    SelectMkvFile, SelectOutputDir, LocateMkvmerge,
-    AnalyzeMkv, SearchTmdb,
-    BuildFilename, VideoTrackName,
+    SelectMkvFile, SelectSubFiles, SelectOutputDir, LocateMkvmerge,
+    AnalyzeMkv, SearchTmdb, TestTmdbKey, FileSize,
     Mux, CancelMux,
   } from '../wailsjs/go/main/App.js';
   import { EventsOn } from '../wailsjs/runtime/runtime.js';
@@ -35,8 +34,26 @@
   let sourceInfo = null;   // réponse AnalyzeMkv
   let tracks = [];         // état UI enrichi de chaque piste
 
-  let videoChoice = { quality: 'HDLight', encoder: 'GANDALF', source: 'REMUX LiHDL', team: 'LiHDL' };
-  let target = { title: '', year: '' };
+  let videoChoice = {
+    quality: 'HDLight',
+    encoder: 'GANDALF',
+    sourceType: 'COMPLETE BluRay', // ex-source split
+    sourceTeam: '',                 // team de la source (ex: Alkaline) — éditable
+    team: 'LiHDL',                  // team de sortie (dans le filename)
+  };
+  let target = { title: '', year: '', resolution: '1080p', source: 'HDLight', video_codec: '' };
+
+  // Dropdowns pour le filename (ordre : résolution.source).
+  const RESOLUTION_OPTIONS = ['720p', '1080p', '2160p'];
+  const TARGET_SOURCE_OPTIONS = ['HDLight', 'WEBLight', 'WEB-DL'];
+  // Dropdown élargi pour le type de source de la piste vidéo.
+  const VIDEO_SOURCE_TYPE_OPTIONS = [
+    'REMUX', 'REMUX CUSTOM',
+    'WEB-DL CUSTOM', 'WEB CUSTOM',
+    'WEB', 'WEB-DL', 'WEBRip',
+    'COMPLETE BluRay',
+  ];
+  const VIDEO_CODEC_OPTIONS = ['H264', 'x264', 'H265', 'x265', 'AV1'];
   let tmdbResults = [];
   let tmdbQuery = '';
   let tmdbSearching = false;
@@ -45,7 +62,10 @@
   let muxPercent = 0;
   let logLines = [];
   let logEl;
-  let dragging = false;
+
+  // Subs externes ajoutés (srt/sup/ass/ssa/sub/idx). Chaque entrée a le même
+  // format qu'une piste interne pour l'UI unifiée, mais avec un flag external.
+  let externalSubs = [];
 
   // --- helpers ---
   function now() {
@@ -66,42 +86,10 @@
     setTimeout(() => { if (logEl) logEl.scrollTop = logEl.scrollHeight; }, 0);
   }
 
-  // Auto-suggest d'un libellé LiHDL pour une piste audio selon langue/codec/canaux.
-  function suggestAudioLabel(t) {
-    const lang = (t.properties.language || '').toLowerCase();
-    const codec = (t.codec || t.properties.codec_id || '').toUpperCase();
-    const ch = t.properties.audio_channels || 2;
-    const ac3 = codec.includes('AC-3') && !codec.includes('E-AC'); // AC-3 pas EAC-3
-    const eac3 = codec.includes('E-AC-3') || codec.includes('EAC3');
-    const c = eac3 ? 'EAC3' : (ac3 ? 'AC3' : '');
-    const chStr = ch >= 6 ? '5.1' : (ch >= 2 ? '2.0' : '1.0');
-    if (!c) return '';
-    let prefix = '';
-    if (lang === 'fre' || lang === 'fra' || lang === 'fr') prefix = 'FR VFF';
-    else if (lang === 'eng' || lang === 'en') prefix = 'ENG VO';
-    else if (lang === 'jpn' || lang === 'ja') prefix = 'JPN VO';
-    else if (lang === 'ita' || lang === 'it') prefix = 'ITA VO';
-    if (!prefix) return '';
-    const candidate = `${prefix} : ${c} ${chStr}`;
-    return options.audio_labels.includes(candidate) ? candidate : '';
-  }
-
-  function suggestSubLabel(t) {
-    const lang = (t.properties.language || '').toLowerCase();
-    const codec = (t.codec || t.properties.codec_id || '').toUpperCase();
-    const isPGS = codec.includes('PGS') || codec.includes('HDMV');
-    const fmt = isPGS ? 'PGS' : 'SRT';
-    const forced = !!t.properties.forced_track;
-    if (lang === 'fre' || lang === 'fra' || lang === 'fr') {
-      const kind = forced ? 'Forced' : 'Full';
-      return `FR ${kind} : ${fmt}`;
-    }
-    if (lang === 'eng' || lang === 'en') return `ENG VO : ${fmt}`;
-    return '';
-  }
-
   function mapLangCode(lbl) {
-    // déduit le code iso 639-2 à partir du libellé LiHDL.
+    // Règle LiHDL : VFQ = québécois → "fr-ca" (IETF BCP 47).
+    // Les autres variantes FR restent en "fre" (ISO 639-2).
+    if (/\bVFQ\b/.test(lbl)) return 'fr-ca';
     if (lbl.startsWith('FR')) return 'fre';
     if (lbl.startsWith('ENG')) return 'eng';
     if (lbl.startsWith('JPN')) return 'jpn';
@@ -109,21 +97,16 @@
     return '';
   }
 
-  // Détecte le codec vidéo LiHDL depuis la piste vidéo du mkv.
+  // Alias maintenu pour compat : renvoie le codec saisi par l'utilisateur
+  // (éditable dans Cible) ou la suggestion auto si vide.
   function videoCodecLihdl() {
-    const v = tracks.find(t => t.type === 'video');
-    if (!v) return '';
-    const c = ((v.codec || '') + ' ' + (v.properties.codec_id || '')).toUpperCase();
-    if (c.includes('AV1') || c.includes('AV01')) return 'AV1';
-    if (c.includes('HEVC') || c.includes('H.265') || c.includes('H265') || c.includes('MPEGH')) return 'HEVC';
-    if (c.includes('AVC') || c.includes('H.264') || c.includes('H264') || c.includes('MPEG4')) return 'AVC';
-    return '';
+    return target.video_codec || suggestedVideoCodec();
   }
 
   function resolutionFromTracks() {
     const v = tracks.find(t => t.type === 'video');
     if (!v) return '';
-    const dim = v.properties.pixel_dimensions || '';
+    const dim = v.pixelDims || '';
     const m = /(\d+)x(\d+)/.exec(dim);
     if (!m) return '';
     const h = parseInt(m[2], 10);
@@ -134,16 +117,20 @@
     return h + 'p';
   }
 
-  function audioCodecsForFilename() {
-    // Liste des "AC3.5.1", "EAC3.2.0", etc. des pistes audio gardées.
-    const out = [];
-    for (const t of tracks) {
-      if (t.type !== 'audio' || !t.keep) continue;
-      const lbl = t.label || '';
-      const m = /: (AC3|EAC3) (\d\.\d)/.exec(lbl);
-      if (m) out.push(`${m[1]}.${m[2]}`);
-    }
-    return out;
+  // Codec+canaux de la 1re piste audio FR VFx gardée (VFF/VFQ/VFi).
+  // Fallback : 1re piste audio gardée tout court. Ex : "AC3.5.1".
+  function firstAudioCodecForFilename() {
+    const kept = tracks.filter(t => t.type === 'audio' && t.keep);
+    const firstFR = kept.find(t => /\bVF[FQi]\b/.test(t.label || ''));
+    const chosen = firstFR || kept[0];
+    if (!chosen) return '';
+    const m = /: (AC3|EAC3) (\d\.\d)/.exec(chosen.label || '');
+    return m ? `${m[1]}.${m[2]}` : '';
+  }
+
+  // Vrai si au moins une piste audio gardée porte un label "FR AD".
+  function hasAudioDescription() {
+    return tracks.some(t => t.type === 'audio' && t.keep && /\bFR AD\b/.test(t.label || ''));
   }
 
   function keptAudioLabels() {
@@ -174,48 +161,90 @@
     return 'VO';
   }
 
+  // Remplace espaces ET tirets par des points (pas de - dans le titre).
+  // Puis compresse les points multiples.
   function dotify(s) {
-    return String(s || '').trim().replace(/\s+/g, '.');
+    return String(s || '').trim()
+      .replace(/[\s-]+/g, '.')
+      .replace(/\.+/g, '.');
   }
 
+  // Auto-détection de la team de la source depuis le nom de fichier.
+  // Pattern : ...-TeamName.mkv → "TeamName"
+  function extractSourceTeam(path) {
+    const name = basename(path || '').replace(/\.[^.]+$/, '');
+    const m = /-([A-Za-z0-9]+)\s*$/.exec(name);
+    return m ? m[1] : '';
+  }
+
+  // Suggestion auto du codec cible (ex : H264 si détecté AVC + source WEB-DL,
+  // sinon x264 ; pareil pour H265/x265). L'utilisateur peut override.
+  function suggestedVideoCodec() {
+    const v = tracks.find(t => t.type === 'video');
+    if (!v) return '';
+    const c = ((v.codec || '') + ' ' + (v.codecId || '')).toUpperCase();
+    if (c.includes('AV1') || c.includes('AV01')) return 'AV1';
+    let base = '';
+    if (c.includes('HEVC') || c.includes('H.265') || c.includes('H265') || c.includes('MPEGH')) base = '265';
+    else if (c.includes('AVC') || c.includes('H.264') || c.includes('H264') || c.includes('MPEG4')) base = '264';
+    if (!base) return '';
+    // Règle LiHDL : H264/H265 toujours. Les x264/x265 sont pour d'autres teams.
+    const prefix = videoChoice.team === 'LiHDL' ? 'H' : (target.source === 'WEB-DL' ? 'H' : 'x');
+    return prefix + base;
+  }
+
+  // Construit le nom de fichier selon les normes LiHDL.
+  // Format : {Title}.{Year}.{Flag}.{SourceQuality}.{Audio}[.WiTH.AD].{VideoCodec}-{Team}.mkv
+  // Exemple : The.Target.2014.VFF.HDLight.1080p.AC3.5.1.WiTH.AD.H264-LiHDL.mkv
   function buildFilenameClient() {
     if (!sourceInfo) return '';
     const parts = [];
     if (target.title) parts.push(dotify(target.title));
     if (target.year)  parts.push(target.year);
-    if (videoChoice.source === 'REMUX CUSTOM LiHDL') parts.push('CUSTOM');
     parts.push(langFlagClient(keptAudioLabels()));
-    const res = resolutionFromTracks(); if (res) parts.push(res);
-    // Source + format : pour REMUX on met BluRay puis REMUX. Sinon la qualité.
-    if (videoChoice.source.includes('REMUX')) {
-      parts.push('BluRay');
-      parts.push('REMUX');
-    } else {
-      parts.push(videoChoice.quality);
-    }
-    for (const ac of audioCodecsForFilename()) parts.push(ac);
-    const vc = videoCodecLihdl(); if (vc) parts.push(vc);
+    if (target.resolution) parts.push(target.resolution);
+    if (target.source) parts.push(target.source);
+    const ac = firstAudioCodecForFilename();
+    if (ac) parts.push(ac);
+    if (hasAudioDescription()) { parts.push('WiTH'); parts.push('AD'); }
+    const vc = videoCodecLihdl();
+    if (vc) parts.push(vc);
     let name = parts.filter(Boolean).join('.');
     if (videoChoice.team) name += '-' + videoChoice.team;
     return name + '.mkv';
   }
 
   function videoTrackNameClient() {
-    return `${videoChoice.quality} By ${videoChoice.encoder} Source ${videoChoice.source} ${videoChoice.team}`;
+    // Format LiHDL : "HDLight By GANDALF (Source COMPLETE BluRay Alkaline)"
+    const src = videoChoice.sourceTeam
+      ? `${videoChoice.sourceType} ${videoChoice.sourceTeam}`
+      : videoChoice.sourceType;
+    return `${videoChoice.quality} By ${videoChoice.encoder} (Source ${src})`;
   }
 
   // Réactivité : on référence chaque dépendance pour que Svelte détecte
   // les changements et recalcule (sinon il n'analyse pas l'intérieur des fns).
   $: previewFilename = (function() {
-    const _deps = [tracks.length, videoChoice.quality, videoChoice.encoder,
-                   videoChoice.source, videoChoice.team, target.title, target.year];
+    const _deps = [tracks.length, videoChoice.team, target.title, target.year,
+                   target.resolution, target.source, target.video_codec,
+                   ...tracks.map(t => (t.keep ? '1' : '0') + (t.label || ''))];
     void _deps;
     return buildFilenameClient();
   })();
   $: previewVideoName = (function() {
-    const _deps = [videoChoice.quality, videoChoice.encoder, videoChoice.source, videoChoice.team];
+    const _deps = [videoChoice.quality, videoChoice.encoder,
+                   videoChoice.sourceType, videoChoice.sourceTeam];
     void _deps;
     return videoTrackNameClient();
+  })();
+  // Auto-fill du codec cible quand aucun n'est explicitement choisi.
+  $: if (!target.video_codec) target.video_codec = suggestedVideoCodec();
+
+  $: suggestedCodecDisplay = (function() {
+    const _deps = [target.source, tracks.length,
+                   ...tracks.filter(t => t.type === 'video').map(t => t.codec + (t.codecId || ''))];
+    void _deps;
+    return suggestedVideoCodec();
   })();
 
   // --- actions ---
@@ -223,13 +252,18 @@
     sourcePath = path;
     sourceInfo = null;
     tracks = [];
+    // Auto-fill la team de la source depuis le nom de fichier.
+    const st = extractSourceTeam(path);
+    if (st) videoChoice.sourceTeam = st;
+    target.video_codec = ''; // reset pour que l'auto-suggest se réapplique
     AnalyzeMkv(path); // fire-and-forget, résultat via event 'analyze:result'
   }
 
   function finalizeAnalyze(rawTracks) {
     appendLog('🎯 finalizeAnalyze appelé avec ' + rawTracks.length + ' pistes');
     sourceInfo = { tracks: rawTracks };
-    tracks = rawTracks.map(t => {
+    externalSubs = []; // reset les subs externes quand on recharge un mkv
+    tracks = rawTracks.map((t, i) => {
       // Les pistes viennent avec les champs aplatis (pas de .properties imbriqué).
       const base = {
         id: t.id,
@@ -243,6 +277,7 @@
         default: !!t.default_track,
         forced: !!t.forced_track,
         name: t.track_name || '',
+        order: i * 10, // pas de 10 pour laisser de la place aux externes
       };
       if (t.type === 'audio')     base.label = suggestAudioLabelFlat(base);
       if (t.type === 'subtitles') base.label = suggestSubLabelFlat(base);
@@ -250,6 +285,134 @@
       return base;
     });
     if (sourcePath) maybeAutoFillTitle(sourcePath);
+  }
+
+  // Auto-suggest d'un label de sous-titre à partir du nom de fichier.
+  // Patterns courants : film.fr.srt, film.fr.forced.srt, film.en.sdh.srt,
+  //                     film.vff.srt, film.fr-fr.srt, film.fra.srt, etc.
+  function suggestSubLabelFromFilename(filename) {
+    const n = filename.toLowerCase();
+    const isPGS   = /\.(sup)$/.test(n);
+    const isASS   = /\.(ass|ssa)$/.test(n);
+    const isIDX   = /\.(idx|sub)$/.test(n);
+    const fmt = isPGS ? 'PGS' : (isASS ? 'ASS' : (isIDX ? 'VobSub' : 'SRT'));
+    const forced = /[._-](forced|forc[eé]s?)[._-]/.test(n) || /\bforced\b/.test(n);
+    const sdh    = /[._-](sdh|cc)[._-]/.test(n) || /\bsdh\b/.test(n);
+    const isFR   = /[._-](fr|fre|fra|fran[cç]ais|french)[._-]/.test(n) || /\.(fr|fre|fra)\./.test(n);
+    const isVFF  = /\bvff\b/.test(n);
+    const isVFQ  = /\bvfq\b/.test(n) || /qu[ée]bec/.test(n);
+    const isEN   = /[._-](en|eng|english)[._-]/.test(n) || /\.(en|eng)\./.test(n);
+
+    if (fmt === 'ASS' || fmt === 'VobSub') {
+      // Pas dans la liste LiHDL — user devra choisir "— autre — ".
+      return '';
+    }
+
+    let prefix = '';
+    if (isFR) {
+      if (isVFF) prefix = 'FR VFF';
+      else if (isVFQ) prefix = 'FR VFQ';
+      else prefix = 'FR';
+    } else if (isEN) {
+      prefix = 'ENG VO';
+    }
+    if (!prefix) return '';
+
+    const kind = forced ? 'Forced' : (sdh ? 'SDH' : 'Full');
+    const candidate = prefix === 'ENG VO' ? `ENG VO : ${fmt}` : `${prefix} ${kind} : ${fmt}`;
+    return options.subtitle_labels.includes(candidate) ? candidate : '';
+  }
+
+  function basename(path) {
+    return String(path || '').split('/').pop().split('\\').pop();
+  }
+
+  function formatBytes(n) {
+    if (n == null || n < 0) return '';
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+    return (n / (1024 * 1024)).toFixed(1) + ' MB';
+  }
+
+  // Heuristique forced vs full selon la taille du fichier.
+  // SRT petit < 5KB = typiquement forced. PGS petit < 300KB = forced.
+  function isLikelyForcedBySize(name, size) {
+    if (size == null || size < 0) return false;
+    const ext = (name.match(/\.([a-z0-9]+)$/i) || [,''])[1].toLowerCase();
+    if (ext === 'srt' || ext === 'ass' || ext === 'ssa') return size < 5 * 1024;
+    if (ext === 'sup') return size < 300 * 1024;
+    return false;
+  }
+
+  async function addExternalSubs(paths) {
+    let maxOrder = 0;
+    for (const t of tracks) maxOrder = Math.max(maxOrder, t.order ?? 0);
+    for (const s of externalSubs) maxOrder = Math.max(maxOrder, s.order ?? 0);
+
+    for (const p of paths) {
+      const name = basename(p);
+      maxOrder += 10;
+      let size = -1;
+      try { size = await FileSize(p); } catch {}
+      const forcedByName = /forced/i.test(name);
+      const forcedBySize = isLikelyForcedBySize(name, size);
+      const forced = forcedByName || forcedBySize;
+      // Si auto-détecté forced mais le label suggéré dit "Full", corrige en "Forced".
+      let label = suggestSubLabelFromFilename(name);
+      if (forced && label && label.includes(' Full ')) {
+        label = label.replace(' Full ', ' Forced ');
+      }
+      externalSubs = [...externalSubs, {
+        path: p, name, size,
+        keep: true, default: false,
+        forced, label,
+        order: maxOrder,
+      }];
+    }
+    if (paths.length > 0) {
+      appendLog('✓ ' + paths.length + ' sous-titre(s) ajouté(s)');
+    }
+  }
+
+  async function pickSubsDialog() {
+    try {
+      const paths = await SelectSubFiles();
+      if (paths && paths.length > 0) addExternalSubs(paths);
+    } catch (e) {
+      appendLog('❌ ' + String(e));
+    }
+  }
+
+  function removeExternalSub(idx) {
+    externalSubs = externalSubs.filter((_, i) => i !== idx);
+  }
+
+  // --- Ordre global des pistes (internes + externes) ---
+  // Chaque piste a un champ `order` (initialisé à son index d'arrivée).
+  // L'UI affiche les sous-titres triés par order avec des flèches ↑↓.
+
+  function moveTrack(kind, idx, dir) {
+    // kind = 'internal' | 'external' ; dir = -1 (up) / +1 (down)
+    const subs = [...tracks.filter(t => t.type === 'subtitles'), ...externalSubs];
+    subs.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    // Trouve la piste concernée dans le tableau trié.
+    let target;
+    if (kind === 'internal') {
+      target = tracks.filter(t => t.type === 'subtitles')[idx];
+    } else {
+      target = externalSubs[idx];
+    }
+    const pos = subs.indexOf(target);
+    const newPos = pos + dir;
+    if (newPos < 0 || newPos >= subs.length) return;
+    // Swap orders.
+    const other = subs[newPos];
+    const tmp = target.order ?? 0;
+    target.order = other.order ?? 0;
+    other.order = tmp;
+    // Force reactivity.
+    tracks = [...tracks];
+    externalSubs = [...externalSubs];
   }
 
   // Versions des suggest adaptées à la structure aplatie.
@@ -343,6 +506,17 @@
     mkvmergePath = await LocateMkvmerge();
   }
 
+  let tmdbTest = { running: false, ok: null, message: '' };
+  async function doTestTmdbKey() {
+    tmdbTest = { running: true, ok: null, message: '' };
+    try {
+      const r = await TestTmdbKey(config.tmdb_key || '');
+      tmdbTest = { running: false, ok: !!r.ok, message: r.message || '' };
+    } catch (e) {
+      tmdbTest = { running: false, ok: false, message: String(e) };
+    }
+  }
+
   async function doMux() {
     if (!sourcePath)        { appendLog('⚠ Aucun .mkv source'); return; }
     if (!config.output_dir) { appendLog('⚠ Dossier de sortie non défini — ouvre Réglages'); return; }
@@ -358,6 +532,15 @@
       Language: t.type === 'video' ? '' : mapLangCode(t.label || ''),
       Default: !!t.default,
       Forced: !!t.forced,
+      Order: t.order ?? 0,
+    }));
+    const extSubs = externalSubs.map(s => ({
+      Path: s.path,
+      Name: s.label || '',
+      Language: mapLangCode(s.label || ''),
+      Default: !!s.default,
+      Forced: !!s.forced,
+      Order: s.order ?? 0,
     }));
 
     const outputPath = config.output_dir.replace(/\/$/, '') + '/' + previewFilename;
@@ -370,6 +553,7 @@
         output_path: outputPath,
         title: target.title || '',
         tracks: specs,
+        external_subs: extSubs,
       });
     } catch (e) {
       appendLog('❌ ' + String(e));
@@ -390,6 +574,7 @@
     EventsOn('mux:progress', (p) => { muxPercent = p.Percent || p.percent || 0; });
     EventsOn('mux:done', () => { muxing = false; muxPercent = 0; });
     EventsOn('file:dropped', (path) => { openMkv(path); });
+    EventsOn('subs:dropped', (paths) => { addExternalSubs(paths || []); });
     // Pattern chunked : analyze:start (n attendu) + analyze:track (x N).
     // On auto-finalise dès qu'on atteint n (l'event analyze:end de Wails
     // ne fire pas côté JS pour une raison obscure).
@@ -470,15 +655,13 @@
                     {#each options.video_encoders as e}<option>{e}</option>{/each}
                   </select>
                 </label>
-                <label>Source
-                  <select bind:value={videoChoice.source}>
-                    {#each options.video_sources as s}<option>{s}</option>{/each}
+                <label>Type source
+                  <select bind:value={videoChoice.sourceType}>
+                    {#each VIDEO_SOURCE_TYPE_OPTIONS as s}<option>{s}</option>{/each}
                   </select>
                 </label>
-                <label>Team
-                  <select bind:value={videoChoice.team}>
-                    {#each options.video_teams as tm}<option>{tm}</option>{/each}
-                  </select>
+                <label>Team de la source
+                  <input type="text" bind:value={videoChoice.sourceTeam} placeholder="ex: Alkaline" />
                 </label>
               </div>
               <div class="track-preview mono">→ {previewVideoName}</div>
@@ -511,30 +694,55 @@
           </div>
         {/if}
 
-        <!-- Subtitles -->
-        {#if tracks.some(t => t.type === 'subtitles')}
-          <div class="card">
+        <!-- Subtitles (internes + externes triés par ordre) -->
+        <div class="card">
+          <div class="section-title-row">
             <div class="section-title">Sous-titres</div>
-            {#each tracks.filter(t => t.type === 'subtitles') as t}
+            <button class="btn-tiny" on:click={pickSubsDialog}>+ Ajouter un fichier</button>
+          </div>
+          {#if tracks.some(t => t.type === 'subtitles') || externalSubs.length > 0}
+            {@const internalSubs = tracks.filter(t => t.type === 'subtitles')}
+            {@const mergedSubs = [
+              ...internalSubs.map((t, i) => ({ kind: 'internal', idx: i, ref: t, order: t.order ?? 0 })),
+              ...externalSubs.map((s, i) => ({ kind: 'external', idx: i, ref: s, order: s.order ?? 0 })),
+            ].sort((a, b) => a.order - b.order)}
+            {#each mergedSubs as item (item.kind + '-' + item.idx)}
               <div class="track-row">
                 <div class="track-meta">
-                  <span class="badge subs">SUBS</span>
-                  <span class="mono">#{t.id} · {t.codec} · {t.lang || '??'}</span>
-                  {#if t.name}<span class="track-current">« {t.name} »</span>{/if}
+                  {#if item.kind === 'internal'}
+                    <span class="badge subs">SUBS</span>
+                    <span class="mono">#{item.ref.id} · {item.ref.codec} · {item.ref.lang || '??'}</span>
+                    {#if item.ref.name}<span class="track-current">« {item.ref.name} »</span>{/if}
+                  {:else}
+                    <span class="badge subs-ext">SUBS EXT</span>
+                    <span class="mono">{basename(item.ref.path)}</span>
+                    {#if item.ref.size != null && item.ref.size >= 0}
+                      <span class="sub-size mono">{formatBytes(item.ref.size)}</span>
+                    {/if}
+                  {/if}
+                  <div class="order-ctrls">
+                    <button class="btn-arrow" title="Monter" on:click={() => moveTrack(item.kind, item.idx, -1)}>↑</button>
+                    <button class="btn-arrow" title="Descendre" on:click={() => moveTrack(item.kind, item.idx, +1)}>↓</button>
+                    {#if item.kind === 'external'}
+                      <button class="btn-arrow danger" title="Supprimer" on:click={() => removeExternalSub(item.idx)}>✕</button>
+                    {/if}
+                  </div>
                 </div>
                 <div class="track-controls">
-                  <select bind:value={t.label}>
+                  <select bind:value={item.ref.label}>
                     <option value="">— choisir —</option>
                     {#each options.subtitle_labels as lbl}<option>{lbl}</option>{/each}
                   </select>
-                  <label class="chk"><input type="checkbox" bind:checked={t.keep}/> Garder</label>
-                  <label class="chk"><input type="checkbox" bind:checked={t.default}/> Default</label>
-                  <label class="chk"><input type="checkbox" bind:checked={t.forced}/> Forced</label>
+                  <label class="chk"><input type="checkbox" bind:checked={item.ref.keep}/> Garder</label>
+                  <label class="chk"><input type="checkbox" bind:checked={item.ref.default}/> Default</label>
+                  <label class="chk"><input type="checkbox" bind:checked={item.ref.forced}/> Forced</label>
                 </div>
               </div>
             {/each}
-          </div>
-        {/if}
+          {:else}
+            <div class="empty-hint">Aucun sous-titre détecté. Drop un .srt/.sup/.ass/.sub ici ou clique "+ Ajouter un fichier".</div>
+          {/if}
+        </div>
 
         <div class="actions-row">
           <button class="btn-primary" on:click={() => screen = 'cible'}>Suivant → Cible</button>
@@ -567,12 +775,36 @@
 
       <div class="card">
         <div class="section-title">Titre cible</div>
-        <div class="field"><label>Titre</label>
-          <input type="text" bind:value={target.title} placeholder="Titre du film" />
+        {#if target.title || target.year}
+          <div class="tmdb-preview mono">{target.title}{target.year ? ' (' + target.year + ')' : ''}</div>
+        {/if}
+        <div class="field-row">
+          <div class="field" style:flex="3"><label>Titre</label>
+            <input type="text" bind:value={target.title} placeholder="Titre du film" />
+          </div>
+          <div class="field" style:flex="1"><label>Année</label>
+            <input type="text" bind:value={target.year} placeholder="2025" maxlength="4" />
+          </div>
         </div>
-        <div class="field"><label>Année</label>
-          <input type="text" bind:value={target.year} placeholder="2025" maxlength="4" />
+        <div class="field-row">
+          <div class="field" style:flex="1"><label>Résolution</label>
+            <select bind:value={target.resolution}>
+              {#each RESOLUTION_OPTIONS as r}<option>{r}</option>{/each}
+            </select>
+          </div>
+          <div class="field" style:flex="1"><label>Source</label>
+            <select bind:value={target.source}>
+              {#each TARGET_SOURCE_OPTIONS as s}<option>{s}</option>{/each}
+            </select>
+          </div>
+          <div class="field" style:flex="1"><label>Codec vidéo</label>
+            <input type="text" bind:value={target.video_codec} list="codec-suggestions" placeholder="H264" />
+            <datalist id="codec-suggestions">
+              {#each VIDEO_CODEC_OPTIONS as c}<option value={c}/>{/each}
+            </datalist>
+          </div>
         </div>
+        <div class="field-hint">Codec auto-suggéré : <b class="mono">{suggestedCodecDisplay || '—'}</b> — modifie au besoin.</div>
         <div class="preview-box">
           <div class="preview-label">Nom de fichier final</div>
           <div class="preview-value mono">{previewFilename || '—'}</div>
@@ -593,7 +825,15 @@
       <div class="card">
         <div class="section-title">TMDB / index serveurperso</div>
         <div class="field"><label>Clé API TMDB (optionnelle)</label>
-          <input type="password" bind:value={config.tmdb_key} placeholder="laisse vide si tu utilises juste serveurperso" />
+          <div class="field-row">
+            <input type="password" bind:value={config.tmdb_key} placeholder="laisse vide si tu utilises juste serveurperso" />
+            <button class="btn-test" on:click={doTestTmdbKey} disabled={tmdbTest.running}>
+              {tmdbTest.running ? '…' : 'Test'}
+            </button>
+          </div>
+          {#if tmdbTest.ok !== null}
+            <div class="result-badge {tmdbTest.ok ? 'ok' : 'err'}">{tmdbTest.message}</div>
+          {/if}
         </div>
         <div class="field"><label>URL de l'index serveurperso</label>
           <input type="text" bind:value={config.serveurperso_url} />
@@ -628,15 +868,13 @@
             {#each options.video_encoders as e}<option>{e}</option>{/each}
           </select>
         </div>
-        <div class="field"><label>Source</label>
+        <div class="field"><label>Type source piste vidéo</label>
           <select bind:value={config.default_source}>
-            {#each options.video_sources as s}<option>{s}</option>{/each}
+            {#each VIDEO_SOURCE_TYPE_OPTIONS as s}<option>{s}</option>{/each}
           </select>
         </div>
-        <div class="field"><label>Team</label>
-          <select bind:value={config.default_team}>
-            {#each options.video_teams as tm}<option>{tm}</option>{/each}
-          </select>
+        <div class="field"><label>Team de sortie (dans le filename)</label>
+          <input type="text" bind:value={config.default_team} placeholder="LiHDL" />
         </div>
       </div>
 
@@ -768,6 +1006,46 @@
   }
   .badge.audio { background: rgba(0,180,216,0.15); color: var(--blue-hot); }
   .badge.subs  { background: rgba(255,214,10,0.15); color: var(--yellow); }
+  .badge.subs-ext { background: rgba(255,149,133,0.18); color: #ff9585; }
+
+  .section-title-row {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 12px;
+  }
+  .section-title-row .section-title { margin-bottom: 0; }
+
+  .btn-tiny {
+    padding: 5px 10px; border-radius: 6px;
+    border: 1px solid var(--border); background: rgba(255,255,255,0.03);
+    color: var(--text2); font: inherit; font-size: 11px; font-weight: 600;
+    cursor: pointer; transition: all 150ms;
+  }
+  .btn-tiny:hover { background: rgba(255,255,255,0.08); color: var(--text); border-color: var(--border-strong); }
+
+  .order-ctrls {
+    display: flex; gap: 4px; margin-left: auto;
+  }
+  .btn-arrow {
+    width: 24px; height: 24px; border-radius: 5px;
+    border: 1px solid var(--border); background: rgba(255,255,255,0.03);
+    color: var(--text2); font: inherit; font-size: 12px; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: all 120ms;
+  }
+  .btn-arrow:hover { background: rgba(255,255,255,0.1); color: var(--text); }
+  .btn-arrow.danger:hover { background: rgba(239,68,68,0.15); color: #ff9585; border-color: rgba(239,68,68,0.4); }
+
+  .sub-size {
+    padding: 2px 6px; border-radius: 4px; font-size: 10px;
+    background: rgba(255,255,255,0.04); color: var(--text3);
+    border: 1px solid var(--border);
+  }
+
+  .empty-hint {
+    padding: 16px; text-align: center;
+    font-size: 12px; color: var(--text3); font-style: italic;
+    border: 1px dashed var(--border); border-radius: 8px;
+  }
   .badge.video { background: rgba(126,240,192,0.15); color: var(--green); }
 
   .track-controls {
@@ -837,6 +1115,20 @@
     height: 100%; background: linear-gradient(90deg, var(--red), var(--red-hot));
     transition: width 200ms ease-out;
   }
+
+  .tmdb-preview {
+    padding: 8px 12px; margin: 6px 0 12px;
+    background: rgba(126, 240, 192, 0.06);
+    border: 1px solid rgba(126, 240, 192, 0.2);
+    border-radius: 8px; font-size: 13px; color: var(--green);
+  }
+
+  .result-badge {
+    margin-top: 6px; padding: 6px 10px; border-radius: 6px;
+    font-size: 11px;
+  }
+  .result-badge.ok  { background: rgba(126,240,192,0.1); color: var(--green); border: 1px solid rgba(126,240,192,0.3); }
+  .result-badge.err { background: rgba(255,149,133,0.1); color: #ff9585; border: 1px solid rgba(255,149,133,0.3); }
 
   .preview-box {
     margin-top: 10px; padding: 12px 14px;

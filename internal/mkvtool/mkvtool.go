@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -109,14 +110,26 @@ type TrackSpec struct {
 	Language string // code iso 639-2 (fre, eng, jpn, ita, ger, spa, und…)
 	Default  bool   // flag default
 	Forced   bool   // flag forced
+	Order    int    // position dans l'ordre final (plus petit = plus haut)
+}
+
+// ExternalSub décrit un fichier de sous-titres externe ajouté au mux.
+type ExternalSub struct {
+	Path     string // chemin du fichier .srt/.sup/.ass/.sub/.idx
+	Name     string // nom de piste LiHDL (--track-name)
+	Language string // code iso 639-2 (fre, eng, …)
+	Default  bool
+	Forced   bool
+	Order    int // position dans l'ordre final (plus petit = plus haut)
 }
 
 // MuxParams regroupe toutes les instructions pour exécuter le mux.
 type MuxParams struct {
-	InputPath  string      // .mkv source
-	OutputPath string      // .mkv cible (chemin complet)
-	Title      string      // titre global du conteneur (optionnel)
-	Tracks     []TrackSpec // une entrée par piste source (audio + video + subs)
+	InputPath    string        // .mkv source
+	OutputPath   string        // .mkv cible (chemin complet)
+	Title        string        // titre global du conteneur (optionnel)
+	Tracks       []TrackSpec   // pistes internes du .mkv source (avec Order)
+	ExternalSubs []ExternalSub // subs externes à ajouter
 }
 
 // MuxProgress est émis pendant le mux (0..100).
@@ -129,6 +142,25 @@ type MuxProgress struct {
 // proprement (bouton Stop côté UI).
 func Mux(ctx context.Context, binary string, p MuxParams, progress func(MuxProgress), logLine func(string)) error {
 	args := buildArgs(p)
+	if logLine != nil {
+		// Log chaque argument sur sa propre ligne pour voir exactement ce
+		// qui est envoyé à mkvmerge (évite toute ambiguïté de séparateur).
+		logLine("CMD>> " + binary)
+		for i, a := range args {
+			logLine("ARG[" + strconv.Itoa(i) + "]=" + a)
+		}
+		// Version inline (compacte) pour debug rapide.
+		var sb strings.Builder
+		sb.WriteString("CMDLINE: ")
+		sb.WriteString(binary)
+		for _, a := range args {
+			sb.WriteByte(' ')
+			sb.WriteByte('\'')
+			sb.WriteString(a)
+			sb.WriteByte('\'')
+		}
+		logLine(sb.String())
+	}
 
 	cmd := exec.CommandContext(ctx, binary, args...)
 	stdout, err := cmd.StdoutPipe()
@@ -191,15 +223,44 @@ func Mux(ctx context.Context, binary string, p MuxParams, progress func(MuxProgr
 }
 
 // buildArgs construit la ligne de commande mkvmerge. Les flags --track-name,
-// --language, --default-track-flag, --forced-track-flag s'appliquent par ID.
+// --language, --default-track-flag, --forced-display-flag s'appliquent par ID.
 // Les pistes non gardées sont exclues via --audio-tracks/--subtitle-tracks.
+// Les subs externes sont ajoutés comme fichiers d'entrée supplémentaires.
+// L'ordre final est contrôlé par --track-order (fileID:trackID).
 func buildArgs(p MuxParams) []string {
 	args := []string{"-o", p.OutputPath}
 	if p.Title != "" {
 		args = append(args, "--title", p.Title)
 	}
 
-	// Applique le renommage sur les pistes gardées.
+	// ---- Track order (option globale, placée au début) ----
+	type ordered struct {
+		order  int
+		fileID int
+		trkID  int
+	}
+	var all []ordered
+	for _, t := range p.Tracks {
+		if !t.Keep {
+			continue
+		}
+		all = append(all, ordered{order: t.Order, fileID: 0, trkID: t.ID})
+	}
+	for i, s := range p.ExternalSubs {
+		all = append(all, ordered{order: s.Order, fileID: i + 1, trkID: 0})
+	}
+	if len(all) > 1 {
+		sort.SliceStable(all, func(i, j int) bool { return all[i].order < all[j].order })
+		parts := make([]string, 0, len(all))
+		for _, o := range all {
+			parts = append(parts, strconv.Itoa(o.fileID)+":"+strconv.Itoa(o.trkID))
+		}
+		args = append(args, "--track-order", strings.Join(parts, ","))
+	}
+
+	// ---- Fichier source (fileID 0) ----
+
+	// Renommage des pistes gardées du fichier source.
 	for _, t := range p.Tracks {
 		if !t.Keep {
 			continue
@@ -212,12 +273,10 @@ func buildArgs(p MuxParams) []string {
 			args = append(args, "--language", id+":"+t.Language)
 		}
 		args = append(args, "--default-track-flag", id+":"+boolFlag(t.Default))
-		args = append(args, "--forced-track-flag", id+":"+boolFlag(t.Forced))
+		args = append(args, "--forced-display-flag", id+":"+boolFlag(t.Forced))
 	}
 
-	// Filtrage des pistes : --audio-tracks / --subtitle-tracks listent les
-	// IDs À GARDER. Si aucune piste d'un type n'est gardée, on utilise
-	// --no-audio / --no-subtitles pour être explicite.
+	// Filtrage audio/subs internes.
 	audioKept, subsKept := []string{}, []string{}
 	audioAny, subsAny := false, false
 	for _, t := range p.Tracks {
@@ -248,8 +307,21 @@ func buildArgs(p MuxParams) []string {
 			args = append(args, "--subtitle-tracks", strings.Join(subsKept, ","))
 		}
 	}
-
 	args = append(args, p.InputPath)
+
+	// ---- Fichiers subs externes (fileID 1, 2, …, chacun avec 1 piste d'ID 0) ----
+	for _, s := range p.ExternalSubs {
+		if s.Name != "" {
+			args = append(args, "--track-name", "0:"+s.Name)
+		}
+		if s.Language != "" {
+			args = append(args, "--language", "0:"+s.Language)
+		}
+		args = append(args, "--default-track-flag", "0:"+boolFlag(s.Default))
+		args = append(args, "--forced-display-flag", "0:"+boolFlag(s.Forced))
+		args = append(args, s.Path)
+	}
+
 	return args
 }
 
