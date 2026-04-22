@@ -19,7 +19,9 @@ jobs:
       - name: Install MKVToolNix + embed mkvmerge
         run: |
           brew install mkvtoolnix
-          cp "$(which mkvmerge)" internal/mkvtool/binaries/mkvmerge
+          mkdir -p internal/mkvtool/binaries/darwin-arm64
+          cp "$(which mkvmerge)" internal/mkvtool/binaries/darwin-arm64/mkvmerge
+          chmod +x internal/mkvtool/binaries/darwin-arm64/mkvmerge
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
       - name: Build
@@ -46,7 +48,9 @@ jobs:
       - name: Install MKVToolNix + embed mkvmerge
         run: |
           brew install mkvtoolnix
-          cp "$(which mkvmerge)" internal/mkvtool/binaries/mkvmerge
+          mkdir -p internal/mkvtool/binaries/darwin-amd64
+          cp "$(which mkvmerge)" internal/mkvtool/binaries/darwin-amd64/mkvmerge
+          chmod +x internal/mkvtool/binaries/darwin-amd64/mkvmerge
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
       - name: Build
@@ -74,7 +78,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev mkvtoolnix
-          cp "$(which mkvmerge)" internal/mkvtool/binaries/mkvmerge
+          mkdir -p internal/mkvtool/binaries/linux-amd64
+          cp "$(which mkvmerge)" internal/mkvtool/binaries/linux-amd64/mkvmerge
+          chmod +x internal/mkvtool/binaries/linux-amd64/mkvmerge
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
       - name: Build
@@ -97,9 +103,10 @@ jobs:
       - name: Download MKVToolNix + embed mkvmerge.exe
         shell: bash
         run: |
+          mkdir -p internal/mkvtool/binaries/windows-amd64
           curl -L -o mkv.7z https://mkvtoolnix.download/windows/releases/98.0/mkvtoolnix-64-bit-98.0.7z
           7z x mkv.7z -o./mkv-extract
-          cp ./mkv-extract/mkvtoolnix/mkvmerge.exe internal/mkvtool/binaries/mkvmerge.exe
+          cp ./mkv-extract/mkvtoolnix/mkvmerge.exe internal/mkvtool/binaries/windows-amd64/mkvmerge.exe
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
       - name: Build
