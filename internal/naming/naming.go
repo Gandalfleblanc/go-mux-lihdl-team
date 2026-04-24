@@ -74,7 +74,7 @@ var (
 	VideoQualities = []string{"HDLight", "WEBRip", "WEB", "WEB.Light", "Custom PSA"}
 	VideoEncoders  = []string{"GANDALF", "FilmZ", "Serveurperso", "Arcaldia", "Nox"}
 	VideoSources   = []string{"REMUX LiHDL", "REMUX CUSTOM LiHDL", "WEBRip"}
-	VideoTeams     = []string{"LiHDL"}
+	VideoTeams     = []string{"LiHDL", "GANDALF"}
 )
 
 // VideoTrackName construit le nom de piste vidéo LiHDL :

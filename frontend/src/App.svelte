@@ -43,7 +43,26 @@
     sourceTeam: '',                 // team de la source (ex: Alkaline) — éditable
     team: 'LiHDL',                  // team de sortie (dans le filename)
   };
-  let target = { title: '', year: '', resolution: '1080p', source: 'HDLight', video_codec: '', lang: 'auto' };
+  let target = {
+    title: '', year: '', resolution: '1080p', source: 'HDLight',
+    video_codec: '', lang: 'auto',
+    episode: '',          // SxxExx auto-détecté (vide = film)
+    flagOverride: 'auto', // override du langflag : auto | VFF | VFQ | VFi | VO | MULTi.VFF | MULTi.VFQ | MULTi.VF2 | MULTi.VFi | FASTSUB.VOSTFR | FASTSUB.FR
+  };
+  const FLAG_OVERRIDE_OPTIONS = [
+    'auto',
+    'VFF', 'VFQ', 'VFi', 'VO',
+    'MULTi.VFF', 'MULTi.VFQ', 'MULTi.VF2', 'MULTi.VFi',
+    'FASTSUB.VOSTFR', 'FASTSUB.FR',
+  ];
+
+  function detectEpisode(filename) {
+    const m = /\bS(\d{1,2})E(\d{1,3})\b/i.exec(String(filename || ''));
+    if (!m) return '';
+    const s = m[1].padStart(2, '0');
+    const e = m[2].padStart(2, '0');
+    return `S${s}E${e}`;
+  }
   // Dernière fiche TMDB sélectionnée — permet de basculer VF/VO sans re-chercher.
   let lastTmdbResult = null;
 
@@ -297,11 +316,19 @@
     // Titre du fichier = FR ou VO selon target.lang (≠ titre cible qui est toujours FR).
     const cleanTitle = stripYearSuffix(filenameTitleForBuild());
     if (cleanTitle) parts.push(dotify(cleanTitle));
-    // Année : soit depuis le champ, soit extraite du titre si absent.
-    const yearMatch = String(target.title || '').match(/\((\d{4})\)\s*$/);
-    const year = target.year || (yearMatch ? yearMatch[1] : '');
-    if (year) parts.push(year);
-    parts.push(langFlagClient(keptAudioLabels()));
+    // Mode série : SxxExx remplace l'année. Mode film : année.
+    if (target.episode) {
+      parts.push(target.episode);
+    } else {
+      const yearMatch = String(target.title || '').match(/\((\d{4})\)\s*$/);
+      const year = target.year || (yearMatch ? yearMatch[1] : '');
+      if (year) parts.push(year);
+    }
+    // Flag langue : override manuel (incl. FASTSUB) ou auto-calculé via LangFlag.
+    const flag = (target.flagOverride && target.flagOverride !== 'auto')
+      ? target.flagOverride
+      : langFlagClient(keptAudioLabels());
+    if (flag) parts.push(flag);
     if (target.resolution) parts.push(target.resolution);
     if (target.source) parts.push(target.source);
     const ac = firstAudioCodecForFilename();
@@ -327,6 +354,7 @@
   $: previewFilename = (function() {
     const _deps = [tracks.length, videoChoice.team, target.title, target.year,
                    target.resolution, target.source, target.video_codec, target.lang,
+                   target.episode, target.flagOverride,
                    ...tracks.map(t => (t.keep ? '1' : '0') + (t.label || ''))];
     void _deps;
     return buildFilenameClient();
@@ -356,6 +384,8 @@
     const st = extractSourceTeam(path);
     if (st) videoChoice.sourceTeam = st;
     target.video_codec = ''; // reset pour que l'auto-suggest se réapplique
+    // Auto-detect SxxExx → mode série
+    target.episode = detectEpisode(path.split('/').pop() || '');
     AnalyzeMkv(path); // fire-and-forget, résultat via event 'analyze:result'
   }
 
@@ -1126,8 +1156,24 @@
           <div class="field" style:flex="3"><label>Titre</label>
             <input type="text" bind:value={target.title} placeholder="Titre du film" />
           </div>
-          <div class="field" style:flex="1"><label>Année</label>
-            <input type="text" bind:value={target.year} placeholder="2025" maxlength="4" />
+          <div class="field" style:flex="1"><label>{target.episode ? 'Épisode' : 'Année'}</label>
+            {#if target.episode}
+              <input type="text" bind:value={target.episode} placeholder="S01E01" maxlength="10" />
+            {:else}
+              <input type="text" bind:value={target.year} placeholder="2025" maxlength="4" />
+            {/if}
+          </div>
+          <div class="field" style:flex="1"><label>Mode</label>
+            <select value={target.episode ? 'tv' : 'movie'} on:change={(e) => {
+              if (e.currentTarget.value === 'tv' && !target.episode) {
+                target.episode = detectEpisode((sourcePath || '').split('/').pop()) || 'S01E01';
+              } else if (e.currentTarget.value === 'movie') {
+                target.episode = '';
+              }
+            }}>
+              <option value="movie">🎬 Film</option>
+              <option value="tv">📺 Série</option>
+            </select>
           </div>
         </div>
         <div class="field-row">
@@ -1144,6 +1190,20 @@
           <div class="field" style:flex="1"><label>Codec vidéo</label>
             <select bind:value={target.video_codec}>
               {#each VIDEO_CODEC_OPTIONS as c}<option>{c}</option>{/each}
+            </select>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field" style:flex="2"><label>Flag langue</label>
+            <select bind:value={target.flagOverride}>
+              {#each FLAG_OVERRIDE_OPTIONS as f}
+                <option value={f}>{f === 'auto' ? 'Auto (calculé selon audios)' : f}</option>
+              {/each}
+            </select>
+          </div>
+          <div class="field" style:flex="1"><label>Team (sortie)</label>
+            <select bind:value={videoChoice.team}>
+              {#each options.video_teams as t}<option>{t}</option>{/each}
             </select>
           </div>
         </div>
