@@ -60,6 +60,9 @@ export namespace main {
 	    tracks: mkvtool.TrackSpec[];
 	    external_audios: mkvtool.ExternalAudio[];
 	    external_subs: mkvtool.ExternalSub[];
+	    secondary_path: string;
+	    secondary_audios: mkvtool.SecondaryTrack[];
+	    secondary_subs: mkvtool.SecondaryTrack[];
 	
 	    static createFrom(source: any = {}) {
 	        return new MuxRequest(source);
@@ -73,6 +76,9 @@ export namespace main {
 	        this.tracks = this.convertValues(source["tracks"], mkvtool.TrackSpec);
 	        this.external_audios = this.convertValues(source["external_audios"], mkvtool.ExternalAudio);
 	        this.external_subs = this.convertValues(source["external_subs"], mkvtool.ExternalSub);
+	        this.secondary_path = source["secondary_path"];
+	        this.secondary_audios = this.convertValues(source["secondary_audios"], mkvtool.SecondaryTrack);
+	        this.secondary_subs = this.convertValues(source["secondary_subs"], mkvtool.SecondaryTrack);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -167,6 +173,28 @@ export namespace mkvtool {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Path = source["Path"];
+	        this.Name = source["Name"];
+	        this.Language = source["Language"];
+	        this.Default = source["Default"];
+	        this.Forced = source["Forced"];
+	        this.Order = source["Order"];
+	    }
+	}
+	export class SecondaryTrack {
+	    ID: number;
+	    Name: string;
+	    Language: string;
+	    Default: boolean;
+	    Forced: boolean;
+	    Order: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new SecondaryTrack(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ID = source["ID"];
 	        this.Name = source["Name"];
 	        this.Language = source["Language"];
 	        this.Default = source["Default"];

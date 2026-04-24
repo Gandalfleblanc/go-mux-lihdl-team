@@ -86,7 +86,7 @@ func (a *App) startup(ctx context.Context) {
 
 // AppVersion est lue par le frontend (pill dans le header) et utilisée pour
 // comparer avec la dernière release GitHub lors du check de mise à jour.
-const AppVersion = "v3.4.1"
+const AppVersion = "v3.5.0"
 
 func (a *App) GetVersion() string { return AppVersion }
 
@@ -258,6 +258,45 @@ func (a *App) AnalyzeMkv(path string) {
 	}()
 }
 
+// AnalyzeMkvSecondary analyse un mkv secondaire (SUPPLY/FW) et émet
+// un événement "secondary:tracks" avec la liste des pistes audio + subs.
+func (a *App) AnalyzeMkvSecondary(path string) {
+	binary := a.LocateMkvmerge()
+	if binary == "" {
+		wr.EventsEmit(a.ctx, "log", "❌ mkvmerge introuvable")
+		return
+	}
+	go func() {
+		raw, err := mkvtool.IdentifyRaw(a.ctx, binary, path)
+		if err != nil {
+			wr.EventsEmit(a.ctx, "log", "❌ secondaire : "+err.Error())
+			return
+		}
+		var info mkvtool.Info
+		_ = json.Unmarshal([]byte(raw), &info)
+		tracksPayload := make([]map[string]any, 0, len(info.Tracks))
+		for _, t := range info.Tracks {
+			if t.Type != "audio" && t.Type != "subtitles" {
+				continue
+			}
+			tracksPayload = append(tracksPayload, map[string]any{
+				"id":             t.ID,
+				"type":           t.Type,
+				"codec":          t.Codec,
+				"language":       t.Properties.Language,
+				"track_name":     t.Properties.TrackName,
+				"audio_channels": t.Properties.AudioChannels,
+				"codec_id":       t.Properties.CodecID,
+				"default_track":  t.Properties.DefaultTrack,
+				"forced_track":   t.Properties.ForcedTrack,
+			})
+		}
+		b, _ := json.Marshal(tracksPayload)
+		wr.EventsEmit(a.ctx, "secondary:tracks", string(b))
+		wr.EventsEmit(a.ctx, "log", "✓ Secondaire : "+itoa(len(tracksPayload))+" piste(s) audio/sub")
+	}()
+}
+
 // --- TMDB ---
 
 func (a *App) SearchTmdb(query string) ([]tmdb.Result, error) {
@@ -344,12 +383,15 @@ func (a *App) VideoTrackName(quality, encoder, source, team string) string {
 
 // MuxRequest est ce que le frontend envoie pour déclencher le mux.
 type MuxRequest struct {
-	InputPath      string                  `json:"input_path"`
-	OutputPath     string                  `json:"output_path"`
-	Title          string                  `json:"title"`
-	Tracks         []mkvtool.TrackSpec     `json:"tracks"`
-	ExternalAudios []mkvtool.ExternalAudio `json:"external_audios"`
-	ExternalSubs   []mkvtool.ExternalSub   `json:"external_subs"`
+	InputPath       string                   `json:"input_path"`
+	OutputPath      string                   `json:"output_path"`
+	Title           string                   `json:"title"`
+	Tracks          []mkvtool.TrackSpec      `json:"tracks"`
+	ExternalAudios  []mkvtool.ExternalAudio  `json:"external_audios"`
+	ExternalSubs    []mkvtool.ExternalSub    `json:"external_subs"`
+	SecondaryPath   string                   `json:"secondary_path"`
+	SecondaryAudios []mkvtool.SecondaryTrack `json:"secondary_audios"`
+	SecondarySubs   []mkvtool.SecondaryTrack `json:"secondary_subs"`
 }
 
 func (a *App) Mux(req MuxRequest) error {
@@ -367,12 +409,15 @@ func (a *App) Mux(req MuxRequest) error {
 
 	wr.EventsEmit(a.ctx, "log", "🔧 Lancement mkvmerge → "+filepath.Base(req.OutputPath))
 	err := mkvtool.Mux(ctx, binary, mkvtool.MuxParams{
-		InputPath:      req.InputPath,
-		OutputPath:     req.OutputPath,
-		Title:          req.Title,
-		Tracks:         req.Tracks,
-		ExternalAudios: req.ExternalAudios,
-		ExternalSubs:   req.ExternalSubs,
+		InputPath:       req.InputPath,
+		OutputPath:      req.OutputPath,
+		Title:           req.Title,
+		Tracks:          req.Tracks,
+		ExternalAudios:  req.ExternalAudios,
+		ExternalSubs:    req.ExternalSubs,
+		SecondaryPath:   req.SecondaryPath,
+		SecondaryAudios: req.SecondaryAudios,
+		SecondarySubs:   req.SecondarySubs,
 	},
 		func(p mkvtool.MuxProgress) {
 			wr.EventsEmit(a.ctx, "mux:progress", p)

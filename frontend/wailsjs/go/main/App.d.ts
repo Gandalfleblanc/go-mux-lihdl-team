@@ -7,6 +7,8 @@ import {tmdb} from '../models';
 
 export function AnalyzeMkv(arg1:string):Promise<void>;
 
+export function AnalyzeMkvSecondary(arg1:string):Promise<void>;
+
 export function BuildFilename(arg1:naming.FilenameParams):Promise<string>;
 
 export function CancelMux():Promise<void>;

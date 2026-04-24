@@ -4,7 +4,7 @@
   import logo from './assets/images/logo.png';
   import {
     GetVersion, GetConfig, SaveConfig, GetLihdlOptions,
-    SelectMkvFile, SelectSubFiles, SelectAudioFiles, SelectOutputDir, LocateMkvmerge, OpenFolder, SearchTmdbTV,
+    SelectMkvFile, SelectSubFiles, SelectAudioFiles, SelectOutputDir, LocateMkvmerge, OpenFolder, SearchTmdbTV, AnalyzeMkvSecondary,
     AnalyzeMkv, SearchTmdb, TestTmdbKey, FileSize,
     Mux, CancelMux,
     CheckUpdate, InstallUpdate,
@@ -154,6 +154,122 @@
   let externalSubs = [];
   let externalAudios = [];
 
+  // Source secondaire (SUPPLY/FW) — récupère uniquement audios + subs.
+  let secondaryPath = '';
+  let secondaryTracks = [];      // tracks audio + subs analysées
+  let secondarySelected = [];    // tracks sélectionnées avec label LiHDL
+
+  function inferAudioLabel(track) {
+    const lang = String(track.language || '').toLowerCase();
+    const codecId = String(track.codec_id || track.codec || '').toUpperCase();
+    const ch = Number(track.audio_channels || 0);
+    let codec = 'AC3';
+    if (codecId.includes('E-AC') || codecId.includes('EAC3')) codec = 'EAC3';
+    else if (codecId.includes('AC-3') || codecId.includes('AC3')) codec = 'AC3';
+    else if (codecId.includes('DTS')) codec = 'DTS';
+    else if (codecId.includes('TRUEHD')) codec = 'TrueHD';
+    let chans = '5.1';
+    if (ch === 1) chans = '1.0';
+    else if (ch === 2) chans = '2.0';
+    else if (ch === 6) chans = '5.1';
+    else if (ch === 8) chans = '7.1';
+    let prefix = 'ENG VO';
+    if (lang === 'fre' || lang === 'fra' || lang === 'fr') prefix = 'FR VFF';
+    else if (lang === 'eng' || lang === 'en') prefix = 'ENG VO';
+    else if (lang === 'jpn' || lang === 'ja') prefix = 'JPN VO';
+    else if (lang === 'ita' || lang === 'it') prefix = 'ITA VO';
+    else if (lang === 'spa' || lang === 'es') prefix = 'SPA VO';
+    else if (lang === 'ger' || lang === 'de') prefix = 'GER VO';
+    return `${prefix} : ${codec} ${chans}`;
+  }
+
+  function inferSubLabel(track, indexAmongSameLang) {
+    const lang = String(track.language || '').toLowerCase();
+    const codecId = String(track.codec_id || track.codec || '').toUpperCase();
+    const forced = !!track.forced_track;
+    let fmt = 'SRT';
+    if (codecId.includes('PGS') || codecId.includes('HDMV')) fmt = 'PGS';
+    let prefix = 'ENG';
+    if (lang === 'fre' || lang === 'fra' || lang === 'fr') prefix = 'FR';
+    else if (lang === 'eng' || lang === 'en') prefix = 'ENG';
+    let kind;
+    if (forced) kind = 'Forced';
+    else if (indexAmongSameLang === 0) kind = 'Full';
+    else kind = 'SDH';
+    return `${prefix} ${kind} : ${fmt}`;
+  }
+
+  async function pickSecondaryDialog() {
+    const p = await SelectMkvFile();
+    if (!p) return;
+    secondaryPath = p;
+    secondaryTracks = [];
+    secondarySelected = [];
+    AnalyzeMkvSecondary(p);
+    appendLog('🔍 Analyse secondaire : ' + p.split('/').pop());
+  }
+
+  function clearSecondary() {
+    secondaryPath = '';
+    secondaryTracks = [];
+    secondarySelected = [];
+  }
+
+  // ⚡ Automatiser : drop tous audios/subs internes du PSA, prend ceux du SUPPLY,
+  // applique les labels LiHDL automatiques, et règle Team=GANDALF + mode série.
+  function automate() {
+    if (!sourcePath) { appendLog('⚠ Charge d\'abord le fichier PSA'); return; }
+    if (!secondaryPath || secondaryTracks.length === 0) {
+      appendLog('⚠ Charge un fichier SUPPLY/FW d\'abord');
+      return;
+    }
+    // 1. Drop audios/subs internes du PSA (keep=false).
+    tracks = tracks.map(t => (t.type === 'audio' || t.type === 'subtitles') ? { ...t, keep: false } : t);
+    // 2. Construit secondarySelected depuis SUPPLY tracks avec auto-labels.
+    const seenLangSubs = {};
+    let order = 100; // après la vidéo (qui sera order=0..99)
+    secondarySelected = secondaryTracks.map(t => {
+      let label, language, defaultFlag = false, forcedFlag = !!t.forced_track;
+      if (t.type === 'audio') {
+        label = inferAudioLabel(t);
+        language = (t.language === 'fre' || t.language === 'fra' || t.language === 'fr') ? 'fre' :
+                   (t.language === 'eng' || t.language === 'en') ? 'eng' :
+                   t.language || 'und';
+        defaultFlag = false; // 1ère piste FR sera default plus tard
+      } else {
+        const lang = String(t.language || '').toLowerCase();
+        const key = lang || 'und';
+        seenLangSubs[key] = (seenLangSubs[key] ?? -1) + 1;
+        label = inferSubLabel(t, seenLangSubs[key]);
+        language = (lang === 'fre' || lang === 'fra' || lang === 'fr') ? 'fre' :
+                   (lang === 'eng' || lang === 'en') ? 'eng' :
+                   lang || 'und';
+      }
+      return {
+        id: t.id,
+        type: t.type,
+        codec: t.codec,
+        codec_id: t.codec_id,
+        language,
+        label,
+        keep: true,
+        default: defaultFlag,
+        forced: forcedFlag,
+        order: order++,
+      };
+    });
+    // Marque la 1ère piste audio FR comme default.
+    const firstFr = secondarySelected.find(t => t.type === 'audio' && t.language === 'fre');
+    if (firstFr) firstFr.default = true;
+    secondarySelected = [...secondarySelected];
+    // 3. Réglages série + GANDALF.
+    videoChoice.team = 'GANDALF';
+    if (!target.episode) {
+      target.episode = detectEpisode((sourcePath || '').split('/').pop()) || 'S01E01';
+    }
+    appendLog('⚡ Automatisé : ' + secondarySelected.filter(t=>t.type==='audio').length + ' audio(s) + ' + secondarySelected.filter(t=>t.type==='subtitles').length + ' sub(s) depuis SUPPLY/FW');
+  }
+
   // --- helpers ---
   function now() {
     return new Date().toTimeString().slice(0, 8);
@@ -221,7 +337,10 @@
   }
 
   function keptAudioLabels() {
-    return tracks.filter(t => t.type === 'audio' && t.keep).map(t => t.label);
+    const internal = tracks.filter(t => t.type === 'audio' && t.keep).map(t => t.label);
+    const external = externalAudios.map(a => a.label);
+    const secondary = secondarySelected.filter(t => t.type === 'audio' && t.keep).map(t => t.label);
+    return [...internal, ...external, ...secondary];
   }
 
   // --- Calcul client-side du flag langue et du filename (évite les Promises
@@ -355,7 +474,9 @@
     const _deps = [tracks.length, videoChoice.team, target.title, target.year,
                    target.resolution, target.source, target.video_codec, target.lang,
                    target.episode, target.flagOverride,
-                   ...tracks.map(t => (t.keep ? '1' : '0') + (t.label || ''))];
+                   secondarySelected.length,
+                   ...tracks.map(t => (t.keep ? '1' : '0') + (t.label || '')),
+                   ...secondarySelected.map(t => (t.keep ? '1' : '0') + (t.label || ''))];
     void _deps;
     return buildFilenameClient();
   })();
@@ -816,6 +937,24 @@
       Order: a.order ?? 0,
     }));
 
+    // Pistes secondaires (SUPPLY/FW) — audios et subs séparés.
+    const secAudios = secondarySelected.filter(t => t.type === 'audio' && t.keep).map(t => ({
+      ID: t.id,
+      Name: t.label || '',
+      Language: t.language || mapLangCode(t.label || ''),
+      Default: !!t.default,
+      Forced: !!t.forced,
+      Order: t.order ?? 0,
+    }));
+    const secSubs = secondarySelected.filter(t => t.type === 'subtitles' && t.keep).map(t => ({
+      ID: t.id,
+      Name: t.label || '',
+      Language: t.language || mapLangCode(t.label || ''),
+      Default: !!t.default,
+      Forced: !!t.forced,
+      Order: t.order ?? 0,
+    }));
+
     const outputPath = config.output_dir.replace(/\/$/, '') + '/' + effectiveFilename;
 
     muxing = true;
@@ -828,6 +967,9 @@
         tracks: specs,
         external_audios: extAudios,
         external_subs: extSubs,
+        secondary_path: secondaryPath,
+        secondary_audios: secAudios,
+        secondary_subs: secSubs,
       });
     } catch (e) {
       appendLog('❌ ' + String(e));
@@ -856,6 +998,13 @@
     EventsOn('file:dropped', (path) => { openMkv(path); });
     EventsOn('subs:dropped', (paths) => { addExternalSubs(paths || []); });
     EventsOn('audios:dropped', (paths) => { addExternalAudios(paths || []); });
+    EventsOn('secondary:tracks', (raw) => {
+      try {
+        secondaryTracks = JSON.parse(String(raw || '[]'));
+      } catch (e) {
+        appendLog('❌ secondary:tracks parse : ' + String(e));
+      }
+    });
     EventsOn('files:dropped', (paths) => {
       if (!paths || !paths.length) return;
       queueAdd(paths);
@@ -934,17 +1083,39 @@
 
   <section class="content">
     {#if screen === 'source'}
-      <!-- Drop zone / pick file -->
+      <!-- Drop zone PSA (vidéo principale) -->
       <div class="card drop-target" style:--wails-drop-target="drop">
         <div class="drop-icon">🎬</div>
+        <div class="drop-label">Source PSA <span class="drop-hint">(vidéo gardée)</span></div>
         {#if !sourcePath}
-          <div class="drop-title">Glisse un fichier .mkv ici</div>
+          <div class="drop-title">Glisse un fichier .mkv PSA ici</div>
           <div class="drop-sub">ou plusieurs pour batcher · puis audios/subs externes</div>
           <button class="btn-primary" on:click={pickMkvDialog}>Choisir un fichier</button>
         {:else}
           <div class="drop-title">{sourcePath.split('/').pop()}</div>
           <div class="drop-sub">{sourcePath}</div>
           <button class="btn-ghost" on:click={pickMkvDialog}>Changer</button>
+        {/if}
+      </div>
+
+      <!-- Drop zone SUPPLY/FW (audios + subs à récupérer) -->
+      <div class="card">
+        <div class="drop-icon">🔊</div>
+        <div class="drop-label">Source SUPPLY / FW <span class="drop-hint">(audios + subs à récupérer)</span></div>
+        {#if !secondaryPath}
+          <div class="drop-sub">.mkv contenant les pistes audio FR + sous-titres à reprendre</div>
+          <button class="btn-ghost" on:click={pickSecondaryDialog}>Choisir un fichier</button>
+        {:else}
+          <div class="drop-title">{secondaryPath.split('/').pop()}</div>
+          <div class="drop-sub">{secondaryTracks.length} piste(s) audio/sub détectée(s)</div>
+          <div class="actions-row" style:gap="8px" style:margin-top="8px">
+            <button class="btn-primary" on:click={automate} disabled={!sourcePath || secondaryTracks.length === 0}>⚡ Automatiser</button>
+            <button class="btn-ghost" on:click={pickSecondaryDialog}>Changer</button>
+            <button class="btn-ghost" on:click={clearSecondary}>Retirer</button>
+          </div>
+          {#if secondarySelected.length > 0}
+            <div class="field-hint" style:margin-top="8px">✓ {secondarySelected.filter(t=>t.type==='audio').length} audio(s) + {secondarySelected.filter(t=>t.type==='subtitles').length} sub(s) prêts à muxer</div>
+          {/if}
         {/if}
       </div>
 
@@ -1504,6 +1675,8 @@
   .drop-icon { font-size: 42px; margin-bottom: 10px; }
   .drop-title { font-size: 15px; font-weight: 700; color: var(--text); }
   .drop-sub { font-size: 12px; color: var(--text2); margin: 4px 0 10px; word-break: break-all; }
+  .drop-label { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+  .drop-hint { color: var(--text2); text-transform: none; letter-spacing: 0; }
 
   .track-row {
     padding: 10px 0;

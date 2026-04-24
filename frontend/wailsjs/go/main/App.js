@@ -6,6 +6,10 @@ export function AnalyzeMkv(arg1) {
   return window['go']['main']['App']['AnalyzeMkv'](arg1);
 }
 
+export function AnalyzeMkvSecondary(arg1) {
+  return window['go']['main']['App']['AnalyzeMkvSecondary'](arg1);
+}
+
 export function BuildFilename(arg1) {
   return window['go']['main']['App']['BuildFilename'](arg1);
 }

@@ -142,14 +142,28 @@ type ExternalAudio struct {
 	Order    int // position dans l'ordre final (plus petit = plus haut)
 }
 
+// SecondaryTrack décrit une piste à reprendre depuis un .mkv secondaire
+// (typiquement un release SUPPLY/FW pour récupérer ses audios/subs).
+type SecondaryTrack struct {
+	ID       int    // ID de la piste dans le mkv secondaire (depuis mkvmerge -J)
+	Name     string // nom de piste LiHDL
+	Language string // code iso 639-2
+	Default  bool
+	Forced   bool
+	Order    int // position dans l'ordre final
+}
+
 // MuxParams regroupe toutes les instructions pour exécuter le mux.
 type MuxParams struct {
-	InputPath      string          // .mkv source
-	OutputPath     string          // .mkv cible (chemin complet)
-	Title          string          // titre global du conteneur (optionnel)
-	Tracks         []TrackSpec     // pistes internes du .mkv source (avec Order)
-	ExternalAudios []ExternalAudio // audios externes à ajouter
-	ExternalSubs   []ExternalSub   // subs externes à ajouter
+	InputPath       string           // .mkv source primaire (vidéo gardée)
+	OutputPath      string           // .mkv cible (chemin complet)
+	Title           string           // titre global du conteneur (optionnel)
+	Tracks          []TrackSpec      // pistes internes du .mkv source (avec Order)
+	ExternalAudios  []ExternalAudio  // audios externes à ajouter
+	ExternalSubs    []ExternalSub    // subs externes à ajouter
+	SecondaryPath   string           // .mkv secondaire (audios/subs uniquement, sans vidéo)
+	SecondaryAudios []SecondaryTrack // audios à reprendre depuis le secondaire
+	SecondarySubs   []SecondaryTrack // subs à reprendre depuis le secondaire
 }
 
 // MuxProgress est émis pendant le mux (0..100).
@@ -253,6 +267,17 @@ func buildArgs(p MuxParams) []string {
 		args = append(args, "--title", p.Title)
 	}
 
+	// File IDs :
+	//   0 = InputPath (primaire)
+	//   1 = SecondaryPath (si présent)
+	//   suivants = ExternalAudios puis ExternalSubs
+	hasSecondary := p.SecondaryPath != ""
+	extAudFileIDStart := 1
+	if hasSecondary {
+		extAudFileIDStart = 2
+	}
+	extSubFileIDStart := extAudFileIDStart + len(p.ExternalAudios)
+
 	// ---- Track order (option globale, placée au début) ----
 	type ordered struct {
 		order  int
@@ -266,13 +291,19 @@ func buildArgs(p MuxParams) []string {
 		}
 		all = append(all, ordered{order: t.Order, fileID: 0, trkID: t.ID})
 	}
-	// External audios : fileID 1..N, external subs : fileID N+1..N+M
-	for i, a := range p.ExternalAudios {
-		all = append(all, ordered{order: a.Order, fileID: i + 1, trkID: 0})
+	if hasSecondary {
+		for _, st := range p.SecondaryAudios {
+			all = append(all, ordered{order: st.Order, fileID: 1, trkID: st.ID})
+		}
+		for _, st := range p.SecondarySubs {
+			all = append(all, ordered{order: st.Order, fileID: 1, trkID: st.ID})
+		}
 	}
-	nAud := len(p.ExternalAudios)
+	for i, a := range p.ExternalAudios {
+		all = append(all, ordered{order: a.Order, fileID: extAudFileIDStart + i, trkID: 0})
+	}
 	for i, s := range p.ExternalSubs {
-		all = append(all, ordered{order: s.Order, fileID: nAud + i + 1, trkID: 0})
+		all = append(all, ordered{order: s.Order, fileID: extSubFileIDStart + i, trkID: 0})
 	}
 	if len(all) > 1 {
 		sort.SliceStable(all, func(i, j int) bool { return all[i].order < all[j].order })
@@ -334,7 +365,54 @@ func buildArgs(p MuxParams) []string {
 	}
 	args = append(args, p.InputPath)
 
-	// ---- Fichiers audio externes (fileID 1..N) ----
+	// ---- Fichier secondaire (fileID 1) — audios + subs uniquement ----
+	if hasSecondary {
+		// Renommage des pistes du secondaire (clé = ID dans le mkv secondaire).
+		for _, st := range p.SecondaryAudios {
+			id := strconv.Itoa(st.ID)
+			if st.Name != "" {
+				args = append(args, "--track-name", id+":"+st.Name)
+			}
+			if st.Language != "" {
+				args = append(args, "--language", id+":"+st.Language)
+			}
+			args = append(args, "--default-track-flag", id+":"+boolFlag(st.Default))
+			args = append(args, "--forced-display-flag", id+":"+boolFlag(st.Forced))
+		}
+		for _, st := range p.SecondarySubs {
+			id := strconv.Itoa(st.ID)
+			if st.Name != "" {
+				args = append(args, "--track-name", id+":"+st.Name)
+			}
+			if st.Language != "" {
+				args = append(args, "--language", id+":"+st.Language)
+			}
+			args = append(args, "--default-track-flag", id+":"+boolFlag(st.Default))
+			args = append(args, "--forced-display-flag", id+":"+boolFlag(st.Forced))
+		}
+		// Filtrage : pas de vidéo, ne garder que les pistes listées.
+		args = append(args, "--no-video")
+		secAudIDs, secSubIDs := []string{}, []string{}
+		for _, st := range p.SecondaryAudios {
+			secAudIDs = append(secAudIDs, strconv.Itoa(st.ID))
+		}
+		for _, st := range p.SecondarySubs {
+			secSubIDs = append(secSubIDs, strconv.Itoa(st.ID))
+		}
+		if len(secAudIDs) > 0 {
+			args = append(args, "--audio-tracks", strings.Join(secAudIDs, ","))
+		} else {
+			args = append(args, "--no-audio")
+		}
+		if len(secSubIDs) > 0 {
+			args = append(args, "--subtitle-tracks", strings.Join(secSubIDs, ","))
+		} else {
+			args = append(args, "--no-subtitles")
+		}
+		args = append(args, p.SecondaryPath)
+	}
+
+	// ---- Fichiers audio externes ----
 	for _, a := range p.ExternalAudios {
 		if a.Name != "" {
 			args = append(args, "--track-name", "0:"+a.Name)
