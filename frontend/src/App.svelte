@@ -64,6 +64,21 @@
   let tmdbMode = 'movie'; // 'movie' | 'tv'
   let filenameCopied = false;
   let filenameCopiedTimer = null;
+  let filenameOverride = false;   // true = l'utilisateur a pris la main sur le nom
+  let manualFilename = '';        // valeur saisie manuellement quand override actif
+
+  // Le nom utilisé pour le mux : manuel si override, sinon généré.
+  $: effectiveFilename = filenameOverride ? manualFilename : previewFilename;
+
+  function startFilenameOverride() {
+    manualFilename = previewFilename;
+    filenameOverride = true;
+  }
+
+  function resetFilenameOverride() {
+    filenameOverride = false;
+    manualFilename = '';
+  }
 
   // Queue batch : liste de .mkv en attente de mux.
   let queue = [];
@@ -98,9 +113,9 @@
   }
 
   async function copyFilename() {
-    if (!previewFilename) return;
+    if (!effectiveFilename) return;
     try {
-      await navigator.clipboard.writeText(previewFilename);
+      await navigator.clipboard.writeText(effectiveFilename);
       filenameCopied = true;
       if (filenameCopiedTimer) clearTimeout(filenameCopiedTimer);
       filenameCopiedTimer = setTimeout(() => { filenameCopied = false; }, 1500);
@@ -740,7 +755,7 @@
   async function doMux() {
     if (!sourcePath)        { appendLog('⚠ Aucun .mkv source'); return; }
     if (!config.output_dir) { appendLog('⚠ Dossier de sortie non défini — ouvre Réglages'); return; }
-    if (!previewFilename)   { appendLog('⚠ Nom de fichier incomplet'); return; }
+    if (!effectiveFilename) { appendLog('⚠ Nom de fichier incomplet'); return; }
 
     // Construit le nom de piste vidéo LiHDL et rattache aux tracks.
     const videoName = videoTrackNameClient();
@@ -771,7 +786,7 @@
       Order: a.order ?? 0,
     }));
 
-    const outputPath = config.output_dir.replace(/\/$/, '') + '/' + previewFilename;
+    const outputPath = config.output_dir.replace(/\/$/, '') + '/' + effectiveFilename;
 
     muxing = true;
     muxPercent = 0;
@@ -1127,10 +1142,9 @@
             </select>
           </div>
           <div class="field" style:flex="1"><label>Codec vidéo</label>
-            <input type="text" bind:value={target.video_codec} list="codec-suggestions" placeholder="H264" />
-            <datalist id="codec-suggestions">
-              {#each VIDEO_CODEC_OPTIONS as c}<option value={c}/>{/each}
-            </datalist>
+            <select bind:value={target.video_codec}>
+              {#each VIDEO_CODEC_OPTIONS as c}<option>{c}</option>{/each}
+            </select>
           </div>
         </div>
         <div class="field-hint">Codec auto-suggéré : <b class="mono">{suggestedCodecDisplay || '—'}</b> — modifie au besoin.</div>
@@ -1144,8 +1158,16 @@
             </div>
           {/if}
           <div class="preview-filename-row">
-            <div class="preview-value mono">{previewFilename || '—'}</div>
-            {#if previewFilename}
+            {#if filenameOverride}
+              <input class="filename-input mono" type="text" bind:value={manualFilename} placeholder="nom-de-fichier.mkv" />
+              <button class="btn-copy" on:click={resetFilenameOverride} title="Revenir à l'auto">↺ Auto</button>
+            {:else}
+              <div class="preview-value mono">{previewFilename || '—'}</div>
+              {#if previewFilename}
+                <button class="btn-copy" on:click={startFilenameOverride} title="Modifier manuellement">✏ Modifier</button>
+              {/if}
+            {/if}
+            {#if effectiveFilename}
               <button class="btn-copy" on:click={copyFilename} title="Copier">{filenameCopied ? '✓ Copié' : '📋 Copier'}</button>
               <button class="btn-copy" on:click={openOutputDir} disabled={!config.output_dir} title="Ouvrir dossier de sortie">📂 Dossier</button>
             {/if}
@@ -1159,7 +1181,7 @@
           <div class="progress-bar"><div class="progress-fill" style:width="{muxPercent}%"></div></div>
           <span class="mono">{muxPercent}%</span>
         {:else}
-          <button class="btn-primary" on:click={doMux} disabled={!sourcePath || !previewFilename}>Muxer</button>
+          <button class="btn-primary" on:click={doMux} disabled={!sourcePath || !effectiveFilename}>Muxer</button>
         {/if}
       </div>
 
@@ -1604,7 +1626,12 @@
     letter-spacing: 1px; margin-bottom: 6px;
   }
   .preview-value { color: var(--green); font-size: 13px; word-break: break-all; flex: 1; }
-  .preview-filename-row { display: flex; gap: 10px; align-items: flex-start; }
+  .preview-filename-row { display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap; }
+  .filename-input {
+    flex: 1; min-width: 280px; font-size: 13px;
+    padding: 6px 8px; background: rgba(0,0,0,0.5);
+    color: var(--green); border: 1px solid var(--border); border-radius: 6px;
+  }
   .btn-copy {
     flex-shrink: 0; padding: 4px 10px; font-size: 11px;
     background: var(--panel2); color: var(--text); border: 1px solid var(--border);
