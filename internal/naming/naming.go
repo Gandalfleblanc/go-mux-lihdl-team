@@ -5,44 +5,41 @@ package naming
 // AudioLabels est la liste ordonnée des libellés audio LiHDL.
 // Format : "{LANG} {VERSION} : {CODEC} {CANAUX}".
 // VFF = Version Française de France, VFQ = Version Française Québécoise,
-// VFi = Version Française Internationale, VO = Version Originale.
+// VFi = Version Française Internationale, VO = Version Originale,
+// AD = Audiodescription.
 var AudioLabels = []string{
-	"FR VFF : AC3 5.1",
 	"FR VFF : AC3 2.0",
-	"FR VFF : AC3 1.0",
-	"FR VFQ : AC3 5.1",
 	"FR VFQ : AC3 2.0",
-	"FR VFQ : AC3 1.0",
-	"FR VFF : EAC3 5.1",
-	"FR VFF : EAC3 2.0",
-	"FR VFQ : EAC3 5.1",
-	"FR VFQ : EAC3 2.0",
-	"FR VFi : AC3 5.1",
 	"FR VFi : AC3 2.0",
-	"FR VFi : AC3 1.0",
-	"FR AD : AC3 5.1",
 	"FR AD : AC3 2.0",
-	"FR AD : AC3 1.0",
-	"FR AD : EAC3 5.1",
+	"FR VFF : AC3 5.1",
+	"FR VFQ : AC3 5.1",
+	"FR VFi : AC3 5.1",
+	"FR AD : AC3 5.1",
+	"FR VFF : EAC3 2.0",
+	"FR VFQ : EAC3 2.0",
+	"FR VFi : EAC3 2.0",
 	"FR AD : EAC3 2.0",
-	"ENG VO : AC3 5.1",
+	"FR VFF : EAC3 5.1",
+	"FR VFQ : EAC3 5.1",
+	"FR VFi : EAC3 5.1",
+	"FR AD : EAC3 5.1",
 	"ENG VO : AC3 2.0",
-	"ENG VO : AC3 1.0",
+	"ENG VO : AC3 5.1",
 	"ENG VO : EAC3 5.1",
 	"ENG VO : EAC3 5.1 ATMOS",
-	"ENG VO : EAC3 2.0",
-	"JPN VO : AC3 5.1",
-	"JPN VO : AC3 2.0",
-	"JPN VO : AC3 1.0",
 	"ITA VO : AC3 5.1",
-	"ITA VO : AC3 2.0",
-	"ITA VO : AC3 1.0",
+	"SPA VO : AC3 5.1",
+	"GER VO : AC3 5.1",
+	"JPN VO : AC3 5.1",
+	"CHI VO : AC3 5.1",
+	"RUS VO : AC3 5.1",
 }
 
 // SubtitleLabels est la liste ordonnée des libellés sous-titres LiHDL.
 // Formats : SRT (texte) et PGS (image bluray).
 var SubtitleLabels = []string{
-	// SRT
+	// FR — SRT
 	"FR Forced : SRT",
 	"FR Full : SRT",
 	"FR SDH : SRT",
@@ -52,9 +49,7 @@ var SubtitleLabels = []string{
 	"FR VFQ Forced : SRT",
 	"FR VFQ Full : SRT",
 	"FR VFQ SDH : SRT",
-	"ENG Forced : SRT",
-	"ENG Full : SRT",
-	// PGS
+	// FR — PGS
 	"FR Forced : PGS",
 	"FR Full : PGS",
 	"FR SDH : PGS",
@@ -64,8 +59,14 @@ var SubtitleLabels = []string{
 	"FR VFQ Forced : PGS",
 	"FR VFQ Full : PGS",
 	"FR VFQ SDH : PGS",
+	// ENG — SRT
+	"ENG Forced : SRT",
+	"ENG Full : SRT",
+	"ENG SDH : SRT",
+	// ENG — PGS
 	"ENG Forced : PGS",
 	"ENG Full : PGS",
+	"ENG SDH : PGS",
 }
 
 // Dropdowns pour la piste vidéo.
