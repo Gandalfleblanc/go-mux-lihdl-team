@@ -68,7 +68,7 @@
 
   // Dropdowns pour le filename (ordre : résolution.source).
   const RESOLUTION_OPTIONS = ['720p', '1080p', '2160p'];
-  const TARGET_SOURCE_OPTIONS = ['HDLight', 'WEBLight', 'WEB-DL'];
+  const TARGET_SOURCE_OPTIONS = ['HDLight', 'WEBLight', 'WEB-DL', 'WEBRip'];
   // Dropdown élargi pour le type de source de la piste vidéo.
   const VIDEO_SOURCE_TYPE_OPTIONS = [
     'REMUX', 'REMUX CUSTOM',
