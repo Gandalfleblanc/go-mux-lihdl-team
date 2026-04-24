@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -39,31 +40,44 @@ func NewApp() *App {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 
-	// Drop-zone : .mkv → "file:dropped" (on prend le 1er) ; subs externes →
-	// "subs:dropped" (tous ceux reconnus). Les deux types peuvent être droppés
-	// ensemble, on dispatche chacun.
+	// Drop-zone : .mkv → "file:dropped" (1er) ou "files:dropped" (batch N≥2) ;
+	// subs externes → "subs:dropped" ; audios externes → "audios:dropped".
+	// Les types peuvent être mixés dans un même drop, on dispatche chacun.
 	subExts := map[string]bool{
 		".srt": true, ".sup": true, ".ass": true,
 		".ssa": true, ".sub": true, ".idx": true,
 	}
+	audExts := map[string]bool{
+		".ac3": true, ".eac3": true, ".dts": true, ".aac": true,
+		".flac": true, ".mp3": true, ".mka": true, ".wav": true,
+		".opus": true, ".truehd": true,
+	}
 	wr.OnFileDrop(ctx, func(x, y int, paths []string) {
-		var mkvs, subs []string
+		var mkvs, subs, auds []string
 		for _, p := range paths {
 			ext := strings.ToLower(filepath.Ext(p))
-			if ext == ".mkv" {
+			switch {
+			case ext == ".mkv":
 				mkvs = append(mkvs, p)
-			} else if subExts[ext] {
+			case subExts[ext]:
 				subs = append(subs, p)
+			case audExts[ext]:
+				auds = append(auds, p)
 			}
 		}
-		if len(mkvs) > 0 {
+		if len(mkvs) == 1 {
 			wr.EventsEmit(ctx, "file:dropped", mkvs[0])
+		} else if len(mkvs) > 1 {
+			wr.EventsEmit(ctx, "files:dropped", mkvs)
 		}
 		if len(subs) > 0 {
 			wr.EventsEmit(ctx, "subs:dropped", subs)
 		}
-		if len(mkvs) == 0 && len(subs) == 0 {
-			wr.EventsEmit(ctx, "log", "⚠ Aucun fichier .mkv ou sous-titre détecté dans le drop")
+		if len(auds) > 0 {
+			wr.EventsEmit(ctx, "audios:dropped", auds)
+		}
+		if len(mkvs) == 0 && len(subs) == 0 && len(auds) == 0 {
+			wr.EventsEmit(ctx, "log", "⚠ Aucun .mkv / sous-titre / audio détecté dans le drop")
 		}
 	})
 }
@@ -72,7 +86,7 @@ func (a *App) startup(ctx context.Context) {
 
 // AppVersion est lue par le frontend (pill dans le header) et utilisée pour
 // comparer avec la dernière release GitHub lors du check de mise à jour.
-const AppVersion = "v2.2.1"
+const AppVersion = "v3.0.0"
 
 func (a *App) GetVersion() string { return AppVersion }
 
@@ -142,10 +156,39 @@ func (a *App) SelectSubFiles() ([]string, error) {
 	})
 }
 
+// SelectAudioFiles ouvre un dialog multi-sélection pour les audios externes.
+func (a *App) SelectAudioFiles() ([]string, error) {
+	return wr.OpenMultipleFilesDialog(a.ctx, wr.OpenDialogOptions{
+		Title: "Choisir un ou plusieurs fichiers audio",
+		Filters: []wr.FileFilter{
+			{DisplayName: "Audio (*.ac3 *.eac3 *.dts *.aac *.flac *.mp3 *.mka *.wav *.opus *.truehd)",
+				Pattern: "*.ac3;*.eac3;*.dts;*.aac;*.flac;*.mp3;*.mka;*.wav;*.opus;*.truehd"},
+		},
+	})
+}
+
 func (a *App) SelectOutputDir() (string, error) {
 	return wr.OpenDirectoryDialog(a.ctx, wr.OpenDialogOptions{
 		Title: "Choisir le dossier de sortie",
 	})
+}
+
+// OpenFolder ouvre un dossier dans l'explorateur de fichiers natif.
+// macOS → open, Linux → xdg-open, Windows → explorer.
+func (a *App) OpenFolder(path string) error {
+	if path == "" {
+		return errors.New("chemin vide")
+	}
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", path)
+	case "windows":
+		cmd = exec.Command("explorer", path)
+	default:
+		cmd = exec.Command("xdg-open", path)
+	}
+	return cmd.Start()
 }
 
 // --- mkvmerge ---
@@ -219,7 +262,26 @@ func (a *App) AnalyzeMkv(path string) {
 
 func (a *App) SearchTmdb(query string) ([]tmdb.Result, error) {
 	c := config.Load()
+	// Si la query est un ID TMDB numérique et qu'on a une clé API, fetch direct
+	q := strings.TrimSpace(query)
+	if q != "" && isAllDigits(q) && c.TmdbKey != "" {
+		if r, err := tmdb.FetchByID(q, c.TmdbKey); err == nil && r != nil {
+			return []tmdb.Result{*r}, nil
+		}
+	}
 	return tmdb.Search(c.ServeurPersoURL, query)
+}
+
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // TestTmdbKey teste la clé API TMDB en appelant /3/configuration.
@@ -263,11 +325,12 @@ func (a *App) VideoTrackName(quality, encoder, source, team string) string {
 
 // MuxRequest est ce que le frontend envoie pour déclencher le mux.
 type MuxRequest struct {
-	InputPath    string                `json:"input_path"`
-	OutputPath   string                `json:"output_path"`
-	Title        string                `json:"title"`
-	Tracks       []mkvtool.TrackSpec   `json:"tracks"`
-	ExternalSubs []mkvtool.ExternalSub `json:"external_subs"`
+	InputPath      string                  `json:"input_path"`
+	OutputPath     string                  `json:"output_path"`
+	Title          string                  `json:"title"`
+	Tracks         []mkvtool.TrackSpec     `json:"tracks"`
+	ExternalAudios []mkvtool.ExternalAudio `json:"external_audios"`
+	ExternalSubs   []mkvtool.ExternalSub   `json:"external_subs"`
 }
 
 func (a *App) Mux(req MuxRequest) error {
@@ -285,11 +348,12 @@ func (a *App) Mux(req MuxRequest) error {
 
 	wr.EventsEmit(a.ctx, "log", "🔧 Lancement mkvmerge → "+filepath.Base(req.OutputPath))
 	err := mkvtool.Mux(ctx, binary, mkvtool.MuxParams{
-		InputPath:    req.InputPath,
-		OutputPath:   req.OutputPath,
-		Title:        req.Title,
-		Tracks:       req.Tracks,
-		ExternalSubs: req.ExternalSubs,
+		InputPath:      req.InputPath,
+		OutputPath:     req.OutputPath,
+		Title:          req.Title,
+		Tracks:         req.Tracks,
+		ExternalAudios: req.ExternalAudios,
+		ExternalSubs:   req.ExternalSubs,
 	},
 		func(p mkvtool.MuxProgress) {
 			wr.EventsEmit(a.ctx, "mux:progress", p)

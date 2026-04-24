@@ -4,7 +4,7 @@
   import logo from './assets/images/logo.png';
   import {
     GetVersion, GetConfig, SaveConfig, GetLihdlOptions,
-    SelectMkvFile, SelectSubFiles, SelectOutputDir, LocateMkvmerge,
+    SelectMkvFile, SelectSubFiles, SelectAudioFiles, SelectOutputDir, LocateMkvmerge, OpenFolder,
     AnalyzeMkv, SearchTmdb, TestTmdbKey, FileSize,
     Mux, CancelMux,
     CheckUpdate, InstallUpdate,
@@ -60,6 +60,52 @@
   const VIDEO_CODEC_OPTIONS = ['H264', 'x264', 'H265', 'x265', 'AV1'];
   let tmdbResults = [];
   let tmdbQuery = '';
+  let filenameCopied = false;
+  let filenameCopiedTimer = null;
+
+  // Queue batch : liste de .mkv en attente de mux.
+  let queue = [];
+
+  function queueAdd(paths) {
+    if (!paths || !paths.length) return;
+    const existing = new Set(queue);
+    for (const p of paths) {
+      if (p && !existing.has(p) && p !== sourcePath) {
+        queue = [...queue, p];
+        existing.add(p);
+      }
+    }
+  }
+
+  function queueRemove(idx) {
+    queue = queue.filter((_, i) => i !== idx);
+  }
+
+  function queueLoad(idx) {
+    const p = queue[idx];
+    if (!p) return;
+    queue = queue.filter((_, i) => i !== idx);
+    openMkv(p);
+  }
+
+  function queueNext() {
+    if (queue.length === 0) return;
+    const p = queue[0];
+    queue = queue.slice(1);
+    openMkv(p);
+  }
+
+  async function copyFilename() {
+    if (!previewFilename) return;
+    try {
+      await navigator.clipboard.writeText(previewFilename);
+      filenameCopied = true;
+      if (filenameCopiedTimer) clearTimeout(filenameCopiedTimer);
+      filenameCopiedTimer = setTimeout(() => { filenameCopied = false; }, 1500);
+    } catch (e) {
+      appendLog('⚠ Copie : ' + String(e));
+    }
+  }
   let tmdbSearching = false;
 
   let muxing = false;
@@ -70,6 +116,7 @@
   // Subs externes ajoutés (srt/sup/ass/ssa/sub/idx). Chaque entrée a le même
   // format qu'une piste interne pour l'UI unifiée, mais avec un flag external.
   let externalSubs = [];
+  let externalAudios = [];
 
   // --- helpers ---
   function now() {
@@ -213,11 +260,25 @@
   // Construit le nom de fichier selon les normes LiHDL.
   // Format : {Title}.{Year}.{Flag}.{SourceQuality}.{Audio}[.WiTH.AD].{VideoCodec}-{Team}.mkv
   // Exemple : The.Target.2014.VFF.HDLight.1080p.AC3.5.1.WiTH.AD.H264-LiHDL.mkv
+  // Choisit le titre (FR ou VO) à utiliser pour le nom de fichier selon target.lang.
+  // Auto = FR si le nom de source ressemble à FRENCH/VOF, sinon VO (étranger).
+  // Si pas de TMDB, fallback sur target.title (saisi manuellement).
+  function filenameTitleForBuild() {
+    if (!lastTmdbResult) return stripYearSuffix(target.title);
+    let useFR;
+    if (target.lang === 'vf')      useFR = true;
+    else if (target.lang === 'vo') useFR = false;
+    else                           useFR = looksFrench(sourcePath);
+    return useFR
+      ? (lastTmdbResult.titre_fr || lastTmdbResult.titre_vo || '')
+      : (lastTmdbResult.titre_vo || lastTmdbResult.titre_fr || '');
+  }
+
   function buildFilenameClient() {
     if (!sourceInfo) return '';
     const parts = [];
-    // Strip le " (YYYY)" final du titre pour garder le filename propre.
-    const cleanTitle = stripYearSuffix(target.title);
+    // Titre du fichier = FR ou VO selon target.lang (≠ titre cible qui est toujours FR).
+    const cleanTitle = stripYearSuffix(filenameTitleForBuild());
     if (cleanTitle) parts.push(dotify(cleanTitle));
     // Année : soit depuis le champ, soit extraite du titre si absent.
     const yearMatch = String(target.title || '').match(/\((\d{4})\)\s*$/);
@@ -248,7 +309,7 @@
   // les changements et recalcule (sinon il n'analyse pas l'intérieur des fns).
   $: previewFilename = (function() {
     const _deps = [tracks.length, videoChoice.team, target.title, target.year,
-                   target.resolution, target.source, target.video_codec,
+                   target.resolution, target.source, target.video_codec, target.lang,
                    ...tracks.map(t => (t.keep ? '1' : '0') + (t.label || ''))];
     void _deps;
     return buildFilenameClient();
@@ -336,12 +397,12 @@
       else if (isVFQ) prefix = 'FR VFQ';
       else prefix = 'FR';
     } else if (isEN) {
-      prefix = 'ENG VO';
+      prefix = 'ENG';
     }
     if (!prefix) return '';
 
     const kind = forced ? 'Forced' : (sdh ? 'SDH' : 'Full');
-    const candidate = prefix === 'ENG VO' ? `ENG VO : ${fmt}` : `${prefix} ${kind} : ${fmt}`;
+    const candidate = `${prefix} ${kind} : ${fmt}`;
     return options.subtitle_labels.includes(candidate) ? candidate : '';
   }
 
@@ -407,6 +468,57 @@
 
   function removeExternalSub(idx) {
     externalSubs = externalSubs.filter((_, i) => i !== idx);
+  }
+
+  async function addExternalAudios(paths) {
+    let maxOrder = 0;
+    for (const t of tracks) maxOrder = Math.max(maxOrder, t.order ?? 0);
+    for (const a of externalAudios) maxOrder = Math.max(maxOrder, a.order ?? 0);
+    for (const p of paths) {
+      const name = basename(p);
+      maxOrder += 10;
+      let size = -1;
+      try { size = await FileSize(p); } catch {}
+      externalAudios = [...externalAudios, {
+        path: p, name, size,
+        keep: true, default: false, forced: false,
+        label: '', order: maxOrder,
+      }];
+    }
+    if (paths.length) appendLog('✓ ' + paths.length + ' audio(s) ajouté(s)');
+  }
+
+  async function pickAudioDialog() {
+    try {
+      const paths = await SelectAudioFiles();
+      if (paths && paths.length > 0) addExternalAudios(paths);
+    } catch (e) {
+      appendLog('❌ ' + String(e));
+    }
+  }
+
+  function removeExternalAudio(idx) {
+    externalAudios = externalAudios.filter((_, i) => i !== idx);
+  }
+
+  function removeInternalTrack(id) {
+    tracks = tracks.filter(t => t.id !== id);
+  }
+
+  function moveAudioTrack(kind, idx, dir) {
+    const all = [
+      ...tracks.filter(t => t.type === 'audio').map((t, i) => ({ kind: 'internal', idx: i, ref: t })),
+      ...externalAudios.map((a, i) => ({ kind: 'external', idx: i, ref: a })),
+    ].sort((a, b) => (a.ref.order ?? 0) - (b.ref.order ?? 0));
+    const pos = all.findIndex(x => x.kind === kind && x.idx === idx);
+    const newPos = pos + dir;
+    if (newPos < 0 || newPos >= all.length) return;
+    const cur = all[pos].ref, oth = all[newPos].ref;
+    const tmp = cur.order ?? 0;
+    cur.order = oth.order ?? 0;
+    oth.order = tmp;
+    tracks = [...tracks];
+    externalAudios = [...externalAudios];
   }
 
   // --- Ordre global des pistes (internes + externes) ---
@@ -478,22 +590,17 @@
       const kind = forced ? 'Forced' : 'Full';
       return `FR ${kind} : ${fmt}`;
     }
-    if (lang === 'eng' || lang === 'en') return `ENG VO : ${fmt}`;
+    if (lang === 'eng' || lang === 'en') {
+      const kind = forced ? 'Forced' : 'Full';
+      return `ENG ${kind} : ${fmt}`;
+    }
     return '';
   }
 
-  // Construit le titre "Titre (Année)" selon target.lang :
-  //   'vf'   → TitreFR forcé
-  //   'vo'   → TitreVO forcé
-  //   'auto' → selon looksFrench(sourcePath)
-  function composeTmdbTitle(r, _unused) {
-    let useFR;
-    if (target.lang === 'vf')      useFR = true;
-    else if (target.lang === 'vo') useFR = false;
-    else                           useFR = looksFrench(sourcePath);
-    const base = useFR
-      ? (r.titre_fr || r.titre_vo || '')
-      : (r.titre_vo || r.titre_fr || '');
+  // Construit le titre "Titre FR (Année)" — TOUJOURS le titre français TMDB
+  // avec l'année entre parenthèses (norme LiHDL). Fallback VO si FR vide.
+  function composeTmdbTitle(r) {
+    const base = r.titre_fr || r.titre_vo || '';
     const year = r.annee_fr || '';
     return year ? (base + ' (' + year + ')') : base;
   }
@@ -561,6 +668,15 @@
   async function pickOutputDir() {
     const d = await SelectOutputDir();
     if (d) config.output_dir = d;
+  }
+
+  async function openOutputDir() {
+    if (!config.output_dir) { appendLog('⚠ Dossier de sortie non défini'); return; }
+    try {
+      await OpenFolder(config.output_dir);
+    } catch (e) {
+      appendLog('❌ Ouvrir dossier : ' + String(e));
+    }
   }
 
   async function saveSettings() {
@@ -642,6 +758,14 @@
       Forced: !!s.forced,
       Order: s.order ?? 0,
     }));
+    const extAudios = externalAudios.map(a => ({
+      Path: a.path,
+      Name: a.label || '',
+      Language: mapLangCode(a.label || ''),
+      Default: !!a.default,
+      Forced: !!a.forced,
+      Order: a.order ?? 0,
+    }));
 
     const outputPath = config.output_dir.replace(/\/$/, '') + '/' + previewFilename;
 
@@ -653,6 +777,7 @@
         output_path: outputPath,
         title: target.title || '',
         tracks: specs,
+        external_audios: extAudios,
         external_subs: extSubs,
       });
     } catch (e) {
@@ -672,9 +797,21 @@
 
     EventsOn('log', (msg) => appendLog(msg));
     EventsOn('mux:progress', (p) => { muxPercent = p.Percent || p.percent || 0; });
-    EventsOn('mux:done', () => { muxing = false; muxPercent = 0; });
+    EventsOn('mux:done', () => {
+      muxing = false;
+      muxPercent = 0;
+      if (queue.length > 0) {
+        appendLog('✓ Mux terminé — ' + queue.length + ' en file. Clique "Charger le suivant" pour continuer.');
+      }
+    });
     EventsOn('file:dropped', (path) => { openMkv(path); });
     EventsOn('subs:dropped', (paths) => { addExternalSubs(paths || []); });
+    EventsOn('audios:dropped', (paths) => { addExternalAudios(paths || []); });
+    EventsOn('files:dropped', (paths) => {
+      if (!paths || !paths.length) return;
+      queueAdd(paths);
+      appendLog('✓ ' + paths.length + ' .mkv ajoutés à la file');
+    });
     // Pattern chunked : analyze:start (n attendu) + analyze:track (x N).
     // On auto-finalise dès qu'on atteint n (l'event analyze:end de Wails
     // ne fire pas côté JS pour une raison obscure).
@@ -753,7 +890,7 @@
         <div class="drop-icon">🎬</div>
         {#if !sourcePath}
           <div class="drop-title">Glisse un fichier .mkv ici</div>
-          <div class="drop-sub">ou</div>
+          <div class="drop-sub">ou plusieurs pour batcher · puis audios/subs externes</div>
           <button class="btn-primary" on:click={pickMkvDialog}>Choisir un fichier</button>
         {:else}
           <div class="drop-title">{sourcePath.split('/').pop()}</div>
@@ -761,6 +898,29 @@
           <button class="btn-ghost" on:click={pickMkvDialog}>Changer</button>
         {/if}
       </div>
+
+      <!-- Queue batch -->
+      {#if queue.length > 0}
+        <div class="card">
+          <div class="section-title-row">
+            <div class="section-title">File d'attente ({queue.length})</div>
+            <div class="section-actions">
+              <button class="btn-ghost" on:click={queueNext} disabled={muxing}>Charger le suivant</button>
+              <button class="btn-ghost" on:click={() => queue = []}>Vider</button>
+            </div>
+          </div>
+          <ul class="queue-list">
+            {#each queue as p, i}
+              <li class="queue-row">
+                <span class="queue-idx">{i + 1}</span>
+                <span class="queue-name mono">{p.split('/').pop()}</span>
+                <button class="btn-ghost btn-xs" on:click={() => queueLoad(i)} disabled={muxing}>Charger</button>
+                <button class="btn-delete" on:click={() => queueRemove(i)} title="Retirer de la file">✕</button>
+              </li>
+            {/each}
+          </ul>
+        </div>
+      {/if}
 
       <!-- Tracks -->
       {#if tracks.length > 0}
@@ -799,37 +959,56 @@
         </div>
 
         <!-- Audio -->
-        {#if tracks.some(t => t.type === 'audio')}
-          {@const audioSorted = tracks.filter(t => t.type === 'audio').slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0))}
-          <div class="card">
+        <div class="card">
+          <div class="section-title-row">
             <div class="section-title">Pistes audio</div>
-            {#each audioSorted as t, i (t.id)}
-              <div class="track-row" class:dropped={!t.keep}>
+            <button class="btn-tiny" on:click={pickAudioDialog}>+ Ajouter un fichier</button>
+          </div>
+          {#if tracks.some(t => t.type === 'audio') || externalAudios.length > 0}
+            {@const internalAudios = tracks.filter(t => t.type === 'audio')}
+            {@const mergedAudios = [
+              ...internalAudios.map((t, i) => ({ kind: 'internal', idx: i, ref: t, order: t.order ?? 0 })),
+              ...externalAudios.map((a, i) => ({ kind: 'external', idx: i, ref: a, order: a.order ?? 0 })),
+            ].sort((a, b) => a.order - b.order)}
+            {#each mergedAudios as item (item.kind + '-' + item.idx)}
+              <div class="track-row" class:dropped={!item.ref.keep}>
                 <div class="track-meta">
-                  <span class="badge audio">AUDIO</span>
-                  <span class="mono">#{t.id} · {t.codec} · {t.lang || '??'} · {t.channels || '?'}ch</span>
-                  {#if t.name}<span class="track-current">« {t.name} »</span>{/if}
+                  {#if item.kind === 'internal'}
+                    <span class="badge audio">AUDIO</span>
+                    <span class="mono">#{item.ref.id} · {item.ref.codec} · {item.ref.lang || '??'} · {item.ref.channels || '?'}ch</span>
+                    {#if item.ref.name}<span class="track-current">« {item.ref.name} »</span>{/if}
+                  {:else}
+                    <span class="badge audio-ext">AUDIO EXT</span>
+                    <span class="mono">{basename(item.ref.path)}</span>
+                    {#if item.ref.size != null && item.ref.size >= 0}
+                      <span class="sub-size mono">{formatBytes(item.ref.size)}</span>
+                    {/if}
+                  {/if}
                   <div class="order-ctrls">
-                    <button class="btn-arrow" title="Monter" on:click={() => moveAudio(i, -1)}>↑</button>
-                    <button class="btn-arrow" title="Descendre" on:click={() => moveAudio(i, +1)}>↓</button>
-                    <button class="btn-arrow danger" title="Exclure du mux" on:click={() => (t.keep = !t.keep)}>
-                      {t.keep ? '✕' : '↩'}
-                    </button>
+                    <button class="btn-arrow" title="Monter" on:click={() => moveAudioTrack(item.kind, item.idx, -1)}>↑</button>
+                    <button class="btn-arrow" title="Descendre" on:click={() => moveAudioTrack(item.kind, item.idx, +1)}>↓</button>
+                    {#if item.kind === 'internal'}
+                      <button class="btn-arrow danger" title="Supprimer" on:click={() => removeInternalTrack(item.ref.id)}>✕</button>
+                    {:else}
+                      <button class="btn-arrow danger" title="Supprimer" on:click={() => removeExternalAudio(item.idx)}>✕</button>
+                    {/if}
                   </div>
                 </div>
                 <div class="track-controls">
-                  <select bind:value={t.label}>
+                  <select bind:value={item.ref.label}>
                     <option value="">— choisir —</option>
                     {#each options.audio_labels as lbl}<option>{lbl}</option>{/each}
                   </select>
-                  <label class="chk"><input type="checkbox" bind:checked={t.keep}/> Garder</label>
-                  <label class="chk"><input type="checkbox" bind:checked={t.default}/> Default</label>
-                  <label class="chk"><input type="checkbox" bind:checked={t.forced}/> Forced</label>
+                  <label class="chk"><input type="checkbox" bind:checked={item.ref.keep}/> Garder</label>
+                  <label class="chk"><input type="checkbox" bind:checked={item.ref.default}/> Default</label>
+                  <label class="chk"><input type="checkbox" bind:checked={item.ref.forced}/> Forced</label>
                 </div>
               </div>
             {/each}
-          </div>
-        {/if}
+          {:else}
+            <div class="empty-hint">Aucune piste audio détectée. Clique "+ Ajouter un fichier" pour ajouter un audio externe.</div>
+          {/if}
+        </div>
 
         <!-- Subtitles (internes + externes triés par ordre) -->
         <div class="card">
@@ -860,7 +1039,9 @@
                   <div class="order-ctrls">
                     <button class="btn-arrow" title="Monter" on:click={() => moveTrack(item.kind, item.idx, -1)}>↑</button>
                     <button class="btn-arrow" title="Descendre" on:click={() => moveTrack(item.kind, item.idx, +1)}>↓</button>
-                    {#if item.kind === 'external'}
+                    {#if item.kind === 'internal'}
+                      <button class="btn-arrow danger" title="Supprimer" on:click={() => removeInternalTrack(item.ref.id)}>✕</button>
+                    {:else}
                       <button class="btn-arrow danger" title="Supprimer" on:click={() => removeExternalSub(item.idx)}>✕</button>
                     {/if}
                   </div>
@@ -915,13 +1096,6 @@
         {#if target.title}
           <div class="tmdb-preview mono">{target.title}</div>
         {/if}
-        {#if lastTmdbResult}
-          <div class="lang-toggle">
-            <button class:active={target.lang === 'auto'} on:click={() => { target.lang = 'auto'; refreshTitleFromLang(); }}>Auto</button>
-            <button class:active={target.lang === 'vf'}   on:click={() => { target.lang = 'vf';   refreshTitleFromLang(); }}>VF</button>
-            <button class:active={target.lang === 'vo'}   on:click={() => { target.lang = 'vo';   refreshTitleFromLang(); }}>VO</button>
-          </div>
-        {/if}
         <div class="field-row">
           <div class="field" style:flex="3"><label>Titre</label>
             <input type="text" bind:value={target.title} placeholder="Titre du film" />
@@ -951,7 +1125,20 @@
         <div class="field-hint">Codec auto-suggéré : <b class="mono">{suggestedCodecDisplay || '—'}</b> — modifie au besoin.</div>
         <div class="preview-box">
           <div class="preview-label">Nom de fichier final</div>
-          <div class="preview-value mono">{previewFilename || '—'}</div>
+          {#if lastTmdbResult}
+            <div class="lang-toggle">
+              <button class:active={target.lang === 'auto'} on:click={() => target.lang = 'auto'}>Auto</button>
+              <button class:active={target.lang === 'vf'}   on:click={() => target.lang = 'vf'}>VF</button>
+              <button class:active={target.lang === 'vo'}   on:click={() => target.lang = 'vo'}>VO</button>
+            </div>
+          {/if}
+          <div class="preview-filename-row">
+            <div class="preview-value mono">{previewFilename || '—'}</div>
+            {#if previewFilename}
+              <button class="btn-copy" on:click={copyFilename} title="Copier">{filenameCopied ? '✓ Copié' : '📋 Copier'}</button>
+              <button class="btn-copy" on:click={openOutputDir} disabled={!config.output_dir} title="Ouvrir dossier de sortie">📂 Dossier</button>
+            {/if}
+          </div>
         </div>
       </div>
 
@@ -989,6 +1176,7 @@
         <div class="field-row">
           <input type="text" bind:value={config.output_dir} placeholder="/Users/…/Mux" readonly />
           <button class="btn-test" on:click={pickOutputDir}>Choisir…</button>
+          <button class="btn-test" on:click={openOutputDir} disabled={!config.output_dir} title="Ouvrir dans le Finder">📂 Ouvrir</button>
         </div>
       </div>
 
@@ -1404,7 +1592,23 @@
     font-size: 10px; color: var(--text3); text-transform: uppercase;
     letter-spacing: 1px; margin-bottom: 6px;
   }
-  .preview-value { color: var(--green); font-size: 13px; word-break: break-all; }
+  .preview-value { color: var(--green); font-size: 13px; word-break: break-all; flex: 1; }
+  .preview-filename-row { display: flex; gap: 10px; align-items: flex-start; }
+  .btn-copy {
+    flex-shrink: 0; padding: 4px 10px; font-size: 11px;
+    background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; cursor: pointer; white-space: nowrap;
+  }
+  .btn-copy:hover { background: var(--panel3); }
+
+  .queue-list { list-style: none; padding: 0; margin: 8px 0 0; display: flex; flex-direction: column; gap: 4px; }
+  .queue-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 10px; background: rgba(0,0,0,0.25); border: 1px solid var(--border); border-radius: 6px;
+  }
+  .queue-idx { color: var(--text3); font-size: 11px; min-width: 16px; }
+  .queue-name { flex: 1; font-size: 12px; color: var(--text); word-break: break-all; }
+  .btn-xs { padding: 2px 8px; font-size: 11px; }
 
   .tmdb-list { list-style: none; padding: 0; margin: 10px 0 0; display: flex; flex-direction: column; gap: 6px; }
   .tmdb-item {

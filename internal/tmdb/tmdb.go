@@ -4,6 +4,8 @@
 package tmdb
 
 import (
+	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -71,6 +73,61 @@ func decodeHTML(s string) string {
 		s = strings.ReplaceAll(s, k, v)
 	}
 	return s
+}
+
+// FetchByID récupère une fiche TMDB directement via l'API officielle par son ID
+// numérique. Nécessite une clé API TMDB. Retourne un Result unique.
+func FetchByID(id, apiKey string) (*Result, error) {
+	if id == "" || apiKey == "" {
+		return nil, fmt.Errorf("id ou clé TMDB manquants")
+	}
+	u := "https://api.themoviedb.org/3/movie/" + url.PathEscape(id) + "?language=fr&api_key=" + url.QueryEscape(apiKey)
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(u)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("TMDB HTTP %d", resp.StatusCode)
+	}
+	var body struct {
+		ID            int     `json:"id"`
+		Title         string  `json:"title"`
+		OriginalTitle string  `json:"original_title"`
+		ReleaseDate   string  `json:"release_date"`
+		Runtime       int     `json:"runtime"`
+		PosterPath    string  `json:"poster_path"`
+		VoteAverage   float64 `json:"vote_average"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return nil, err
+	}
+	if body.ID == 0 {
+		return nil, fmt.Errorf("TMDB ID %s introuvable", id)
+	}
+	year := ""
+	if len(body.ReleaseDate) >= 4 {
+		year = body.ReleaseDate[:4]
+	}
+	duree := ""
+	if body.Runtime > 0 {
+		duree = fmt.Sprintf("%dh%02dmin", body.Runtime/60, body.Runtime%60)
+	}
+	poster := ""
+	if body.PosterPath != "" {
+		poster = "https://image.tmdb.org/t/p/w500" + body.PosterPath
+	}
+	return &Result{
+		TmdbID:    strconv.Itoa(body.ID),
+		Note:      body.VoteAverage,
+		TitreFR:   body.Title,
+		AnneeFR:   year,
+		TitreVO:   body.OriginalTitle,
+		Duree:     duree,
+		URL:       "https://www.themoviedb.org/movie/" + strconv.Itoa(body.ID) + "?language=fr",
+		PosterURL: poster,
+	}, nil
 }
 
 // Search interroge l'index serveurperso et retourne les fiches TMDB matchées.

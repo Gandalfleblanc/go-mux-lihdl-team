@@ -132,13 +132,24 @@ type ExternalSub struct {
 	Order    int // position dans l'ordre final (plus petit = plus haut)
 }
 
+// ExternalAudio décrit un fichier audio externe ajouté au mux.
+type ExternalAudio struct {
+	Path     string // chemin du fichier audio (.ac3/.eac3/.dts/.aac/.flac/.mka…)
+	Name     string // nom de piste LiHDL (--track-name)
+	Language string // code iso 639-2 (fre, eng, …)
+	Default  bool
+	Forced   bool
+	Order    int // position dans l'ordre final (plus petit = plus haut)
+}
+
 // MuxParams regroupe toutes les instructions pour exécuter le mux.
 type MuxParams struct {
-	InputPath    string        // .mkv source
-	OutputPath   string        // .mkv cible (chemin complet)
-	Title        string        // titre global du conteneur (optionnel)
-	Tracks       []TrackSpec   // pistes internes du .mkv source (avec Order)
-	ExternalSubs []ExternalSub // subs externes à ajouter
+	InputPath      string          // .mkv source
+	OutputPath     string          // .mkv cible (chemin complet)
+	Title          string          // titre global du conteneur (optionnel)
+	Tracks         []TrackSpec     // pistes internes du .mkv source (avec Order)
+	ExternalAudios []ExternalAudio // audios externes à ajouter
+	ExternalSubs   []ExternalSub   // subs externes à ajouter
 }
 
 // MuxProgress est émis pendant le mux (0..100).
@@ -255,8 +266,13 @@ func buildArgs(p MuxParams) []string {
 		}
 		all = append(all, ordered{order: t.Order, fileID: 0, trkID: t.ID})
 	}
+	// External audios : fileID 1..N, external subs : fileID N+1..N+M
+	for i, a := range p.ExternalAudios {
+		all = append(all, ordered{order: a.Order, fileID: i + 1, trkID: 0})
+	}
+	nAud := len(p.ExternalAudios)
 	for i, s := range p.ExternalSubs {
-		all = append(all, ordered{order: s.Order, fileID: i + 1, trkID: 0})
+		all = append(all, ordered{order: s.Order, fileID: nAud + i + 1, trkID: 0})
 	}
 	if len(all) > 1 {
 		sort.SliceStable(all, func(i, j int) bool { return all[i].order < all[j].order })
@@ -318,7 +334,20 @@ func buildArgs(p MuxParams) []string {
 	}
 	args = append(args, p.InputPath)
 
-	// ---- Fichiers subs externes (fileID 1, 2, …, chacun avec 1 piste d'ID 0) ----
+	// ---- Fichiers audio externes (fileID 1..N) ----
+	for _, a := range p.ExternalAudios {
+		if a.Name != "" {
+			args = append(args, "--track-name", "0:"+a.Name)
+		}
+		if a.Language != "" {
+			args = append(args, "--language", "0:"+a.Language)
+		}
+		args = append(args, "--default-track-flag", "0:"+boolFlag(a.Default))
+		args = append(args, "--forced-display-flag", "0:"+boolFlag(a.Forced))
+		args = append(args, a.Path)
+	}
+
+	// ---- Fichiers subs externes (fileID N+1..N+M) ----
 	for _, s := range p.ExternalSubs {
 		if s.Name != "" {
 			args = append(args, "--track-name", "0:"+s.Name)

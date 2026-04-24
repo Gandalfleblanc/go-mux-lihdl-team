@@ -51,7 +51,8 @@ var SubtitleLabels = []string{
 	"FR VFQ Forced : SRT",
 	"FR VFQ Full : SRT",
 	"FR VFQ SDH : SRT",
-	"ENG VO : SRT",
+	"ENG Forced : SRT",
+	"ENG Full : SRT",
 	// PGS
 	"FR Forced : PGS",
 	"FR Full : PGS",
@@ -62,14 +63,15 @@ var SubtitleLabels = []string{
 	"FR VFQ Forced : PGS",
 	"FR VFQ Full : PGS",
 	"FR VFQ SDH : PGS",
-	"ENG VO : PGS",
+	"ENG Forced : PGS",
+	"ENG Full : PGS",
 }
 
 // Dropdowns pour la piste vidéo.
 var (
-	VideoQualities = []string{"HDLight", "WEBRip", "WEB", "WEB.Light"}
+	VideoQualities = []string{"HDLight", "WEBRip", "WEB", "WEB.Light", "Custom PSA"}
 	VideoEncoders  = []string{"GANDALF", "FilmZ", "Serveurperso", "Arcaldia", "Nox"}
-	VideoSources   = []string{"REMUX LiHDL", "REMUX CUSTOM LiHDL"}
+	VideoSources   = []string{"REMUX LiHDL", "REMUX CUSTOM LiHDL", "WEBRip"}
 	VideoTeams     = []string{"LiHDL"}
 )
 

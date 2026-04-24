@@ -58,6 +58,7 @@ export namespace main {
 	    output_path: string;
 	    title: string;
 	    tracks: mkvtool.TrackSpec[];
+	    external_audios: mkvtool.ExternalAudio[];
 	    external_subs: mkvtool.ExternalSub[];
 	
 	    static createFrom(source: any = {}) {
@@ -70,6 +71,7 @@ export namespace main {
 	        this.output_path = source["output_path"];
 	        this.title = source["title"];
 	        this.tracks = this.convertValues(source["tracks"], mkvtool.TrackSpec);
+	        this.external_audios = this.convertValues(source["external_audios"], mkvtool.ExternalAudio);
 	        this.external_subs = this.convertValues(source["external_subs"], mkvtool.ExternalSub);
 	    }
 	
@@ -105,11 +107,51 @@ export namespace main {
 	        this.message = source["message"];
 	    }
 	}
+	export class UpdateInfo {
+	    available: boolean;
+	    version: string;
+	    url: string;
+	    notes: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.available = source["available"];
+	        this.version = source["version"];
+	        this.url = source["url"];
+	        this.notes = source["notes"];
+	    }
+	}
 
 }
 
 export namespace mkvtool {
 	
+	export class ExternalAudio {
+	    Path: string;
+	    Name: string;
+	    Language: string;
+	    Default: boolean;
+	    Forced: boolean;
+	    Order: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExternalAudio(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Path = source["Path"];
+	        this.Name = source["Name"];
+	        this.Language = source["Language"];
+	        this.Default = source["Default"];
+	        this.Forced = source["Forced"];
+	        this.Order = source["Order"];
+	    }
+	}
 	export class ExternalSub {
 	    Path: string;
 	    Name: string;

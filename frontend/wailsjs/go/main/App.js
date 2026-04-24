@@ -14,6 +14,10 @@ export function CancelMux() {
   return window['go']['main']['App']['CancelMux']();
 }
 
+export function CheckUpdate() {
+  return window['go']['main']['App']['CheckUpdate']();
+}
+
 export function FileSize(arg1) {
   return window['go']['main']['App']['FileSize'](arg1);
 }
@@ -30,6 +34,10 @@ export function GetVersion() {
   return window['go']['main']['App']['GetVersion']();
 }
 
+export function InstallUpdate() {
+  return window['go']['main']['App']['InstallUpdate']();
+}
+
 export function LocateMkvmerge() {
   return window['go']['main']['App']['LocateMkvmerge']();
 }
@@ -38,12 +46,20 @@ export function Mux(arg1) {
   return window['go']['main']['App']['Mux'](arg1);
 }
 
+export function OpenFolder(arg1) {
+  return window['go']['main']['App']['OpenFolder'](arg1);
+}
+
 export function SaveConfig(arg1) {
   return window['go']['main']['App']['SaveConfig'](arg1);
 }
 
 export function SearchTmdb(arg1) {
   return window['go']['main']['App']['SearchTmdb'](arg1);
+}
+
+export function SelectAudioFiles() {
+  return window['go']['main']['App']['SelectAudioFiles']();
 }
 
 export function SelectMkvFile() {
