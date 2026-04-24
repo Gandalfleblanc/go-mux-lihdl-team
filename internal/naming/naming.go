@@ -29,6 +29,7 @@ var AudioLabels = []string{
 	"ENG VO : AC3 2.0",
 	"ENG VO : AC3 1.0",
 	"ENG VO : EAC3 5.1",
+	"ENG VO : EAC3 5.1 ATMOS",
 	"ENG VO : EAC3 2.0",
 	"JPN VO : AC3 5.1",
 	"JPN VO : AC3 2.0",
@@ -88,16 +89,17 @@ func IsCustomSource(source string) bool {
 }
 
 // LangFlag calcule le flag langue pour le nom de fichier final selon les
-// pistes audio sélectionnées. Règles :
-//   - 1 VFF seule                  → "VFF"
-//   - 1 VFQ seule                  → "VFQ"
-//   - 1 VO seule (ENG/JPN/ITA)     → "VO"
-//   - 1 VFF + 1 VO                 → "MULTi.VFF"
-//   - 1 VFF + 1 VFQ                → "MULTi.VF2"
-//   - 1 VFF + 1 VFQ + 1 VO         → "MULTi.VF2"
-//   - autre combinaison            → best-effort
-//
-// selectedLabels contient les libellés audio LiHDL retenus (cf. AudioLabels).
+// pistes audio sélectionnées. Règles (en ordre de priorité) :
+//   - multi-audio (≥2) avec une piste French (Canada)/VFQ → "MULTi.VF2"
+//   - 2+ variantes françaises (VFF+VFQ, etc.)             → "MULTi.VF2"
+//   - 1 VFF + 1 VO                                        → "MULTi.VFF"
+//   - 1 VFi + 1 VO                                        → "MULTi.VFi"
+//   - 1 VFF seule                                         → "VFF"
+//   - 1 VFQ seule                                         → "VFQ"
+//   - 1 VFi seule                                         → "VFi"
+//   - 1 VO seule (ENG/JPN/ITA)                            → "VO"
+//   - multi-audio sans tag FR clair                       → "MULTi.VFi"
+//   - sinon                                               → "VO"
 func LangFlag(selectedLabels []string) string {
 	hasVFF, hasVFQ, hasVFi, hasVO := false, false, false, false
 	for _, lbl := range selectedLabels {
@@ -122,13 +124,14 @@ func LangFlag(selectedLabels []string) string {
 	if hasVFi {
 		vfCount++
 	}
+	multi := len(selectedLabels) >= 2
 	switch {
+	case multi && hasVFQ:
+		return "MULTi.VF2"
 	case vfCount >= 2:
 		return "MULTi.VF2"
 	case hasVFF && hasVO:
 		return "MULTi.VFF"
-	case hasVFQ && hasVO:
-		return "MULTi.VFQ"
 	case hasVFi && hasVO:
 		return "MULTi.VFi"
 	case hasVFF:
@@ -139,6 +142,8 @@ func LangFlag(selectedLabels []string) string {
 		return "VFi"
 	case hasVO:
 		return "VO"
+	case multi:
+		return "MULTi.VFi"
 	}
 	return "VO"
 }

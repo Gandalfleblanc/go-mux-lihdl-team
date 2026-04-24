@@ -4,7 +4,7 @@
   import logo from './assets/images/logo.png';
   import {
     GetVersion, GetConfig, SaveConfig, GetLihdlOptions,
-    SelectMkvFile, SelectSubFiles, SelectAudioFiles, SelectOutputDir, LocateMkvmerge, OpenFolder,
+    SelectMkvFile, SelectSubFiles, SelectAudioFiles, SelectOutputDir, LocateMkvmerge, OpenFolder, SearchTmdbTV,
     AnalyzeMkv, SearchTmdb, TestTmdbKey, FileSize,
     Mux, CancelMux,
     CheckUpdate, InstallUpdate,
@@ -61,6 +61,7 @@
   const VIDEO_CODEC_OPTIONS = ['H264', 'x264', 'H265', 'x265', 'AV1'];
   let tmdbResults = [];
   let tmdbQuery = '';
+  let tmdbMode = 'movie'; // 'movie' | 'tv'
   let filenameCopied = false;
   let filenameCopiedTimer = null;
 
@@ -644,7 +645,9 @@
     tmdbSearching = true;
     tmdbResults = [];
     try {
-      const r = await SearchTmdb(tmdbQuery);
+      const r = tmdbMode === 'tv'
+        ? await SearchTmdbTV(tmdbQuery)
+        : await SearchTmdb(tmdbQuery);
       tmdbResults = r || [];
     } catch (e) {
       appendLog('❌ TMDB : ' + String(e));
@@ -1071,10 +1074,17 @@
     {:else if screen === 'cible'}
       <div class="card">
         <div class="section-title">Recherche TMDB</div>
+        <div class="lang-toggle" style:margin-bottom="8px">
+          <button class:active={tmdbMode === 'movie'} on:click={() => tmdbMode = 'movie'}>🎬 Film</button>
+          <button class:active={tmdbMode === 'tv'}    on:click={() => tmdbMode = 'tv'}>📺 Série</button>
+        </div>
         <div class="field-row">
-          <input type="text" bind:value={tmdbQuery} placeholder="Titre du film…" on:keydown={(e) => e.key === 'Enter' && searchTmdb()} />
+          <input type="text" bind:value={tmdbQuery} placeholder={tmdbMode === 'tv' ? 'Titre de série ou ID TMDB…' : 'Titre du film ou ID TMDB…'} on:keydown={(e) => e.key === 'Enter' && searchTmdb()} />
           <button class="btn-primary" on:click={searchTmdb} disabled={tmdbSearching}>{tmdbSearching ? '…' : 'Chercher'}</button>
         </div>
+        {#if tmdbMode === 'tv' && !config.tmdb_key}
+          <div class="field-hint">⚠ Clé API TMDB requise pour chercher des séries — Réglages.</div>
+        {/if}
         {#if tmdbResults.length > 0}
           <ul class="tmdb-list">
             {#each tmdbResults as r}

@@ -33,6 +33,8 @@ export function SaveConfig(arg1:config.Config):Promise<void>;
 
 export function SearchTmdb(arg1:string):Promise<Array<tmdb.Result>>;
 
+export function SearchTmdbTV(arg1:string):Promise<Array<tmdb.Result>>;
+
 export function SelectAudioFiles():Promise<Array<string>>;
 
 export function SelectMkvFile():Promise<string>;

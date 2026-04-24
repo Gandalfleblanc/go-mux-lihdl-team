@@ -58,6 +58,10 @@ export function SearchTmdb(arg1) {
   return window['go']['main']['App']['SearchTmdb'](arg1);
 }
 
+export function SearchTmdbTV(arg1) {
+  return window['go']['main']['App']['SearchTmdbTV'](arg1);
+}
+
 export function SelectAudioFiles() {
   return window['go']['main']['App']['SelectAudioFiles']();
 }

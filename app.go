@@ -86,7 +86,7 @@ func (a *App) startup(ctx context.Context) {
 
 // AppVersion est lue par le frontend (pill dans le header) et utilisée pour
 // comparer avec la dernière release GitHub lors du check de mise à jour.
-const AppVersion = "v3.0.1"
+const AppVersion = "v3.1.0"
 
 func (a *App) GetVersion() string { return AppVersion }
 
@@ -270,6 +270,25 @@ func (a *App) SearchTmdb(query string) ([]tmdb.Result, error) {
 		}
 	}
 	return tmdb.Search(c.ServeurPersoURL, query)
+}
+
+// SearchTmdbTV cherche une série TV via l'API TMDB (nom ou ID numérique).
+// Nécessite une clé API TMDB renseignée dans Réglages.
+func (a *App) SearchTmdbTV(query string) ([]tmdb.Result, error) {
+	c := config.Load()
+	if c.TmdbKey == "" {
+		return nil, errors.New("clé API TMDB requise pour chercher des séries (Réglages)")
+	}
+	q := strings.TrimSpace(query)
+	if q == "" {
+		return nil, nil
+	}
+	if isAllDigits(q) {
+		if r, err := tmdb.FetchTVByID(q, c.TmdbKey); err == nil && r != nil {
+			return []tmdb.Result{*r}, nil
+		}
+	}
+	return tmdb.SearchTV(q, c.TmdbKey)
 }
 
 func isAllDigits(s string) bool {

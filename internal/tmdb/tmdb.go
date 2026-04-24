@@ -130,6 +130,108 @@ func FetchByID(id, apiKey string) (*Result, error) {
 	}, nil
 }
 
+// SearchTV recherche des séries via l'API TMDB /3/search/tv (nécessite clé API).
+func SearchTV(query, apiKey string) ([]Result, error) {
+	if apiKey == "" {
+		return nil, fmt.Errorf("clé API TMDB requise pour la recherche série")
+	}
+	if strings.TrimSpace(query) == "" {
+		return nil, nil
+	}
+	u := "https://api.themoviedb.org/3/search/tv?language=fr&query=" + url.QueryEscape(query) + "&api_key=" + url.QueryEscape(apiKey)
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Get(u)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("TMDB HTTP %d", resp.StatusCode)
+	}
+	var body struct {
+		Results []struct {
+			ID           int     `json:"id"`
+			Name         string  `json:"name"`
+			OriginalName string  `json:"original_name"`
+			FirstAirDate string  `json:"first_air_date"`
+			PosterPath   string  `json:"poster_path"`
+			VoteAverage  float64 `json:"vote_average"`
+		} `json:"results"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return nil, err
+	}
+	out := make([]Result, 0, len(body.Results))
+	for _, r := range body.Results {
+		year := ""
+		if len(r.FirstAirDate) >= 4 {
+			year = r.FirstAirDate[:4]
+		}
+		poster := ""
+		if r.PosterPath != "" {
+			poster = "https://image.tmdb.org/t/p/w500" + r.PosterPath
+		}
+		out = append(out, Result{
+			TmdbID:    strconv.Itoa(r.ID),
+			Note:      r.VoteAverage,
+			TitreFR:   r.Name,
+			AnneeFR:   year,
+			TitreVO:   r.OriginalName,
+			URL:       "https://www.themoviedb.org/tv/" + strconv.Itoa(r.ID) + "?language=fr",
+			PosterURL: poster,
+		})
+	}
+	return out, nil
+}
+
+// FetchTVByID récupère une fiche TMDB série directement via l'API par ID.
+func FetchTVByID(id, apiKey string) (*Result, error) {
+	if id == "" || apiKey == "" {
+		return nil, fmt.Errorf("id ou clé TMDB manquants")
+	}
+	u := "https://api.themoviedb.org/3/tv/" + url.PathEscape(id) + "?language=fr&api_key=" + url.QueryEscape(apiKey)
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(u)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("TMDB HTTP %d", resp.StatusCode)
+	}
+	var body struct {
+		ID           int     `json:"id"`
+		Name         string  `json:"name"`
+		OriginalName string  `json:"original_name"`
+		FirstAirDate string  `json:"first_air_date"`
+		PosterPath   string  `json:"poster_path"`
+		VoteAverage  float64 `json:"vote_average"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return nil, err
+	}
+	if body.ID == 0 {
+		return nil, fmt.Errorf("TMDB série ID %s introuvable", id)
+	}
+	year := ""
+	if len(body.FirstAirDate) >= 4 {
+		year = body.FirstAirDate[:4]
+	}
+	poster := ""
+	if body.PosterPath != "" {
+		poster = "https://image.tmdb.org/t/p/w500" + body.PosterPath
+	}
+	return &Result{
+		TmdbID:    strconv.Itoa(body.ID),
+		Note:      body.VoteAverage,
+		TitreFR:   body.Name,
+		AnneeFR:   year,
+		TitreVO:   body.OriginalName,
+		URL:       "https://www.themoviedb.org/tv/" + strconv.Itoa(body.ID) + "?language=fr",
+		PosterURL: poster,
+	}, nil
+}
+
 // Search interroge l'index serveurperso et retourne les fiches TMDB matchées.
 // baseURL par défaut = https://www.serveurperso.com/stats/search.php
 func Search(baseURL, query string) ([]Result, error) {
