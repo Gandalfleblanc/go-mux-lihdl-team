@@ -12,6 +12,27 @@
   import { EventsOn } from '../wailsjs/runtime/runtime.js';
 
   let screen = 'source';
+  let muxMode = 'lihdl';   // 'lihdl' | 'psa'
+
+  function switchMuxMode(mode) {
+    if (muxMode === mode) return;
+    muxMode = mode;
+    if (mode === 'psa') {
+      // Défauts mode PSA : série WEBRip Team GANDALF
+      videoChoice.team = 'GANDALF';
+      if (!target.source || target.source === 'HDLight') target.source = 'WEBRip';
+      if (sourcePath && !target.episode) {
+        target.episode = detectEpisode(sourcePath.split('/').pop()) || 'S01E01';
+      }
+    } else {
+      // Défauts mode LiHDL : film/release Team LiHDL
+      videoChoice.team = 'LiHDL';
+      if (target.source === 'WEBRip') target.source = 'HDLight';
+      // Pas de SUPPLY en mode LiHDL — on nettoie.
+      clearSecondary();
+    }
+    appendLog('Mode mux : ' + mode.toUpperCase());
+  }
   let appVersion = '';
   let mkvmergePath = '';
 
@@ -161,39 +182,61 @@
 
   function inferAudioLabel(track) {
     const lang = String(track.language || '').toLowerCase();
+    const name = String(track.track_name || '').toLowerCase();
     const codecId = String(track.codec_id || track.codec || '').toUpperCase();
     const ch = Number(track.audio_channels || 0);
+    // Codec
     let codec = 'AC3';
     if (codecId.includes('E-AC') || codecId.includes('EAC3')) codec = 'EAC3';
     else if (codecId.includes('AC-3') || codecId.includes('AC3')) codec = 'AC3';
     else if (codecId.includes('DTS')) codec = 'DTS';
     else if (codecId.includes('TRUEHD')) codec = 'TrueHD';
+    // Channels
     let chans = '5.1';
     if (ch === 1) chans = '1.0';
     else if (ch === 2) chans = '2.0';
     else if (ch === 6) chans = '5.1';
     else if (ch === 8) chans = '7.1';
+    // Atmos (souvent dans track_name pour ENG VO EAC3)
+    const isAtmos = /atmos/i.test(name);
+    // Préfixe langue + variante (FR uniquement) via track_name
     let prefix = 'ENG VO';
-    if (lang === 'fre' || lang === 'fra' || lang === 'fr') prefix = 'FR VFF';
+    if (lang === 'fre' || lang === 'fra' || lang === 'fr') {
+      if (/audio.?descrip|\bad\b|vmal|malvoyant/i.test(name)) prefix = 'FR AD';
+      else if (/canad|québ|quebec|vfq/i.test(name))           prefix = 'FR VFQ';
+      else if (/internat|vfi/i.test(name))                     prefix = 'FR VFi';
+      else                                                     prefix = 'FR VFF';
+    }
     else if (lang === 'eng' || lang === 'en') prefix = 'ENG VO';
     else if (lang === 'jpn' || lang === 'ja') prefix = 'JPN VO';
     else if (lang === 'ita' || lang === 'it') prefix = 'ITA VO';
     else if (lang === 'spa' || lang === 'es') prefix = 'SPA VO';
     else if (lang === 'ger' || lang === 'de') prefix = 'GER VO';
-    return `${prefix} : ${codec} ${chans}`;
+    else if (lang === 'chi' || lang === 'zho' || lang === 'zh') prefix = 'CHI VO';
+    else if (lang === 'rus' || lang === 'ru') prefix = 'RUS VO';
+    // ATMOS uniquement quand combinaison existante dans AudioLabels (ENG VO EAC3 5.1)
+    const atmosSuffix = (isAtmos && prefix === 'ENG VO' && codec === 'EAC3' && chans === '5.1') ? ' ATMOS' : '';
+    return `${prefix} : ${codec} ${chans}${atmosSuffix}`;
   }
 
   function inferSubLabel(track, indexAmongSameLang) {
     const lang = String(track.language || '').toLowerCase();
+    const name = String(track.track_name || '').toLowerCase();
     const codecId = String(track.codec_id || track.codec || '').toUpperCase();
     const forced = !!track.forced_track;
     let fmt = 'SRT';
     if (codecId.includes('PGS') || codecId.includes('HDMV')) fmt = 'PGS';
+    // Préfixe langue + variante FR via track_name
     let prefix = 'ENG';
-    if (lang === 'fre' || lang === 'fra' || lang === 'fr') prefix = 'FR';
-    else if (lang === 'eng' || lang === 'en') prefix = 'ENG';
+    if (lang === 'fre' || lang === 'fra' || lang === 'fr') {
+      if (/canad|québ|quebec|vfq/i.test(name)) prefix = 'FR VFQ';
+      else if (/vff|france/i.test(name))       prefix = 'FR VFF';
+      else                                      prefix = 'FR';
+    } else if (lang === 'eng' || lang === 'en') prefix = 'ENG';
+    // Type
     let kind;
-    if (forced) kind = 'Forced';
+    if (forced || /forc(é|e)/i.test(name)) kind = 'Forced';
+    else if (/sdh|sourds|hearing/i.test(name)) kind = 'SDH';
     else if (indexAmongSameLang === 0) kind = 'Full';
     else kind = 'SDH';
     return `${prefix} ${kind} : ${fmt}`;
@@ -1075,6 +1118,11 @@
     </div>
   </header>
 
+  <nav class="mux-mode-tabs">
+    <button class:active={muxMode === 'lihdl'} on:click={() => switchMuxMode('lihdl')}>⚡ MUX LiHDL</button>
+    <button class:active={muxMode === 'psa'}   on:click={() => switchMuxMode('psa')}>🎬 MUX PSA</button>
+  </nav>
+
   <nav class="tabs">
     <button class:active={screen === 'source'}   on:click={() => screen = 'source'}>Source</button>
     <button class:active={screen === 'cible'}    on:click={() => screen = 'cible'}>Cible</button>
@@ -1083,12 +1131,12 @@
 
   <section class="content">
     {#if screen === 'source'}
-      <!-- Drop zone PSA (vidéo principale) -->
+      <!-- Drop zone source primaire -->
       <div class="card drop-target" style:--wails-drop-target="drop">
         <div class="drop-icon">🎬</div>
-        <div class="drop-label">Source PSA <span class="drop-hint">(vidéo gardée)</span></div>
+        <div class="drop-label">{muxMode === 'psa' ? 'Source PSA' : 'Source LiHDL'} <span class="drop-hint">(vidéo gardée)</span></div>
         {#if !sourcePath}
-          <div class="drop-title">Glisse un fichier .mkv PSA ici</div>
+          <div class="drop-title">Glisse un fichier .mkv ici</div>
           <div class="drop-sub">ou plusieurs pour batcher · puis audios/subs externes</div>
           <button class="btn-primary" on:click={pickMkvDialog}>Choisir un fichier</button>
         {:else}
@@ -1098,7 +1146,8 @@
         {/if}
       </div>
 
-      <!-- Drop zone SUPPLY/FW (audios + subs à récupérer) -->
+      <!-- Drop zone SUPPLY/FW (audios + subs à récupérer) — mode PSA uniquement -->
+      {#if muxMode === 'psa'}
       <div class="card">
         <div class="drop-icon">🔊</div>
         <div class="drop-label">Source SUPPLY / FW <span class="drop-hint">(audios + subs à récupérer)</span></div>
@@ -1118,6 +1167,7 @@
           {/if}
         {/if}
       </div>
+      {/if}
 
       <!-- Queue batch -->
       {#if queue.length > 0}
@@ -1627,6 +1677,26 @@
     color: var(--text); border-color: var(--border-strong);
   }
   .gear { font-size: 14px; }
+
+  .mux-mode-tabs {
+    display: flex; gap: 8px; padding: 8px 20px;
+    background: var(--bg-tint);
+    border-bottom: 1px solid var(--border);
+  }
+  .mux-mode-tabs button {
+    flex: 1; padding: 10px 18px; border: 1px solid var(--border); border-radius: 8px;
+    background: rgba(0,0,0,0.25); color: var(--text2);
+    font: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
+    letter-spacing: 0.3px;
+    transition: all 150ms;
+  }
+  .mux-mode-tabs button:hover { color: var(--text); border-color: var(--border-hover); }
+  .mux-mode-tabs button.active {
+    color: var(--red-hot);
+    border-color: var(--red);
+    background: linear-gradient(180deg, rgba(255,40,80,0.15), rgba(255,40,80,0.05));
+    box-shadow: 0 0 0 1px var(--red), inset 0 1px 0 rgba(255,255,255,0.05);
+  }
 
   .tabs {
     display: flex; gap: 2px; padding: 0 20px;
