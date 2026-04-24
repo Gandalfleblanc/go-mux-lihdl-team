@@ -55,6 +55,7 @@
     'REMUX', 'REMUX CUSTOM',
     'WEB-DL CUSTOM', 'WEB CUSTOM',
     'WEB', 'WEB-DL', 'WEBRip',
+    'WEBRip PSA Audio SUPPLY', 'WEBRIP PSA Audio FW',
     'COMPLETE BluRay',
   ];
   const VIDEO_CODEC_OPTIONS = ['H264', 'x264', 'H265', 'x265', 'AV1'];
