@@ -4,10 +4,11 @@
   import logo from './assets/images/logo.png';
   import {
     GetVersion, GetConfig, SaveConfig, GetLihdlOptions,
-    SelectMkvFile, SelectSubFiles, SelectAudioFiles, SelectOutputDir, LocateMkvmerge, OpenFolder, SearchTmdbTV, SearchTmdbMovie, AnalyzeMkvSecondary, MoveToTrash, CheckVFQ, LookupHydrackerURL, TestHydrackerKey, TestUnfrKey, OpenURL,
+    SelectMkvFile, SelectSubFiles, SelectAudioFiles, SelectOutputDir, LocateMkvmerge, OpenFolder, SearchTmdbTV, SearchTmdbMovie, AnalyzeMkvSecondary, MoveToTrash, LookupHydrackerURL, TestHydrackerKey, TestUnfrKey, OpenURL, GetMkvBasicInfo,
     AnalyzeMkv, SearchTmdb, TestTmdbKey, FileSize,
     Mux, CancelMux,
     CheckUpdate, InstallUpdate,
+    ListAudioTracksForSync, MuxAudioSync, DetectAudioOffset,
   } from '../wailsjs/go/main/App.js';
   import { EventsOn } from '../wailsjs/runtime/runtime.js';
 
@@ -88,14 +89,16 @@
   // Détecte le type de source depuis le nom de fichier selon les normes LiHDL.
   // Priorité : REMUX CUSTOM > WEB-DL CUSTOM > WEB CUSTOM > REMUX > WEB-DL > WEBRip > WEB > COMPLETE BluRay
   // "COMPLETE BluRay" exige les deux mots présents — sinon pas d'auto-detect.
+  // WEB-DL accepte aussi la forme dotée "WEB.DL" (fréquente dans les filenames).
   function detectSourceType(filename) {
     const n = String(filename || '').toUpperCase();
     const hasCustom = /\bCUSTOM\b/.test(n);
+    const hasWebDL  = /\bWEB[-.]DL\b/.test(n);
     if (/\bREMUX\b/.test(n) && hasCustom)  return 'REMUX CUSTOM';
-    if (/\bWEB-DL\b/.test(n) && hasCustom) return 'WEB-DL CUSTOM';
-    if (/\bWEB\b/.test(n) && hasCustom && !/\bWEB-DL\b/.test(n)) return 'WEB CUSTOM';
+    if (hasWebDL && hasCustom)             return 'WEB-DL CUSTOM';
+    if (/\bWEB\b/.test(n) && hasCustom && !hasWebDL) return 'WEB CUSTOM';
     if (/\bREMUX\b/.test(n))   return 'REMUX';
-    if (/\bWEB-DL\b/.test(n))  return 'WEB-DL';
+    if (hasWebDL)              return 'WEB-DL';
     if (/\bWEBRIP\b/.test(n))  return 'WEBRip';
     if (/\bWEB\b/.test(n))     return 'WEB';
     if (/\bCOMPLETE\b/.test(n) && /\bBLURAY\b/.test(n)) return 'COMPLETE BluRay';
@@ -160,11 +163,11 @@
   const VIDEO_CODEC_OPTIONS = ['H264', 'x264', 'H265', 'x265', 'AV1'];
   let tmdbResults = [];
   let tmdbQuery = '';
+  let tmdbIdQuery = ''; // recherche par ID TMDB (séparée du nom)
   let tmdbMode = 'movie'; // 'movie' | 'tv'
-  // VFQ par défaut OFF (= la majorité des films n'ont pas de doublage québécois).
-  // Auto-check via CheckVFQ après pick TMDB peut le passer ON.
-  // L'utilisateur peut toggler manuellement à tout moment.
-  let vfqAvailable = false;
+  // Toggle VFi par défaut ON : les pistes audio FR sont labellisées FR VFi.
+  // Si l'utilisateur décoche → FR VFF.
+  let useVFi = true;
   // Règle universelle pour les subs : un label "FR Forced" ou "FR VFF Forced"
   // a default=true ET forced=true. Toutes les autres subs ont les 2 à false.
   function isForcedFRLabel(label) {
@@ -195,11 +198,53 @@
 
   // Swap immédiat des labels audio FR VFF ↔ FR VFQ quand le toggle change.
   // Couvre aussi externalAudios + secondarySelected pour mode PSA.
-  // Swap immédiat FR VFF ↔ FR VFi selon vfqAvailable (sans vérif TMDB).
-  function applyVFQAvailableSwapOnly() {
+  // Si TMDB indique que le film est originellement français (original_language=fr),
+  // toutes les pistes audio FR (VFF/VFi/VFQ) sont en réalité la VO du film → FR VOF.
+  function applyVOFSwap() {
+    const swap = (lbl) => {
+      if (/^FR (VFF|VFi|VFQ) /.test(lbl || '')) return lbl.replace(/^FR (VFF|VFi|VFQ) /, 'FR VOF ');
+      return lbl;
+    };
+    tracks = tracks.map(t => t.type === 'audio'
+      ? { ...t, label: swap(t.label || '') }
+      : t);
+    externalAudios = externalAudios.map(a => ({ ...a, label: swap(a.label || '') }));
+    secondarySelected = secondarySelected.map(t => t.type === 'audio'
+      ? { ...t, label: swap(t.label || '') }
+      : t);
+    appendLog('🇫🇷 Film français (TMDB) → labels FR VFF/VFi/VFQ convertis en FR VOF');
+
+    // Sur un film français : 2+ pistes FR + une en 2.0 → c'est l'audiodescription (FR AD).
+    // Le flag malvoyant + l'insertion de WiTH.AD dans le nom de fichier sont gérés en aval.
+    const toAD = (lbl) => /^FR (VFF|VFQ|VFi|VOF) /.test(lbl || '') && / 2\.0/.test(lbl || '')
+      ? lbl.replace(/^FR (VFF|VFQ|VFi|VOF) /, 'FR AD ')
+      : lbl;
+    const frInternal = tracks.filter(t => t.type === 'audio' && /^FR /.test(t.label || ''));
+    if (frInternal.length >= 2) {
+      tracks = tracks.map(t => t.type === 'audio' ? { ...t, label: toAD(t.label || '') } : t);
+    }
+    const frSecondary = secondarySelected.filter(t => t.type === 'audio' && /^FR /.test(t.label || ''));
+    if (frSecondary.length >= 2) {
+      secondarySelected = secondarySelected.map(t => t.type === 'audio' ? { ...t, label: toAD(t.label || '') } : t);
+    }
+    if (externalAudios.filter(a => /^FR /.test(a.label || '')).length >= 2) {
+      externalAudios = externalAudios.map(a => ({ ...a, label: toAD(a.label || '') }));
+    }
+    if (tracks.some(t => /^FR AD /.test(t.label || '')) ||
+        secondarySelected.some(t => /^FR AD /.test(t.label || '')) ||
+        externalAudios.some(a => /^FR AD /.test(a.label || ''))) {
+      appendLog('🦮 2ᵉ piste FR 2.0 détectée → labellisée FR AD (audiodescription)');
+    }
+  }
+
+  // Toggle VFi : applique le swap immédiat sur toutes les pistes audio FR.
+  //   useVFi = true  → tout FR VFF devient FR VFi
+  //   useVFi = false → tout FR VFi devient FR VFF
+  // Note : ne touche PAS les FR VOF (films originellement français).
+  function applyVFiSwap() {
     const swapVFFtoVFi = (lbl) => /^FR VFF\b/.test(lbl) ? lbl.replace(/^FR VFF/, 'FR VFi') : lbl;
     const swapVFitoVFF = (lbl) => /^FR VFi\b/.test(lbl) ? lbl.replace(/^FR VFi/, 'FR VFF') : lbl;
-    const fn = vfqAvailable ? swapVFitoVFF : swapVFFtoVFi;
+    const fn = useVFi ? swapVFFtoVFi : swapVFitoVFF;
     tracks = tracks.map(t => t.type === 'audio'
       ? { ...t, label: fn(t.label || '') }
       : t);
@@ -207,27 +252,48 @@
     secondarySelected = secondarySelected.map(t => t.type === 'audio'
       ? { ...t, label: fn(t.label || '') }
       : t);
-    appendLog(vfqAvailable ? '↻ FR VFi → FR VFF' : '↻ FR VFF → FR VFi');
-  }
-
-  // Handler du toggle : applique le swap, puis si l'utilisateur a coché ON,
-  // vérifie via TMDB CheckVFQ. Si TMDB dit pas de trad fr-CA → décoche auto.
-  async function applyVFQAvailableSwap() {
-    applyVFQAvailableSwapOnly();
-    if (vfqAvailable && lastTmdbResult && lastTmdbResult.tmdb_id && config.tmdb_key) {
-      try {
-        const has = await CheckVFQ(lastTmdbResult.tmdb_id);
-        if (!has) {
-          vfqAvailable = false;
-          appendLog('⚠ TMDB : pas de trad fr-CA → toggle décoché automatiquement');
-          applyVFQAvailableSwapOnly();
-        }
-      } catch (_) { /* silencieux */ }
-    }
+    appendLog(useVFi ? '↻ FR VFF → FR VFi' : '↻ FR VFi → FR VFF');
   }
 
   // URL fiche Hydracker (résolue via API à partir de l'ID TMDB ; vide si pas de clé)
   let hydrackerURL = '';
+
+  // Source de référence (3ᵉ barre, optionnelle) : pour vérifier compatibilité
+  // durée + FPS avant de récupérer les sous-titres dessus.
+  let referencePath = '';
+  let sourceMkvInfo = null;     // { duration_seconds, framerate, width, height }
+  let referenceMkvInfo = null;
+  let showReferenceBar = false;
+
+  function formatDuration(secs) {
+    if (!secs || secs <= 0) return '?';
+    const s = Math.round(secs);
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const r = s % 60;
+    return h > 0 ? `${h}h${String(m).padStart(2,'0')}m${String(r).padStart(2,'0')}s` : `${m}m${String(r).padStart(2,'0')}s`;
+  }
+
+  async function pickReferenceDialog() {
+    const p = await SelectMkvFile();
+    if (!p) return;
+    referencePath = p;
+    referenceMkvInfo = await GetMkvBasicInfo(p).catch(() => null);
+    appendLog('🔍 Référence : ' + p.split('/').pop() + (referenceMkvInfo ? ` (${formatDuration(referenceMkvInfo.duration_seconds)}, ${referenceMkvInfo.framerate} fps)` : ''));
+  }
+
+  function clearReference() {
+    referencePath = '';
+    referenceMkvInfo = null;
+  }
+
+  // Compare 2 MkvBasicInfo et retourne {durationOK, fpsOK} (tolérance 1s + 0.05fps)
+  function checkCompat(a, b) {
+    if (!a || !b) return { durationOK: null, fpsOK: null };
+    const durationOK = Math.abs((a.duration_seconds || 0) - (b.duration_seconds || 0)) <= 2;
+    const fpsOK = Math.abs((a.framerate || 0) - (b.framerate || 0)) <= 0.05;
+    return { durationOK, fpsOK };
+  }
 
   // Réinitialiser tous les états de la session courante (source, secondaire,
   // pistes, sous-titres externes, TMDB, status). Ne supprime pas les fichiers.
@@ -243,10 +309,15 @@
     lastTmdbResult = null;
     tmdbResults = [];
     tmdbQuery = '';
+    tmdbIdQuery = '';
     target = { ...target, title: '', year: '', episode: '', flagOverride: 'auto' };
     filenameOverride = false;
     manualFilename = '';
-    vfqAvailable = false;
+    useVFi = true;
+    referencePath = '';
+    sourceMkvInfo = null;
+    referenceMkvInfo = null;
+    showReferenceBar = false;
     hydrackerURL = '';
     autoMuxStatus = '';
     if (autoMuxStatusTimer) { clearTimeout(autoMuxStatusTimer); autoMuxStatusTimer = null; }
@@ -336,6 +407,102 @@
   let muxing = false;
   let muxPercent = 0;
   let logLines = [];
+
+  // ─── Onglet Synchro Audios ────────────────────────────────────────────────
+  // État indépendant du workflow LiHDL/PSA. Charge un .mkv, affiche ses
+  // pistes audio, permet de désigner une piste de référence et d'appliquer
+  // un décalage (ms) aux autres. Le mux résultant copie l'audio bit-à-bit
+  // (mkvmerge --sync TID:offset, pas de réencodage).
+  let syncSourcePath = '';
+  let syncAudioTracks = [];   // [{id, codec, language, name, channels}]
+  let syncRefId = null;       // track ID désigné comme référence
+  let syncOffsets = {};       // { trackId: delayMs }
+  let syncRunning = false;
+  let syncPercent = 0;
+  let syncDetecting = {};   // { trackId: true } pendant la détection
+  let syncResults = {};     // { trackId: {offset_ms, confidence, drift_ms, method, notes} }
+
+  async function syncDetectOne(trackId) {
+    if (!syncSourcePath || syncRefId === null || trackId === syncRefId) return;
+    syncDetecting = { ...syncDetecting, [trackId]: true };
+    try {
+      const r = await DetectAudioOffset(syncSourcePath, syncRefId, trackId);
+      syncResults = { ...syncResults, [trackId]: r };
+      syncOffsets = { ...syncOffsets, [trackId]: r.offset_ms };
+    } catch (e) {
+      appendLog('❌ Détection piste ' + trackId + ' : ' + String(e));
+    } finally {
+      syncDetecting = { ...syncDetecting, [trackId]: false };
+    }
+  }
+
+  async function syncDetectAll() {
+    for (const t of syncAudioTracks) {
+      if (t.id === syncRefId) continue;
+      await syncDetectOne(t.id);
+    }
+  }
+
+  async function syncPickFile() {
+    try {
+      const p = await SelectMkvFile();
+      if (!p) return;
+      syncSourcePath = p;
+      syncAudioTracks = [];
+      syncRefId = null;
+      syncOffsets = {};
+      const list = await ListAudioTracksForSync(p);
+      syncAudioTracks = list || [];
+      // sélectionne par défaut la 1ère piste comme référence
+      if (syncAudioTracks.length > 0) syncRefId = syncAudioTracks[0].id;
+      appendLog(`📂 Synchro : ${syncAudioTracks.length} piste(s) audio chargée(s)`);
+    } catch (e) {
+      appendLog('❌ Synchro : ' + String(e));
+    }
+  }
+
+  function syncSetRef(id) {
+    syncRefId = id;
+    // Une piste référence n'a jamais d'offset (c'est elle qu'on cale les autres dessus).
+    if (syncOffsets[id]) { delete syncOffsets[id]; syncOffsets = { ...syncOffsets }; }
+  }
+
+  function syncDefaultOutput() {
+    if (!syncSourcePath) return '';
+    const i = syncSourcePath.lastIndexOf('.');
+    const base = i > 0 ? syncSourcePath.slice(0, i) : syncSourcePath;
+    return base + '.sync.mkv';
+  }
+
+  async function syncApply() {
+    if (!syncSourcePath || syncRefId === null) return;
+    const offsets = [];
+    for (const t of syncAudioTracks) {
+      if (t.id === syncRefId) continue;
+      const d = parseInt(syncOffsets[t.id] || 0, 10);
+      const r = syncResults[t.id];
+      const tempo = (r && r.tempo_factor && r.tempo_factor !== 1.0) ? r.tempo_factor : 1.0;
+      // On envoie la piste si offset OU tempo nécessite une action.
+      if ((Number.isFinite(d) && d !== 0) || tempo !== 1.0) {
+        offsets.push({ track_id: t.id, delay_ms: d || 0, tempo_factor: tempo });
+      }
+    }
+    if (offsets.length === 0) {
+      appendLog('ℹ Aucun décalage saisi — rien à recaler');
+      return;
+    }
+    syncRunning = true;
+    syncPercent = 0;
+    try {
+      await MuxAudioSync({
+        input_path: syncSourcePath,
+        output_path: syncDefaultOutput(),
+        offsets,
+      });
+    } catch (e) {
+      appendLog('❌ Recalage : ' + String(e));
+    }
+  }
   let logEl;
 
   // Subs externes ajoutés (srt/sup/ass/ssa/sub/idx). Chaque entrée a le même
@@ -356,15 +523,25 @@
       String(track.mi_title || ''),
       String(track.mi_service_kind_name || ''),
     ].join(' ').toLowerCase();
+    // Codec : on combine track_name + mediainfo Format + mkvmerge codec_id.
+    // Si le track_name dit explicitement "E-AC3" ou "EAC3", on lui fait confiance
+    // (cas où mediainfo voit AC-3 mais le release est tagué E-AC3).
+    const miFormat = String(track.mi_format || '').toUpperCase();
     const codecId = String(track.codec_id || track.codec || '').toUpperCase();
+    const trackNameUpper = String(track.track_name || track.mi_title || '').toUpperCase();
+    const codecSource = trackNameUpper + ' ' + miFormat + ' ' + codecId;
     const miFormatProfile = String(track.mi_format_profile || '').toUpperCase();
-    const ch = Number(track.audio_channels || 0);
-    // Codec
+    // Channels : priorité mediainfo, fallback mkvmerge.
+    const miCh = parseInt(track.mi_channels, 10);
+    const mkvCh = Number(track.audio_channels || 0);
+    const ch = (isFinite(miCh) && miCh > 0) ? miCh : mkvCh;
     let codec = 'AC3';
-    if (codecId.includes('E-AC') || codecId.includes('EAC3')) codec = 'EAC3';
-    else if (codecId.includes('AC-3') || codecId.includes('AC3')) codec = 'AC3';
-    else if (codecId.includes('DTS')) codec = 'DTS';
-    else if (codecId.includes('TRUEHD')) codec = 'TrueHD';
+    if (codecSource.includes('E-AC') || codecSource.includes('EAC3')) codec = 'EAC3';
+    else if (codecSource.includes('AC-3') || codecSource.includes('AC3')) codec = 'AC3';
+    else if (codecSource.includes('DTS')) codec = 'DTS';
+    else if (codecSource.includes('TRUEHD') || codecSource.includes('MLP FBA')) codec = 'TrueHD';
+    else if (codecSource.includes('FLAC')) codec = 'FLAC';
+    else if (codecSource.includes('OPUS')) codec = 'Opus';
     // Channels
     let chans = '5.1';
     if (ch === 1) chans = '1.0';
@@ -400,6 +577,7 @@
     else if (lang === 'ger' || lang === 'de') prefix = 'GER VO';
     else if (lang === 'chi' || lang === 'zho' || lang === 'zh') prefix = 'CHI VO';
     else if (lang === 'rus' || lang === 'ru') prefix = 'RUS VO';
+    else if (lang === 'dut' || lang === 'nld' || lang === 'nl') prefix = 'DUT VO';
     // ATMOS : suffixe ajouté pour toute langue dès lors qu'on est en EAC3 5.1
     // ET que mediainfo signale JOC (Atmos) ou que track_name contient "atmos".
     const atmosSuffix = (isAtmos && codec === 'EAC3' && chans === '5.1') ? ' ATMOS' : '';
@@ -511,6 +689,7 @@
         else if (/^GER /.test(label))            language = 'ger';
         else if (/^CHI /.test(label))            language = 'zho';
         else if (/^RUS /.test(label))            language = 'rus';
+        else if (/^DUT /.test(label))            language = 'dut';
         else                                      language = t.language || 'und';
         defaultFlag = false; // 1ère piste FR sera default plus tard
       } else {
@@ -550,6 +729,17 @@
     // Marque la 1ère piste audio FR comme default.
     const firstFr = secondarySelected.find(t => t.type === 'audio' && t.language === 'fre');
     if (firstFr) firstFr.default = true;
+
+    // Heuristique : si on a 2+ pistes FR audio et qu'une est en 2.0,
+    // on la marque automatiquement comme AD (FR AD : <codec> 2.0).
+    const frAudios = secondarySelected.filter(t => t.type === 'audio' && /^FR /.test(t.label || ''));
+    if (frAudios.length >= 2) {
+      for (const t of frAudios) {
+        if (/ 2\.0/.test(t.label || '') && !/^FR AD/.test(t.label)) {
+          t.label = t.label.replace(/^FR (VFF|VFQ|VFi|VOF) /, 'FR AD ');
+        }
+      }
+    }
 
     // Norme LiHDL : la piste FR Forced est placée EN PREMIER parmi les subs.
     const subEntries = secondarySelected.filter(t => t.type === 'subtitles');
@@ -606,6 +796,11 @@
     if (lbl.startsWith('ENG')) return 'eng';
     if (lbl.startsWith('JPN')) return 'jpn';
     if (lbl.startsWith('ITA')) return 'ita';
+    if (lbl.startsWith('SPA')) return 'spa';
+    if (lbl.startsWith('GER')) return 'ger';
+    if (lbl.startsWith('CHI')) return 'zho';
+    if (lbl.startsWith('RUS')) return 'rus';
+    if (lbl.startsWith('DUT')) return 'dut';
     return '';
   }
 
@@ -662,20 +857,34 @@
   // --- Calcul client-side du flag langue et du filename (évite les Promises
   //     de Wails en rendu synchrone qui cassaient les tabs). ---
 
+  // Vrai si le mux contient au moins un sous-titre FR (interne kept, externe ou secondaire).
+  function hasFrSub() {
+    const re = /^FR\b/;
+    if (tracks.some(t => t.type === 'subtitles' && t.keep && re.test(t.label || ''))) return true;
+    if (externalSubs.some(s => re.test(s.label || ''))) return true;
+    if (secondarySelected.some(t => t.type === 'subtitles' && t.keep && re.test(t.label || ''))) return true;
+    return false;
+  }
+
   function langFlagClient(labels) {
-    let hasVFF = false, hasVFQ = false, hasVFi = false, hasVO = false;
+    let hasVFF = false, hasVFQ = false, hasVFi = false, hasVOF = false, hasVO = false;
     for (const l of labels) {
       if (!l) continue;
-      if (/\bVFF\b/.test(l)) hasVFF = true;
+      if (/\bVOF\b/.test(l)) hasVOF = true;       // film original français
+      else if (/\bVFF\b/.test(l)) hasVFF = true;
       else if (/\bVFQ\b/.test(l)) hasVFQ = true;
       else if (/\bVFi\b/.test(l)) hasVFi = true;
       else if (/\bVO\b/.test(l)) hasVO = true;
     }
+    // Film français → flag dédié
+    if (hasVOF) return hasVO ? 'MULTi.FRENCH' : 'FRENCH.VOF';
     const vfCount = (hasVFF?1:0) + (hasVFQ?1:0) + (hasVFi?1:0);
-    if (vfCount >= 2) return 'MULTi.VF2';
-    if (hasVFF && hasVO) return 'MULTi.VFF';
-    if (hasVFQ && hasVO) return 'MULTi.VFQ';
-    if (hasVFi && hasVO) return 'MULTi.VFi';
+    // Si pas de sous-titre FR : préfixe DUAL au lieu de MULTi (norme LiHDL).
+    const prefix = hasFrSub() ? 'MULTi' : 'DUAL';
+    if (vfCount >= 2) return prefix + '.VF2';
+    if (hasVFF && hasVO) return prefix + '.VFF';
+    if (hasVFQ && hasVO) return prefix + '.VFQ';
+    if (hasVFi && hasVO) return prefix + '.VFi';
     if (hasVFF) return 'VFF';
     if (hasVFQ) return 'VFQ';
     if (hasVFi) return 'VFi';
@@ -723,10 +932,11 @@
   // Normalise un nom de team selon les conventions LiHDL :
   //   - "lihdl" (n'importe quelle casse) → "LiHDL" exactement
   //   - autres teams → MAJUSCULES sauf les "i" qui restent minuscules
-  // Ex : "psa" → "PSA", "supply" → "SUPPLY", "Alkaline" → "ALKALiNE"
+  // Ex : "psa"→"PSA", "4Fr"→"4FR", "Alkaline"→"ALKALiNE", "lihdl"→"LiHDL"
   function normalizeLihdl(s) {
     if (!s) return s;
-    return String(s).replace(/\b[A-Za-z][A-Za-z0-9]*\b/g, (word) => {
+    return String(s).replace(/\b\w+\b/g, (word) => {
+      if (!/[A-Za-z]/.test(word)) return word;       // chiffres seuls (années) → laisse
       if (/^lihdl$/i.test(word)) return 'LiHDL';
       return word.toUpperCase().replace(/I/g, 'i');
     });
@@ -749,8 +959,8 @@
   }
 
   // Construit le nom de fichier selon les normes LiHDL.
-  // Format : {Title}.{Year}.{Flag}.{SourceQuality}.{Audio}[.WiTH.AD].{VideoCodec}-{Team}.mkv
-  // Exemple : The.Target.2014.VFF.HDLight.1080p.AC3.5.1.WiTH.AD.H264-LiHDL.mkv
+  // Format : {Title}.{Year}.{Flag}[.WiTH.AD].{Resolution}.{Source}.{Audio}.{VideoCodec}-{Team}.mkv
+  // Exemple : Le.Comte.De.Monte.Cristo.2024.FRENCH.VOF.WiTH.AD.1080p.WEBRip.AC3.5.1.H264-LiHDL.mkv
   // Choisit le titre (FR ou VO) à utiliser pour le nom de fichier selon target.lang.
   // Auto = FR si le nom de source ressemble à FRENCH/VOF, sinon VO (étranger).
   // Si pas de TMDB, fallback sur target.title (saisi manuellement).
@@ -784,11 +994,12 @@
       ? target.flagOverride
       : langFlagClient(keptAudioLabels());
     if (flag) parts.push(flag);
+    // WiTH.AD inséré entre le flag (VOF/FRENCH.VOF/etc.) et la résolution.
+    if (hasAudioDescription()) { parts.push('WiTH'); parts.push('AD'); }
     if (target.resolution) parts.push(target.resolution);
     if (target.source) parts.push(target.source);
     const ac = firstAudioCodecForFilename();
     if (ac) parts.push(ac);
-    if (hasAudioDescription()) { parts.push('WiTH'); parts.push('AD'); }
     const vc = videoCodecLihdl();
     if (vc) parts.push(vc);
     let name = parts.filter(Boolean).join('.');
@@ -798,14 +1009,14 @@
   }
 
   function videoTrackNameClient() {
-    // Format LiHDL : "HDLight By GANDALF (Source COMPLETE BluRay Alkaline)"
-    // Seul le sourceTeam (release team extrait du nom source) est normalisé,
-    // les autres composants viennent des dropdowns avec leur casing canonique.
+    // Format LiHDL : "HDLight LiHDL By GANDALF (Source COMPLETE BluRay Alkaline)"
+    // Team de l'encodeur (LiHDL/GANDALF) insérée entre la qualité et "By <encoder>".
     const sourceTeam = normalizeLihdl(videoChoice.sourceTeam || '');
     const src = sourceTeam
       ? `${videoChoice.sourceType} ${sourceTeam}`
       : videoChoice.sourceType;
-    return `${videoChoice.quality} By ${videoChoice.encoder} (Source ${src})`;
+    const team = videoChoice.team || '';
+    return `${videoChoice.quality}${team ? ' ' + team : ''} By ${videoChoice.encoder} (Source ${src})`;
   }
 
   // Réactivité : on référence chaque dépendance pour que Svelte détecte
@@ -868,10 +1079,22 @@
       const detected = detectSourceType(filename);
       if (detected) {
         videoChoice.sourceType = detected;
-        appendLog(`✓ Source détectée : ${detected}`);
+        // Map sourceType → target.source pour le nom de fichier final :
+        //   BluRay/REMUX/REMUX CUSTOM/COMPLETE BluRay → HDLight
+        //   WEB/WEB-DL/WEBRip/WEB CUSTOM/WEB-DL CUSTOM → WEBRip
+        const u = detected.toUpperCase();
+        if (u.includes('WEB')) {
+          target.source = 'WEBRip';
+        } else if (u.includes('REMUX') || u.includes('BLURAY')) {
+          target.source = 'HDLight';
+        }
+        appendLog(`✓ Source détectée : ${detected} → target.source = ${target.source}`);
       }
     }
     AnalyzeMkv(path); // fire-and-forget, résultat via event 'analyze:result'
+    // Récupère duration + FPS pour la card de comparaison (mode LiHDL)
+    sourceMkvInfo = null;
+    GetMkvBasicInfo(path).then(info => { sourceMkvInfo = info; }).catch(() => {});
   }
 
   function finalizeAnalyze(rawTracks) {
@@ -894,10 +1117,12 @@
         order: i * 10,
         // Champs mediainfo (peuvent être absents) — utilisés par automateLihdl
         mi_title: t.mi_title || '',
+        mi_format: t.mi_format || '',
         mi_format_profile: t.mi_format_profile || '',
         mi_format_commercial: t.mi_format_commercial || '',
         mi_format_commercial_if_any: t.mi_format_commercial_if_any || '',
         mi_format_features: t.mi_format_features || '',
+        mi_channels: t.mi_channels || '',
         mi_service_kind: t.mi_service_kind || '',
         mi_service_kind_name: t.mi_service_kind_name || '',
       };
@@ -1107,21 +1332,27 @@
 
   // Versions des suggest adaptées à la structure aplatie.
   function suggestAudioLabelFlat(t) {
-    const lang = (t.lang || '').toLowerCase();
-    const codec = ((t.codec || '') + ' ' + (t.codecId || '')).toUpperCase();
-    const ch = t.channels || 2;
-    const ac3 = codec.includes('AC-3') && !codec.includes('E-AC');
-    const eac3 = codec.includes('E-AC-3') || codec.includes('EAC3');
-    const c = eac3 ? 'EAC3' : (ac3 ? 'AC3' : '');
-    const chStr = ch >= 6 ? '5.1' : (ch >= 2 ? '2.0' : '1.0');
-    if (!c) return '';
-    let prefix = '';
-    if (lang === 'fre' || lang === 'fra' || lang === 'fr') prefix = 'FR VFF';
-    else if (lang === 'eng' || lang === 'en') prefix = 'ENG VO';
-    else if (lang === 'jpn' || lang === 'ja') prefix = 'JPN VO';
-    else if (lang === 'ita' || lang === 'it') prefix = 'ITA VO';
-    if (!prefix) return '';
-    const candidate = `${prefix} : ${c} ${chStr}`;
+    // Adapte la track interne (camelCase) au format attendu par inferAudioLabel
+    // (snake_case + champs mediainfo) — comme ça le label tient compte de
+    // mediainfo dès le chargement, pas seulement à automate.
+    const raw = {
+      language: t.lang,
+      track_name: t.name,
+      audio_channels: t.channels,
+      codec_id: t.codecId,
+      codec: t.codec,
+      forced_track: t.forced,
+      mi_title: t.mi_title,
+      mi_format: t.mi_format,
+      mi_format_profile: t.mi_format_profile,
+      mi_format_commercial: t.mi_format_commercial,
+      mi_format_commercial_if_any: t.mi_format_commercial_if_any,
+      mi_format_features: t.mi_format_features,
+      mi_channels: t.mi_channels,
+      mi_service_kind: t.mi_service_kind,
+      mi_service_kind_name: t.mi_service_kind_name,
+    };
+    const candidate = inferAudioLabel(raw);
     return options.audio_labels.includes(candidate) ? candidate : '';
   }
   function suggestSubLabelFlat(t) {
@@ -1235,17 +1466,10 @@
         target.year  = picked.annee_fr || '';
         const suffix = r.length > 1 ? ` (${r.length} résultats — top auto)` : '';
         appendLog('✓ TMDB' + (forceTV ? ' (série)' : '') + ' : ' + target.title + suffix);
-        // Mode LiHDL : vérifie automatiquement la présence d'une trad fr-CA
-        // sur TMDB (signal fort d'un VFQ existant). L'utilisateur peut
-        // toujours toggle manuellement après.
-        if (muxMode === 'lihdl' && picked.tmdb_id && config.tmdb_key) {
-          try {
-            const has = await CheckVFQ(picked.tmdb_id);
-            vfqAvailable = !!has;
-            appendLog(`📺 VFQ via TMDB : ${has ? 'trad fr-CA complète trouvée → VFF' : 'pas de trad fr-CA → VFi (par défaut)'}`);
-          } catch (_) { vfqAvailable = false; }
-        } else if (muxMode === 'lihdl') {
-          vfqAvailable = false;
+        // Mode LiHDL : si film français → VOF, sinon applique le toggle VFi.
+        if (muxMode === 'lihdl') {
+          if (picked && picked.original_language === 'fr') applyVOFSwap();
+          else applyVFiSwap();
         }
         // Mode LiHDL : résolution Hydracker en arrière-plan (cache 12h)
         hydrackerURL = '';
@@ -1268,6 +1492,41 @@
       }
     } catch (e) {
       appendLog('⚠ TMDB : ' + String(e));
+    } finally {
+      tmdbSearching = false;
+    }
+  }
+
+  // Recherche TMDB par ID numérique uniquement (champ séparé).
+  async function searchTmdbById() {
+    const id = String(tmdbIdQuery || '').trim();
+    if (!id || !/^\d+$/.test(id)) {
+      appendLog('⚠ ID TMDB doit être numérique');
+      return;
+    }
+    tmdbSearching = true;
+    tmdbResults = [];
+    try {
+      const r = tmdbMode === 'tv'
+        ? await SearchTmdbTV(id)
+        : (muxMode === 'lihdl' && config.tmdb_key)
+          ? await SearchTmdbMovie(id)
+          : await SearchTmdb(id);
+      tmdbResults = r || [];
+      if (r && r.length >= 1) {
+        lastTmdbResult = r[0];
+        target.title = composeTmdbTitle(r[0]);
+        target.year  = r[0].annee_fr || '';
+        appendLog(`✓ TMDB (par ID ${id}) : ${target.title}`);
+        if (muxMode === 'lihdl') {
+          if (r[0].original_language === 'fr') applyVOFSwap();
+          else applyVFiSwap();
+        }
+      } else {
+        appendLog(`ℹ Aucun résultat pour ID ${id}`);
+      }
+    } catch (e) {
+      appendLog('❌ TMDB par ID : ' + String(e));
     } finally {
       tmdbSearching = false;
     }
@@ -1416,6 +1675,8 @@
 
     // Construit le nom de piste vidéo LiHDL et rattache aux tracks.
     const videoName = videoTrackNameClient();
+    // Helper : true si le label commence par "FR AD" → flag malvoyant
+    const isAD = (lbl) => /^FR AD\b/.test(lbl || '');
     const specs = tracks.map(t => ({
       ID: t.id,
       Type: t.type,
@@ -1424,6 +1685,7 @@
       Language: t.type === 'video' ? '' : mapLangCode(t.label || ''),
       Default: !!t.default,
       Forced: !!t.forced,
+      VisualImpaired: t.type === 'audio' && isAD(t.label),
       Order: t.order ?? 0,
     }));
     const extSubs = externalSubs.map(s => ({
@@ -1440,6 +1702,7 @@
       Language: mapLangCode(a.label || ''),
       Default: !!a.default,
       Forced: !!a.forced,
+      VisualImpaired: isAD(a.label),
       Order: a.order ?? 0,
     }));
 
@@ -1450,6 +1713,7 @@
       Language: t.language || mapLangCode(t.label || ''),
       Default: !!t.default,
       Forced: !!t.forced,
+      VisualImpaired: isAD(t.label),
       Order: t.order ?? 0,
     }));
     const secSubs = secondarySelected.filter(t => t.type === 'subtitles' && t.keep).map(t => ({
@@ -1507,10 +1771,12 @@
         codec: t.codec,
         forced_track: t.forced,
         mi_title: t.mi_title,
+        mi_format: t.mi_format,
         mi_format_profile: t.mi_format_profile,
         mi_format_commercial: t.mi_format_commercial,
         mi_format_commercial_if_any: t.mi_format_commercial_if_any,
         mi_format_features: t.mi_format_features,
+        mi_channels: t.mi_channels,
         mi_service_kind: t.mi_service_kind,
         mi_service_kind_name: t.mi_service_kind_name,
       };
@@ -1534,16 +1800,33 @@
         };
       }
     });
-    // Si pas de VFQ (= un seul doublage français existe) → swap FR VFF en FR VFi
-    if (vfqAvailable === false) {
+    // Si le film est originellement français (TMDB original_language = "fr"),
+    // les pistes FR ne sont pas des doublages → flag "FRENCH.VOF" + label "FR VOF".
+    const isOrigFrench = lastTmdbResult && lastTmdbResult.original_language === 'fr';
+    if (isOrigFrench) {
       tracks = tracks.map(t => {
         if (t.type !== 'audio') return t;
-        if (/^FR VFF\b/.test(t.label || '')) {
-          return { ...t, label: t.label.replace(/^FR VFF/, 'FR VFi') };
+        if (/^FR (VFF|VFi|VFQ) /.test(t.label || '')) {
+          return { ...t, label: t.label.replace(/^FR (VFF|VFi|VFQ) /, 'FR VOF ') };
         }
         return t;
       });
-      appendLog('↻ Pas de VFQ → labels FR VFF convertis en FR VFi');
+      appendLog('🇫🇷 Film français (TMDB) → labels FR VOF');
+    } else {
+      // Toggle VFi : applique le swap FR VFF ↔ FR VFi selon le state useVFi.
+      applyVFiSwap();
+    }
+
+    // Heuristique : 2+ pistes FR audio + une en 2.0 → AD (audiodescription)
+    const frAudios = tracks.filter(t => t.type === 'audio' && /^FR /.test(t.label || ''));
+    if (frAudios.length >= 2) {
+      tracks = tracks.map(t => {
+        if (t.type !== 'audio') return t;
+        if (/^FR (VFF|VFQ|VFi|VOF) /.test(t.label || '') && / 2\.0/.test(t.label)) {
+          return { ...t, label: t.label.replace(/^FR (VFF|VFQ|VFi|VOF) /, 'FR AD ') };
+        }
+        return t;
+      });
     }
 
     // Subs externes : applique aussi la règle FR Forced → keep + default + forced
@@ -1634,6 +1917,8 @@
         appendLog('✓ Mux terminé — ' + queue.length + ' en file. Clique "Charger le suivant" pour continuer.');
       }
     });
+    EventsOn('audiosync:progress', (p) => { syncPercent = p.Percent || p.percent || 0; });
+    EventsOn('audiosync:done', () => { syncRunning = false; syncPercent = 0; });
     EventsOn('file:dropped', (path) => { openMkv(path); });
     EventsOn('subs:dropped', (paths) => { addExternalSubs(paths || []); });
     EventsOn('audios:dropped', (paths) => { addExternalAudios(paths || []); });
@@ -1726,6 +2011,7 @@
   <nav class="tabs">
     <button class:active={screen === 'source'}   on:click={() => screen = 'source'}>Source</button>
     <button class:active={screen === 'cible'}    on:click={() => screen = 'cible'}>Cible</button>
+    <button class:active={screen === 'sync'}     on:click={() => screen = 'sync'}>Synchro Audios</button>
     <button class:active={screen === 'reglages'} on:click={() => screen = 'reglages'}>Réglages</button>
   </nav>
 
@@ -1786,21 +2072,56 @@
                 <span class="source-hint">(SRT/PGS/ASS · optionnel)</span>
               </div>
               {#if externalSubs.length > 0}
-                <div class="source-meta">{externalSubs.length} sous-titre(s) chargé(s)</div>
-                {#each externalSubs as s}
-                  <div class="source-filename mono">• {basename(s.path)}</div>
-                {/each}
+                <div class="source-filename mono">
+                  {externalSubs.length} fichier(s) : {basename(externalSubs[0].path)}{externalSubs.length > 1 ? ` +${externalSubs.length - 1} autre(s)` : ''}
+                </div>
               {:else}
                 <div class="source-empty">— Aucun sous-titre chargé —</div>
               {/if}
             </div>
-            <div style:display="flex" style:flex-direction="column" style:gap="6px" style:flex-shrink="0">
-              <button class="btn-primary" on:click={pickSubsDialog}>+ Ajouter</button>
+            <div class="source-row-actions">
+              <button class="btn-primary" on:click={pickSubsDialog}>
+                {externalSubs.length > 0 ? '+ Ajouter' : 'Choisir des fichiers'}
+              </button>
               {#if externalSubs.length > 0}
-                <button class="btn-ghost" on:click={() => externalSubs = []}>Vider</button>
+                <button class="btn-icon" on:click={() => externalSubs = []} title="Vider la liste">✕</button>
               {/if}
             </div>
           </div>
+
+          <!-- Ligne ③ Source de référence (vérif durée+FPS, optionnelle) -->
+          {#if showReferenceBar}
+            {@const compat = checkCompat(sourceMkvInfo, referenceMkvInfo)}
+            <div class="source-row secondary">
+              <div class="source-info">
+                <div class="source-label">
+                  <span class="source-num">③</span>
+                  Source de référence
+                  <span class="source-hint">(vérif compatibilité durée + FPS)</span>
+                </div>
+                {#if referencePath}
+                  <div class="source-filename mono">{basename(referencePath)}</div>
+                  {#if referenceMkvInfo && sourceMkvInfo}
+                    <div class="compat-grid">
+                      <span>Durée : {formatDuration(sourceMkvInfo.duration_seconds)} vs {formatDuration(referenceMkvInfo.duration_seconds)} <span class:compat-ok={compat.durationOK} class:compat-bad={compat.durationOK === false}>{compat.durationOK ? '✓' : '✗'}</span></span>
+                      <span>FPS : {sourceMkvInfo.framerate || '?'} vs {referenceMkvInfo.framerate || '?'} <span class:compat-ok={compat.fpsOK} class:compat-bad={compat.fpsOK === false}>{compat.fpsOK ? '✓' : '✗'}</span></span>
+                      <span>VFQ : <span class:compat-ok={referenceMkvInfo.has_vfq_audio} class:compat-bad={!referenceMkvInfo.has_vfq_audio}>{referenceMkvInfo.has_vfq_audio ? '✓ ' + (referenceMkvInfo.vfq_track_info || 'piste détectée') : '✗ aucune piste FR Canada'}</span></span>
+                    </div>
+                  {/if}
+                {:else}
+                  <div class="source-empty">— Aucun fichier de référence —</div>
+                {/if}
+              </div>
+              <div class="source-row-actions">
+                <button class="btn-primary" on:click={pickReferenceDialog}>
+                  {referencePath ? 'Changer' : 'Choisir un fichier'}
+                </button>
+                <button class="btn-icon" on:click={() => { clearReference(); showReferenceBar = false; }} title="Retirer la source de référence">✕</button>
+              </div>
+            </div>
+          {:else}
+            <button class="source-row-placeholder" on:click={() => { showReferenceBar = true; }}>+ Ajouter source de référence (vérif durée / FPS)</button>
+          {/if}
         {/if}
       </div>
 
@@ -1822,9 +2143,9 @@
             </div>
           {/if}
           <label class="vfq-toggle" style:margin-top="8px">
-            <input type="checkbox" bind:checked={vfqAvailable} on:change={applyVFQAvailableSwap} />
-            <span class:vfq-yes={vfqAvailable} class:vfq-no={!vfqAvailable}>
-              {vfqAvailable ? '✓ Doublage québécois disponible (FR → VFF)' : '✗ Pas de VFQ — FR sera labellisé VFi'}
+            <input type="checkbox" bind:checked={useVFi} on:change={applyVFiSwap} />
+            <span class:vfq-yes={useVFi} class:vfq-no={!useVFi}>
+              {useVFi ? '✓ FR VFi (doublage international)' : '☐ FR VFF (doublage France métropolitaine)'}
             </span>
             {#if lastTmdbResult && lastTmdbResult.tmdb_id}
               <button class="vfq-link" type="button" on:click={() => OpenURL(`https://www.themoviedb.org/movie/${lastTmdbResult.tmdb_id}/translations`)}>vérifier sur TMDB ↗</button>
@@ -2080,8 +2401,12 @@
           <button class:active={tmdbMode === 'tv'}    on:click={() => tmdbMode = 'tv'}>📺 Série</button>
         </div>
         <div class="field-row">
-          <input type="text" bind:value={tmdbQuery} placeholder={tmdbMode === 'tv' ? 'Titre de série ou ID TMDB…' : 'Titre du film ou ID TMDB…'} on:keydown={(e) => e.key === 'Enter' && searchTmdb()} />
-          <button class="btn-primary" on:click={searchTmdb} disabled={tmdbSearching}>{tmdbSearching ? '…' : 'Chercher'}</button>
+          <input type="text" bind:value={tmdbQuery} placeholder={tmdbMode === 'tv' ? 'Titre de série…' : 'Titre du film…'} on:keydown={(e) => e.key === 'Enter' && searchTmdb()} />
+          <button class="btn-primary" on:click={searchTmdb} disabled={tmdbSearching}>{tmdbSearching ? '…' : 'Chercher par titre'}</button>
+        </div>
+        <div class="field-row" style:margin-top="6px">
+          <input type="text" bind:value={tmdbIdQuery} placeholder="ID TMDB numérique (ex: 12345)…" inputmode="numeric" pattern="[0-9]*" on:keydown={(e) => e.key === 'Enter' && searchTmdbById()} />
+          <button class="btn-primary" on:click={searchTmdbById} disabled={tmdbSearching}>{tmdbSearching ? '…' : 'Chercher par ID'}</button>
         </div>
         {#if tmdbMode === 'tv' && !config.tmdb_key}
           <div class="field-hint">⚠ Clé API TMDB requise pour chercher des séries — Réglages.</div>
@@ -2105,13 +2430,10 @@
               </div>
               {#if muxMode === 'lihdl'}
                 <label class="vfq-toggle">
-                  <input type="checkbox" bind:checked={vfqAvailable} />
-                  <span class:vfq-yes={vfqAvailable} class:vfq-no={!vfqAvailable}>
-                    {vfqAvailable ? '✓ Doublage québécois disponible (FR → VFF)' : '✗ Pas de VFQ — FR sera labellisé VFi'}
+                  <input type="checkbox" bind:checked={useVFi} on:change={applyVFiSwap} />
+                  <span class:vfq-yes={useVFi} class:vfq-no={!useVFi}>
+                    {useVFi ? '✓ FR VFi (doublage international)' : '☐ FR VFF (doublage France métropolitaine)'}
                   </span>
-                  {#if lastTmdbResult.tmdb_id}
-                    <button class="vfq-link" type="button" on:click|preventDefault|stopPropagation={() => OpenURL(`https://www.themoviedb.org/movie/${lastTmdbResult.tmdb_id}/translations`)}>vérifier sur TMDB ↗</button>
-                  {/if}
                 </label>
               {/if}
               {#if lastTmdbResult.overview}
@@ -2253,6 +2575,135 @@
           <span class="mono">{muxPercent}%</span>
         {:else}
           <button class="btn-primary" on:click={doMux} disabled={!sourcePath || !effectiveFilename}>Muxer</button>
+        {/if}
+      </div>
+
+    {:else if screen === 'sync'}
+      <div class="card">
+        <div class="section-title">🔊 Synchro des Pistes Audios</div>
+        <p class="hint">
+          Charge un .mkv contenant plusieurs pistes audio (ex : VFF + VFQ).
+          Choisis la piste de <strong>référence</strong> et indique pour chaque autre
+          piste son décalage en ms (positif = retarder, négatif = avancer).
+          L'audio est copié <strong>bit-à-bit</strong> via <code>mkvmerge --sync</code> —
+          aucun réencodage, AC3/EAC3 préservés.
+        </p>
+
+        <div class="field">
+          <label>Fichier .mkv</label>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <button class="btn-secondary" on:click={syncPickFile}>
+              {syncSourcePath ? 'Changer' : 'Choisir un fichier'}
+            </button>
+            {#if syncSourcePath}
+              <span class="mono" style="opacity:.8; font-size:.85em;">{syncSourcePath}</span>
+            {/if}
+          </div>
+        </div>
+
+        {#if syncAudioTracks.length > 0}
+          <div class="section-title" style="margin-top:14px;">Pistes audio</div>
+          <table class="tracks-table">
+            <thead>
+              <tr>
+                <th style="width:60px;">Réf</th>
+                <th style="width:50px;">ID</th>
+                <th>Codec</th>
+                <th>Langue</th>
+                <th>Nom</th>
+                <th style="width:70px;">Canaux</th>
+                <th style="width:140px;">Décalage (ms)</th>
+                <th style="width:200px;">Détection auto</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each syncAudioTracks as t (t.id)}
+                <tr class:ref={t.id === syncRefId}>
+                  <td>
+                    <input type="radio" name="syncRef" value={t.id}
+                           checked={t.id === syncRefId}
+                           on:change={() => syncSetRef(t.id)} />
+                  </td>
+                  <td class="mono">{t.id}</td>
+                  <td class="mono">{t.codec || ''}</td>
+                  <td class="mono">{t.language || ''}</td>
+                  <td>{t.name || ''}</td>
+                  <td class="mono">{t.channels || ''}</td>
+                  <td>
+                    {#if t.id === syncRefId}
+                      <span style="opacity:.5;">— référence —</span>
+                    {:else}
+                      <input type="number" step="1"
+                             placeholder="0"
+                             bind:value={syncOffsets[t.id]}
+                             style="width:110px;" />
+                    {/if}
+                  </td>
+                  <td>
+                    {#if t.id === syncRefId}
+                      <span style="opacity:.4;">—</span>
+                    {:else if syncDetecting[t.id]}
+                      <span style="opacity:.7;">⏳ analyse…</span>
+                    {:else}
+                      <button class="btn-secondary"
+                              on:click={() => syncDetectOne(t.id)}
+                              disabled={!syncSourcePath}>🎯 Détecter</button>
+                      {#if syncResults[t.id]}
+                        {@const r = syncResults[t.id]}
+                        <div style="font-size:.78em; opacity:.85; margin-top:4px;">
+                          conf {r.confidence.toFixed(2)}
+                          {#if r.drift_ms > 0} · drift {r.drift_ms} ms{/if}
+                        </div>
+                        {#if r.method === 'drift_linear'}
+                          <div style="margin-top:4px; padding:4px 6px; background:#5a3a00; color:#ffd166; border-radius:4px; font-size:.78em;">
+                            ⚠️ FPS différent — resample atempo {r.tempo_factor.toFixed(6)} ({((r.tempo_factor - 1) * 100).toFixed(3)}%) sera appliqué au mux (1 génération AC3/EAC3 perdue).
+                          </div>
+                        {:else if r.method === 'drift_unstable'}
+                          <div style="margin-top:4px; padding:4px 6px; background:#5a1f1f; color:#ffb3b3; border-radius:4px; font-size:.78em;">
+                            ⚠️ Drift instable — recalage non fiable, vérifier manuellement.
+                          </div>
+                        {:else if r.method === 'low_confidence'}
+                          <div style="margin-top:4px; padding:4px 6px; background:#3a3a3a; color:#bbb; border-radius:4px; font-size:.78em;">
+                            ⚠️ Corrélation faible — résultat peu fiable.
+                          </div>
+                        {/if}
+                      {/if}
+                    {/if}
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+
+          <p class="hint" style="margin-top:14px; opacity:.75;">
+            🎯 « Détecter » mesure l'offset par cross-correlation (extraction PCM mono
+            8 kHz via ffmpeg, ~3 min en début de film + vérif drift à 85% sur films
+            &gt;20 min). « Appliquer » mux un nouveau .mkv en copiant l'audio bit-à-bit
+            (AC3/EAC3 préservés).
+          </p>
+
+          <div class="actions-row" style="gap:10px;">
+            <button class="btn-secondary"
+                    on:click={syncDetectAll}
+                    disabled={!syncSourcePath || syncRefId === null}>
+              🎯 Détecter toutes les pistes
+            </button>
+            {#if syncRunning}
+              <div class="progress-bar"><div class="progress-fill" style:width="{syncPercent}%"></div></div>
+              <span class="mono">{syncPercent}%</span>
+            {:else}
+              <button class="btn-primary"
+                      on:click={syncApply}
+                      disabled={!syncSourcePath || syncRefId === null}>
+                ✅ Appliquer le recalage
+              </button>
+              {#if syncSourcePath}
+                <span class="mono" style="opacity:.7; font-size:.85em;">
+                  → {syncDefaultOutput()}
+                </span>
+              {/if}
+            {/if}
+          </div>
         {/if}
       </div>
 
@@ -2597,27 +3048,89 @@
   .drop-label { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
   .drop-hint { color: var(--text2); text-transform: none; letter-spacing: 0; }
 
-  /* Card unifiée Sources (PSA + SUPPLY dans une même fenêtre) */
-  .sources-card .section-title { margin-bottom: 12px; }
+  /* Card unifiée Sources — design harmonisé moderne */
+  .sources-card { padding: 18px 18px 18px 18px; }
+  .sources-card .section-title { margin-bottom: 14px; font-size: 13px; letter-spacing: 1px; }
+
   .source-row {
-    display: flex; align-items: center; gap: 14px;
-    padding: 12px 14px;
-    background: rgba(0,0,0,0.25);
+    display: grid;
+    grid-template-columns: 1fr 200px;
+    align-items: center;
+    gap: 16px;
+    padding: 14px 18px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.18));
     border: 1px solid var(--border);
-    border-radius: 8px;
-    margin-bottom: 8px;
+    border-radius: 10px;
+    margin-bottom: 10px;
+    height: 90px;
+    box-sizing: border-box;
+    transition: all 150ms;
   }
+  .source-row:hover { border-color: var(--border-hover); background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(0,0,0,0.2)); }
   .source-row:last-child { margin-bottom: 0; }
   .source-row.secondary { border-left: 3px solid rgba(50,130,200,0.55); }
-  .source-row .btn-primary { white-space: nowrap; flex-shrink: 0; }
-  .source-info { flex: 1; min-width: 0; }
-  .source-label { font-size: 12px; color: var(--text2); font-weight: 600; }
-  .source-num { color: var(--red-hot); font-weight: 700; margin-right: 6px; }
-  .source-row.secondary .source-num { color: rgb(120,170,220); }
-  .source-hint { color: var(--text3); font-weight: 400; margin-left: 4px; font-size: 11px; }
-  .source-filename { font-size: 13px; color: var(--green); margin-top: 4px; word-break: break-all; }
-  .source-empty { font-size: 12px; color: var(--text3); margin-top: 4px; font-style: italic; }
-  .source-meta { font-size: 11px; color: var(--text3); margin-top: 2px; }
+
+  .source-info { overflow: hidden; min-width: 0; }
+  .source-label {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 12px; color: var(--text2); font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .source-num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px; border-radius: 50%;
+    background: rgba(230,57,70,0.15); color: var(--red-hot);
+    font-size: 13px; font-weight: 700; flex-shrink: 0;
+  }
+  .source-row.secondary .source-num { background: rgba(50,130,200,0.15); color: rgb(120,170,220); }
+  .source-hint { color: var(--text3); font-weight: 400; font-size: 11px; text-transform: none; letter-spacing: 0; }
+
+  .source-filename {
+    font-size: 13px; color: var(--green); margin-top: 4px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    font-family: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+  }
+  .source-empty {
+    font-size: 12px; color: var(--text3); margin-top: 4px; font-style: italic;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .source-meta {
+    font-size: 11px; color: var(--text3); margin-top: 4px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+
+  .source-row-actions {
+    display: flex; flex-direction: row; gap: 6px; flex-shrink: 0;
+    align-items: center; justify-content: flex-end;
+  }
+  .source-row-actions .btn-primary {
+    flex: 1; min-width: 0; max-width: 170px; white-space: nowrap;
+    padding: 9px 12px; font-size: 12px;
+  }
+  .source-row-actions .btn-icon {
+    width: 36px; height: 36px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.3); border: 1px solid var(--border);
+    border-radius: 6px; color: var(--text3);
+    font-size: 14px; cursor: pointer; transition: all 150ms;
+  }
+  .source-row-actions .btn-icon:hover {
+    color: rgb(255,150,150); border-color: rgba(239,68,68,0.5); background: rgba(239,68,68,0.12);
+  }
+
+  .compat-ok { color: rgb(80,220,120); font-weight: 700; margin-left: 4px; }
+  .compat-bad { color: rgb(255,120,120); font-weight: 700; margin-left: 4px; }
+
+  /* Bouton "+ Ajouter source de référence" placeholder, taille d'une source-row */
+  .source-row-placeholder {
+    display: flex; align-items: center; justify-content: center;
+    height: 56px; padding: 0;
+    background: transparent;
+    border: 1px dashed var(--border); border-radius: 10px;
+    color: var(--text3); font-size: 12px; cursor: pointer;
+    transition: all 150ms; width: 100%;
+  }
+  .source-row-placeholder:hover { color: var(--text); border-color: var(--border-hover); background: rgba(255,255,255,0.02); }
   .automate-bar { padding: 14px 16px; border-color: rgba(230,57,70,0.4); background: linear-gradient(180deg, rgba(230,57,70,0.06), rgba(0,0,0,0.2)); position: relative; }
   .btn-reset-corner {
     position: absolute; top: 10px; right: 10px;

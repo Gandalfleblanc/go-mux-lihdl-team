@@ -52,9 +52,14 @@ type Track struct {
 	ServiceKind              string `json:"ServiceKind"`              // ex: "VI", "HI"
 	ServiceKindNames         string `json:"ServiceKind/String"`       // texte du service kind
 	StreamSize               string `json:"StreamSize"`               // octets
+	BitRate                  string `json:"BitRate"`                  // bps (string)
+	BitRateMode              string `json:"BitRate_Mode"`             // "CBR" / "VBR"
 	ElementCount             string `json:"ElementCount"`             // nombre d'éléments (subs)
 	Width                    string `json:"Width"`
 	Height                   string `json:"Height"`
+	Duration                 string `json:"Duration"`        // en secondes (string)
+	FrameRate                string `json:"FrameRate"`       // FPS (string, ex: "23.976")
+	FrameRateMode            string `json:"FrameRate_Mode"`  // "CFR" / "VFR"
 }
 
 // Info est la structure renvoyée par mediainfo --Output=JSON.

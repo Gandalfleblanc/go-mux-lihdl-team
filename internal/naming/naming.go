@@ -8,6 +8,10 @@ package naming
 // VFi = Version Française Internationale, VO = Version Originale,
 // AD = Audiodescription.
 var AudioLabels = []string{
+	"FR VOF : AC3 2.0",
+	"FR VOF : AC3 5.1",
+	"FR VOF : EAC3 2.0",
+	"FR VOF : EAC3 5.1",
 	"FR VFF : AC3 2.0",
 	"FR VFQ : AC3 2.0",
 	"FR VFi : AC3 2.0",
@@ -33,17 +37,26 @@ var AudioLabels = []string{
 	"ENG VO : EAC3 5.1",
 	"ENG VO : EAC3 5.1 ATMOS",
 	"ITA VO : AC3 5.1",
+	"ITA VO : EAC3 5.1",
 	"ITA VO : EAC3 5.1 ATMOS",
 	"SPA VO : AC3 5.1",
+	"SPA VO : EAC3 5.1",
 	"SPA VO : EAC3 5.1 ATMOS",
 	"GER VO : AC3 5.1",
+	"GER VO : EAC3 5.1",
 	"GER VO : EAC3 5.1 ATMOS",
 	"JPN VO : AC3 5.1",
+	"JPN VO : EAC3 5.1",
 	"JPN VO : EAC3 5.1 ATMOS",
 	"CHI VO : AC3 5.1",
+	"CHI VO : EAC3 5.1",
 	"CHI VO : EAC3 5.1 ATMOS",
 	"RUS VO : AC3 5.1",
+	"RUS VO : EAC3 5.1",
 	"RUS VO : EAC3 5.1 ATMOS",
+	"DUT VO : AC3 5.1",
+	"DUT VO : EAC3 5.1",
+	"DUT VO : EAC3 5.1 ATMOS",
 }
 
 // SubtitleLabels est la liste ordonnée des libellés sous-titres LiHDL.

@@ -12,12 +12,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	wr "github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"go-mux-lihdl-team/internal/audiosync"
 	"go-mux-lihdl-team/internal/config"
 	"go-mux-lihdl-team/internal/hydracker"
 	"go-mux-lihdl-team/internal/mediainfo"
@@ -89,7 +91,7 @@ func (a *App) startup(ctx context.Context) {
 
 // AppVersion est lue par le frontend (pill dans le header) et utilisée pour
 // comparer avec la dernière release GitHub lors du check de mise à jour.
-const AppVersion = "v4.0.0"
+const AppVersion = "v4.1.0"
 
 func (a *App) GetVersion() string { return AppVersion }
 
@@ -331,6 +333,7 @@ func (a *App) AnalyzeMkv(path string) {
 				row["mi_format_commercial"] = mt.FormatCommercial
 				row["mi_format_commercial_if_any"] = mt.FormatCommercialIfAny
 				row["mi_format_features"] = mt.FormatAdditionalFeatures
+				row["mi_channels"] = mt.Channels
 				row["mi_service_kind"] = mt.ServiceKind
 				row["mi_service_kind_name"] = mt.ServiceKindNames
 				row["mi_stream_size"] = mt.StreamSize
@@ -422,6 +425,7 @@ func (a *App) AnalyzeMkvSecondary(path string) {
 				row["mi_format_commercial"] = mt.FormatCommercial
 				row["mi_format_commercial_if_any"] = mt.FormatCommercialIfAny
 				row["mi_format_features"] = mt.FormatAdditionalFeatures
+				row["mi_channels"] = mt.Channels
 				row["mi_service_kind"] = mt.ServiceKind
 				row["mi_service_kind_name"] = mt.ServiceKindNames
 				row["mi_stream_size"] = mt.StreamSize
@@ -514,6 +518,80 @@ func (a *App) TestUnfrKey(key string) ApiKeyTestResult {
 	default:
 		return ApiKeyTestResult{OK: false, Message: "HTTP " + resp.Status}
 	}
+}
+
+// MkvBasicInfo : durée + FPS + scan audio d'un mkv (pour vérif compat subs/sources).
+type MkvBasicInfo struct {
+	DurationSeconds float64 `json:"duration_seconds"`
+	Framerate       float64 `json:"framerate"`
+	Width           int     `json:"width"`
+	Height          int     `json:"height"`
+	HasVFQAudio     bool    `json:"has_vfq_audio"` // une piste audio FR Canada détectée
+	VFQTrackInfo    string  `json:"vfq_track_info"` // libellé court (ex: "fr-CA · EAC3 5.1")
+}
+
+// GetMkvBasicInfo extrait durée + framerate + présence VFQ via mediainfo + mkvmerge.
+func (a *App) GetMkvBasicInfo(path string) (*MkvBasicInfo, error) {
+	if path == "" {
+		return nil, errors.New("chemin vide")
+	}
+	out := &MkvBasicInfo{}
+	// 1) mediainfo : durée + framerate + dimensions
+	if mibin, err := mediainfo.Locate(""); err == nil {
+		if mi, err := mediainfo.Identify(a.ctx, mibin, path); err == nil {
+			for _, t := range mi.Media.Track {
+				switch t.Type {
+				case "General":
+					if t.Duration != "" {
+						if d, err := strconv.ParseFloat(t.Duration, 64); err == nil {
+							out.DurationSeconds = d
+						}
+					}
+				case "Video":
+					if t.FrameRate != "" {
+						if f, err := strconv.ParseFloat(t.FrameRate, 64); err == nil {
+							out.Framerate = f
+						}
+					}
+					if t.Width != "" {
+						if w, err := strconv.Atoi(t.Width); err == nil {
+							out.Width = w
+						}
+					}
+					if t.Height != "" {
+						if h, err := strconv.Atoi(t.Height); err == nil {
+							out.Height = h
+						}
+					}
+				}
+			}
+		}
+	}
+	// 2) mkvmerge : scan des pistes audio pour détecter une VFQ
+	if binary := a.LocateMkvmerge(); binary != "" {
+		if info, err := mkvtool.Identify(a.ctx, binary, path); err == nil {
+			for _, t := range info.Tracks {
+				if t.Type != "audio" {
+					continue
+				}
+				lang := strings.ToLower(t.Properties.Language)
+				name := strings.ToLower(t.Properties.TrackName)
+				// fr-CA explicite OU mots-clés Canada/Québec dans le nom de piste
+				isFR := lang == "fre" || lang == "fra" || lang == "fr" || strings.HasPrefix(lang, "fr-")
+				isCanadian := lang == "fr-ca" || strings.Contains(name, "canad") || strings.Contains(name, "québ") || strings.Contains(name, "quebec") || strings.Contains(name, "vfq")
+				if isFR && isCanadian {
+					out.HasVFQAudio = true
+					info := strings.TrimSpace(t.Properties.TrackName)
+					if info == "" {
+						info = t.Codec
+					}
+					out.VFQTrackInfo = info
+					break
+				}
+			}
+		}
+	}
+	return out, nil
 }
 
 // LookupHydrackerURL résout l'URL fiche Hydracker pour un ID TMDB donné.
@@ -696,6 +774,318 @@ func (a *App) Mux(req MuxRequest) error {
 	}
 	wr.EventsEmit(a.ctx, "log", "✅ Mux terminé : "+req.OutputPath)
 	wr.EventsEmit(a.ctx, "mux:done", map[string]any{"ok": true, "path": req.OutputPath})
+	return nil
+}
+
+// SyncAudioTrack résume une piste audio pour l'onglet Synchro.
+type SyncAudioTrack struct {
+	ID       int    `json:"id"`
+	Codec    string `json:"codec"`
+	Language string `json:"language"`
+	Name     string `json:"name"`
+	Channels int    `json:"channels"`
+}
+
+// ListAudioTracksForSync renvoie les pistes audio d'un .mkv pour l'onglet Synchro.
+func (a *App) ListAudioTracksForSync(path string) ([]SyncAudioTrack, error) {
+	if path == "" {
+		return nil, errors.New("chemin vide")
+	}
+	binary := a.LocateMkvmerge()
+	if binary == "" {
+		return nil, errors.New("mkvmerge introuvable")
+	}
+	info, err := mkvtool.Identify(a.ctx, binary, path)
+	if err != nil {
+		return nil, err
+	}
+	out := []SyncAudioTrack{}
+	for _, t := range info.Tracks {
+		if t.Type != "audio" {
+			continue
+		}
+		out = append(out, SyncAudioTrack{
+			ID:       t.ID,
+			Codec:    t.Codec,
+			Language: t.Properties.Language,
+			Name:     t.Properties.TrackName,
+			Channels: t.Properties.AudioChannels,
+		})
+	}
+	return out, nil
+}
+
+// DetectAudioOffset mesure auto le décalage de la piste `otherID` par rapport
+// à `refID` dans `path` (cross-correlation des enveloppes via ffmpeg). Vérifie
+// aussi le drift sur les films >20 min en mesurant à 85% du film.
+func (a *App) DetectAudioOffset(path string, refID, otherID int) (*audiosync.DetectionResult, error) {
+	if path == "" {
+		return nil, errors.New("chemin vide")
+	}
+	binDir, _ := config.BinDir()
+	ffmpeg, err := audiosync.Locate(binDir)
+	if err != nil {
+		return nil, err
+	}
+	// Durée totale du film via mediainfo (pour activer la double-mesure).
+	var durationSec float64
+	if mibin, err := mediainfo.Locate(""); err == nil {
+		if mi, err := mediainfo.Identify(a.ctx, mibin, path); err == nil {
+			for _, t := range mi.Media.Track {
+				if t.Type == "General" && t.Duration != "" {
+					if d, err := strconv.ParseFloat(t.Duration, 64); err == nil {
+						durationSec = d
+					}
+					break
+				}
+			}
+		}
+	}
+	wr.EventsEmit(a.ctx, "log", fmt.Sprintf("🔎 Détection offset piste %d vs réf %d…", otherID, refID))
+	res, err := audiosync.DetectOffset(a.ctx, ffmpeg, path, refID, otherID, durationSec)
+	if err != nil {
+		wr.EventsEmit(a.ctx, "log", "❌ Détection : "+err.Error())
+		return nil, err
+	}
+	msg := fmt.Sprintf("✓ Piste %d : offset = %d ms (confiance %.2f)", otherID, res.OffsetMs, res.Confidence)
+	if res.DriftMs > 0 {
+		msg += fmt.Sprintf(", drift %d ms", res.DriftMs)
+	}
+	if res.Notes != "" {
+		msg += " — " + res.Notes
+	}
+	wr.EventsEmit(a.ctx, "log", msg)
+	return res, nil
+}
+
+// AudioSyncOffset associe un track ID à un décalage en ms et un éventuel
+// ratio atempo (resample requis si FPS différent → drift linéaire).
+type AudioSyncOffset struct {
+	TrackID     int     `json:"track_id"`
+	DelayMs     int     `json:"delay_ms"`
+	TempoFactor float64 `json:"tempo_factor"` // 1.0 = pas de resample ; ≠1.0 = ffmpeg atempo + réencode
+}
+
+// AudioSyncRequest : remux un .mkv en appliquant les décalages sur certaines pistes audio.
+type AudioSyncRequest struct {
+	InputPath  string            `json:"input_path"`
+	OutputPath string            `json:"output_path"`
+	Offsets    []AudioSyncOffset `json:"offsets"`
+}
+
+// MuxAudioSync remux le .mkv en appliquant les corrections sur certaines pistes audio :
+//   - Offset constant uniquement (TempoFactor = 0 ou 1.0) → mkvmerge --sync TID:offset
+//     (audio bit-à-bit, AC3/EAC3 préservés).
+//   - Drift linéaire (TempoFactor ≠ 1.0, typiquement FPS différent) → la piste est
+//     d'abord ré-encodée avec ffmpeg atempo (1 génération AC3/EAC3 perdue), puis
+//     muxée comme audio externe avec son nouvel offset.
+//
+// Émet "audiosync:progress" / "audiosync:done".
+func (a *App) MuxAudioSync(req AudioSyncRequest) error {
+	binary := a.LocateMkvmerge()
+	if binary == "" {
+		return errMkvNotFound
+	}
+	info, err := mkvtool.Identify(a.ctx, binary, req.InputPath)
+	if err != nil {
+		return err
+	}
+	offsetByID := map[int]AudioSyncOffset{}
+	for _, o := range req.Offsets {
+		offsetByID[o.TrackID] = o
+	}
+
+	// Sépare les pistes nécessitant un resample (TempoFactor ≠ 1.0) des autres.
+	resampleTIDs := map[int]bool{}
+	for _, o := range req.Offsets {
+		if o.TempoFactor != 0 && o.TempoFactor != 1.0 {
+			resampleTIDs[o.TrackID] = true
+		}
+	}
+
+	// Récupère bitrate/codec/channels via mediainfo pour les pistes à resample.
+	type trackMeta struct {
+		Codec       string
+		Channels    int
+		BitrateKbps int
+		Name        string
+		Language    string
+	}
+	metaByID := map[int]trackMeta{}
+	if len(resampleTIDs) > 0 {
+		if mibin, err := mediainfo.Locate(""); err == nil {
+			if mi, err := mediainfo.Identify(a.ctx, mibin, req.InputPath); err == nil {
+				audIdx := 0
+				for _, t := range info.Tracks {
+					if t.Type != "audio" {
+						continue
+					}
+					if resampleTIDs[t.ID] {
+						// L'audio mediainfo dans le même ordre que mkvmerge audio.
+						var miAudio mediainfo.Track
+						count := 0
+						for _, m := range mi.Media.Track {
+							if m.Type == "Audio" {
+								if count == audIdx {
+									miAudio = m
+									break
+								}
+								count++
+							}
+						}
+						chans := t.Properties.AudioChannels
+						if chans == 0 {
+							chans, _ = strconv.Atoi(miAudio.Channels)
+						}
+						bitrateKbps := 0
+						if miAudio.BitRate != "" {
+							if br, err := strconv.Atoi(miAudio.BitRate); err == nil {
+								bitrateKbps = br / 1000
+							}
+						}
+						if bitrateKbps == 0 {
+							// Défauts raisonnables si non détecté.
+							switch chans {
+							case 1:
+								bitrateKbps = 192
+							case 2:
+								bitrateKbps = 256
+							case 6, 8:
+								bitrateKbps = 640
+							default:
+								bitrateKbps = 384
+							}
+						}
+						metaByID[t.ID] = trackMeta{
+							Codec:       t.Codec,
+							Channels:    chans,
+							BitrateKbps: bitrateKbps,
+							Name:        t.Properties.TrackName,
+							Language:    t.Properties.Language,
+						}
+					}
+					audIdx++
+				}
+			}
+		}
+	}
+
+	// Resample chaque piste concernée vers /tmp/<basename>.<tid>.<ext>.
+	tmpDir, err := os.MkdirTemp("", "audiosync-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmpDir)
+
+	resampledFiles := map[int]string{} // tid → chemin du fichier resamplé
+	if len(resampleTIDs) > 0 {
+		ffmpeg, err := audiosync.Locate("")
+		if err != nil {
+			return fmt.Errorf("resample : %w", err)
+		}
+		for tid := range resampleTIDs {
+			meta := metaByID[tid]
+			if meta.Codec == "" {
+				wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠️ Piste %d : codec inconnu, resample skip", tid))
+				continue
+			}
+			ext := "ac3"
+			codecLower := strings.ToLower(meta.Codec)
+			if strings.Contains(codecLower, "e-ac") || strings.Contains(codecLower, "eac") {
+				ext = "eac3"
+			}
+			outPath := filepath.Join(tmpDir, fmt.Sprintf("track_%d.%s", tid, ext))
+			tempo := offsetByID[tid].TempoFactor
+			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("🎚 Resample piste %d (%s, %d ch, %d kbps, atempo=%.6f)…", tid, meta.Codec, meta.Channels, meta.BitrateKbps, tempo))
+			if err := audiosync.Resample(a.ctx, ffmpeg, audiosync.ResampleParams{
+				InputPath:   req.InputPath,
+				TrackID:     tid,
+				Codec:       meta.Codec,
+				Channels:    meta.Channels,
+				BitrateKbps: meta.BitrateKbps,
+				Tempo:       tempo,
+				OutputPath:  outPath,
+			}); err != nil {
+				wr.EventsEmit(a.ctx, "log", "❌ Resample piste "+strconv.Itoa(tid)+" : "+err.Error())
+				return err
+			}
+			resampledFiles[tid] = outPath
+			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("✓ Piste %d resamplée → %s", tid, filepath.Base(outPath)))
+		}
+	}
+
+	// Construit les TrackSpec : pistes resamplées exclues, autres gardées avec --sync.
+	var tracks []mkvtool.TrackSpec
+	for i, t := range info.Tracks {
+		spec := mkvtool.TrackSpec{
+			ID:      t.ID,
+			Type:    t.Type,
+			Default: t.Properties.DefaultTrack,
+			Forced:  t.Properties.ForcedTrack,
+			Order:   i,
+		}
+		if _, isResampled := resampledFiles[t.ID]; isResampled {
+			spec.Keep = false
+		} else {
+			spec.Keep = true
+			if o, ok := offsetByID[t.ID]; ok {
+				spec.DelayMs = o.DelayMs
+			}
+		}
+		tracks = append(tracks, spec)
+	}
+
+	// Ajoute les pistes resamplées comme audios externes, en préservant leur place dans l'ordre.
+	var externalAudios []mkvtool.ExternalAudio
+	for tid, path := range resampledFiles {
+		meta := metaByID[tid]
+		// Ordre : on insère à la position originelle du tid (pour garder l'ordre des pistes).
+		order := 0
+		for i, t := range info.Tracks {
+			if t.ID == tid {
+				order = i
+				break
+			}
+		}
+		externalAudios = append(externalAudios, mkvtool.ExternalAudio{
+			Path:     path,
+			Name:     meta.Name,
+			Language: meta.Language,
+			Default:  false, // par défaut on ne ré-élève pas ; on respecte la default originelle si elle est ailleurs
+			Forced:   false,
+			DelayMs:  offsetByID[tid].DelayMs,
+			Order:    order,
+		})
+	}
+
+	a.mu.Lock()
+	if a.opCancel != nil {
+		a.opCancel()
+	}
+	ctx, cancel := context.WithCancel(a.ctx)
+	a.opCtx, a.opCancel = ctx, cancel
+	a.mu.Unlock()
+
+	wr.EventsEmit(a.ctx, "log", "🔧 Recalage audio → "+filepath.Base(req.OutputPath))
+	err = mkvtool.Mux(ctx, binary, mkvtool.MuxParams{
+		InputPath:      req.InputPath,
+		OutputPath:     req.OutputPath,
+		Tracks:         tracks,
+		ExternalAudios: externalAudios,
+	},
+		func(p mkvtool.MuxProgress) { wr.EventsEmit(a.ctx, "audiosync:progress", p) },
+		func(line string) { wr.EventsEmit(a.ctx, "log", line) },
+	)
+	a.mu.Lock()
+	a.opCtx, a.opCancel = nil, nil
+	a.mu.Unlock()
+	if err != nil {
+		wr.EventsEmit(a.ctx, "log", "❌ "+err.Error())
+		wr.EventsEmit(a.ctx, "audiosync:done", map[string]any{"ok": false})
+		return err
+	}
+	wr.EventsEmit(a.ctx, "log", "✅ Recalage terminé : "+req.OutputPath)
+	wr.EventsEmit(a.ctx, "audiosync:done", map[string]any{"ok": true, "path": req.OutputPath})
 	return nil
 }
 

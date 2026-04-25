@@ -26,6 +26,10 @@ export function CheckVFQ(arg1) {
   return window['go']['main']['App']['CheckVFQ'](arg1);
 }
 
+export function DetectAudioOffset(arg1, arg2, arg3) {
+  return window['go']['main']['App']['DetectAudioOffset'](arg1, arg2, arg3);
+}
+
 export function FileSize(arg1) {
   return window['go']['main']['App']['FileSize'](arg1);
 }
@@ -38,12 +42,20 @@ export function GetLihdlOptions() {
   return window['go']['main']['App']['GetLihdlOptions']();
 }
 
+export function GetMkvBasicInfo(arg1) {
+  return window['go']['main']['App']['GetMkvBasicInfo'](arg1);
+}
+
 export function GetVersion() {
   return window['go']['main']['App']['GetVersion']();
 }
 
 export function InstallUpdate() {
   return window['go']['main']['App']['InstallUpdate']();
+}
+
+export function ListAudioTracksForSync(arg1) {
+  return window['go']['main']['App']['ListAudioTracksForSync'](arg1);
 }
 
 export function LocateMkvmerge() {
@@ -60,6 +72,10 @@ export function MoveToTrash(arg1) {
 
 export function Mux(arg1) {
   return window['go']['main']['App']['Mux'](arg1);
+}
+
+export function MuxAudioSync(arg1) {
+  return window['go']['main']['App']['MuxAudioSync'](arg1);
 }
 
 export function OpenFolder(arg1) {

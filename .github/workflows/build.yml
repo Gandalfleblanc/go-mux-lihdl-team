@@ -16,15 +16,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Install MKVToolNix + MediaInfo + embed binaries
+      - name: Install MKVToolNix + MediaInfo + ffmpeg + embed binaries
         run: |
-          brew install mkvtoolnix mediainfo
+          brew install mkvtoolnix mediainfo ffmpeg
           mkdir -p internal/mkvtool/binaries/darwin-arm64
           cp "$(which mkvmerge)" internal/mkvtool/binaries/darwin-arm64/mkvmerge
           chmod +x internal/mkvtool/binaries/darwin-arm64/mkvmerge
           mkdir -p internal/mediainfo/binaries/darwin-arm64
           cp "$(which mediainfo)" internal/mediainfo/binaries/darwin-arm64/mediainfo
           chmod +x internal/mediainfo/binaries/darwin-arm64/mediainfo
+          mkdir -p internal/audiosync/binaries/darwin-arm64
+          cp "$(which ffmpeg)" internal/audiosync/binaries/darwin-arm64/ffmpeg
+          chmod +x internal/audiosync/binaries/darwin-arm64/ffmpeg
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
       - name: Build
@@ -48,15 +51,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Install MKVToolNix + MediaInfo + embed binaries
+      - name: Install MKVToolNix + MediaInfo + ffmpeg + embed binaries
         run: |
-          brew install mkvtoolnix mediainfo
+          brew install mkvtoolnix mediainfo ffmpeg
           mkdir -p internal/mkvtool/binaries/darwin-amd64
           cp "$(which mkvmerge)" internal/mkvtool/binaries/darwin-amd64/mkvmerge
           chmod +x internal/mkvtool/binaries/darwin-amd64/mkvmerge
           mkdir -p internal/mediainfo/binaries/darwin-amd64
           cp "$(which mediainfo)" internal/mediainfo/binaries/darwin-amd64/mediainfo
           chmod +x internal/mediainfo/binaries/darwin-amd64/mediainfo
+          mkdir -p internal/audiosync/binaries/darwin-amd64
+          cp "$(which ffmpeg)" internal/audiosync/binaries/darwin-amd64/ffmpeg
+          chmod +x internal/audiosync/binaries/darwin-amd64/ffmpeg
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
       - name: Build
@@ -80,16 +86,19 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Install system dependencies + mkvmerge + mediainfo
+      - name: Install system dependencies + mkvmerge + mediainfo + ffmpeg
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev mkvtoolnix mediainfo
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev mkvtoolnix mediainfo ffmpeg
           mkdir -p internal/mkvtool/binaries/linux-amd64
           cp "$(which mkvmerge)" internal/mkvtool/binaries/linux-amd64/mkvmerge
           chmod +x internal/mkvtool/binaries/linux-amd64/mkvmerge
           mkdir -p internal/mediainfo/binaries/linux-amd64
           cp "$(which mediainfo)" internal/mediainfo/binaries/linux-amd64/mediainfo
           chmod +x internal/mediainfo/binaries/linux-amd64/mediainfo
+          mkdir -p internal/audiosync/binaries/linux-amd64
+          cp "$(which ffmpeg)" internal/audiosync/binaries/linux-amd64/ffmpeg
+          chmod +x internal/audiosync/binaries/linux-amd64/ffmpeg
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
       - name: Build
@@ -109,7 +118,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Download MKVToolNix + MediaInfo + embed binaries
+      - name: Download MKVToolNix + MediaInfo + ffmpeg + embed binaries
         shell: bash
         run: |
           mkdir -p internal/mkvtool/binaries/windows-amd64
@@ -120,6 +129,10 @@ jobs:
           curl -L -o mi.zip https://mediaarea.net/download/binary/mediainfo/24.12/MediaInfo_CLI_24.12_Windows_x64.zip
           7z x mi.zip -o./mi-extract
           cp ./mi-extract/MediaInfo.exe internal/mediainfo/binaries/windows-amd64/mediainfo.exe
+          mkdir -p internal/audiosync/binaries/windows-amd64
+          curl -L -o ffmpeg.zip https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip
+          7z x ffmpeg.zip -o./ffmpeg-extract
+          cp ./ffmpeg-extract/*/bin/ffmpeg.exe internal/audiosync/binaries/windows-amd64/ffmpeg.exe
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
       - name: Build

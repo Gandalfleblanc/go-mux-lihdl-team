@@ -17,15 +17,16 @@ import (
 )
 
 type Result struct {
-	TmdbID    string  `json:"tmdb_id"`
-	Note      float64 `json:"note"`
-	TitreFR   string  `json:"titre_fr"`
-	AnneeFR   string  `json:"annee_fr"`
-	TitreVO   string  `json:"titre_vo"`
-	Duree     string  `json:"duree"`
-	URL       string  `json:"url"`
-	PosterURL string  `json:"poster_url"`
-	Overview  string  `json:"overview"`
+	TmdbID           string  `json:"tmdb_id"`
+	Note             float64 `json:"note"`
+	TitreFR          string  `json:"titre_fr"`
+	AnneeFR          string  `json:"annee_fr"`
+	TitreVO          string  `json:"titre_vo"`
+	Duree            string  `json:"duree"`
+	URL              string  `json:"url"`
+	PosterURL        string  `json:"poster_url"`
+	Overview         string  `json:"overview"`
+	OriginalLanguage string  `json:"original_language"` // ISO 639-1 (ex: "fr", "en", "ja")
 }
 
 var regexOgImage = regexp.MustCompile(`<meta\s+property="og:image"\s+content="([^"]+)"`)
@@ -141,14 +142,15 @@ func FetchByID(id, apiKey string) (*Result, error) {
 		return nil, fmt.Errorf("TMDB HTTP %d", resp.StatusCode)
 	}
 	var body struct {
-		ID            int     `json:"id"`
-		Title         string  `json:"title"`
-		OriginalTitle string  `json:"original_title"`
-		ReleaseDate   string  `json:"release_date"`
-		Runtime       int     `json:"runtime"`
-		PosterPath    string  `json:"poster_path"`
-		VoteAverage   float64 `json:"vote_average"`
-		Overview      string  `json:"overview"`
+		ID               int     `json:"id"`
+		Title            string  `json:"title"`
+		OriginalTitle    string  `json:"original_title"`
+		OriginalLanguage string  `json:"original_language"`
+		ReleaseDate      string  `json:"release_date"`
+		Runtime          int     `json:"runtime"`
+		PosterPath       string  `json:"poster_path"`
+		VoteAverage      float64 `json:"vote_average"`
+		Overview         string  `json:"overview"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		return nil, err
@@ -169,15 +171,16 @@ func FetchByID(id, apiKey string) (*Result, error) {
 		poster = "https://image.tmdb.org/t/p/w500" + body.PosterPath
 	}
 	return &Result{
-		TmdbID:    strconv.Itoa(body.ID),
-		Note:      body.VoteAverage,
-		TitreFR:   body.Title,
-		AnneeFR:   year,
-		TitreVO:   body.OriginalTitle,
-		Duree:     duree,
-		URL:       "https://www.themoviedb.org/movie/" + strconv.Itoa(body.ID) + "?language=fr",
-		PosterURL: poster,
-		Overview:  body.Overview,
+		TmdbID:           strconv.Itoa(body.ID),
+		Note:             body.VoteAverage,
+		TitreFR:          body.Title,
+		AnneeFR:          year,
+		TitreVO:           body.OriginalTitle,
+		Duree:            duree,
+		URL:              "https://www.themoviedb.org/movie/" + strconv.Itoa(body.ID) + "?language=fr",
+		PosterURL:        poster,
+		Overview:         body.Overview,
+		OriginalLanguage: body.OriginalLanguage,
 	}, nil
 }
 
@@ -204,11 +207,12 @@ func SearchMovie(query, apiKey string) ([]Result, error) {
 		Results []struct {
 			ID            int     `json:"id"`
 			Title         string  `json:"title"`
-			OriginalTitle string  `json:"original_title"`
-			ReleaseDate   string  `json:"release_date"`
-			PosterPath    string  `json:"poster_path"`
-			VoteAverage   float64 `json:"vote_average"`
-			Overview      string  `json:"overview"`
+			OriginalTitle    string  `json:"original_title"`
+			OriginalLanguage string  `json:"original_language"`
+			ReleaseDate      string  `json:"release_date"`
+			PosterPath       string  `json:"poster_path"`
+			VoteAverage      float64 `json:"vote_average"`
+			Overview         string  `json:"overview"`
 		} `json:"results"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
@@ -225,14 +229,15 @@ func SearchMovie(query, apiKey string) ([]Result, error) {
 			poster = "https://image.tmdb.org/t/p/w500" + r.PosterPath
 		}
 		out = append(out, Result{
-			TmdbID:    strconv.Itoa(r.ID),
-			Note:      r.VoteAverage,
-			TitreFR:   r.Title,
-			AnneeFR:   year,
-			TitreVO:   r.OriginalTitle,
-			URL:       "https://www.themoviedb.org/movie/" + strconv.Itoa(r.ID) + "?language=fr",
-			PosterURL: poster,
-			Overview:  r.Overview,
+			TmdbID:           strconv.Itoa(r.ID),
+			Note:             r.VoteAverage,
+			TitreFR:          r.Title,
+			AnneeFR:          year,
+			TitreVO:          r.OriginalTitle,
+			URL:              "https://www.themoviedb.org/movie/" + strconv.Itoa(r.ID) + "?language=fr",
+			PosterURL:        poster,
+			Overview:         r.Overview,
+			OriginalLanguage: r.OriginalLanguage,
 		})
 	}
 	return out, nil
@@ -258,13 +263,14 @@ func SearchTV(query, apiKey string) ([]Result, error) {
 	}
 	var body struct {
 		Results []struct {
-			ID           int     `json:"id"`
-			Name         string  `json:"name"`
-			OriginalName string  `json:"original_name"`
-			FirstAirDate string  `json:"first_air_date"`
-			PosterPath   string  `json:"poster_path"`
-			VoteAverage  float64 `json:"vote_average"`
-			Overview     string  `json:"overview"`
+			ID               int     `json:"id"`
+			Name             string  `json:"name"`
+			OriginalName     string  `json:"original_name"`
+			OriginalLanguage string  `json:"original_language"`
+			FirstAirDate     string  `json:"first_air_date"`
+			PosterPath       string  `json:"poster_path"`
+			VoteAverage      float64 `json:"vote_average"`
+			Overview         string  `json:"overview"`
 		} `json:"results"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
@@ -281,8 +287,9 @@ func SearchTV(query, apiKey string) ([]Result, error) {
 			poster = "https://image.tmdb.org/t/p/w500" + r.PosterPath
 		}
 		out = append(out, Result{
-			TmdbID:    strconv.Itoa(r.ID),
-			Note:      r.VoteAverage,
+			TmdbID:           strconv.Itoa(r.ID),
+			Note:             r.VoteAverage,
+			OriginalLanguage: r.OriginalLanguage,
 			TitreFR:   r.Name,
 			AnneeFR:   year,
 			TitreVO:   r.OriginalName,
@@ -310,13 +317,14 @@ func FetchTVByID(id, apiKey string) (*Result, error) {
 		return nil, fmt.Errorf("TMDB HTTP %d", resp.StatusCode)
 	}
 	var body struct {
-		ID           int     `json:"id"`
-		Name         string  `json:"name"`
-		OriginalName string  `json:"original_name"`
-		FirstAirDate string  `json:"first_air_date"`
-		PosterPath   string  `json:"poster_path"`
-		VoteAverage  float64 `json:"vote_average"`
-		Overview     string  `json:"overview"`
+		ID               int     `json:"id"`
+		Name             string  `json:"name"`
+		OriginalName     string  `json:"original_name"`
+		OriginalLanguage string  `json:"original_language"`
+		FirstAirDate     string  `json:"first_air_date"`
+		PosterPath       string  `json:"poster_path"`
+		VoteAverage      float64 `json:"vote_average"`
+		Overview         string  `json:"overview"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		return nil, err
@@ -333,14 +341,15 @@ func FetchTVByID(id, apiKey string) (*Result, error) {
 		poster = "https://image.tmdb.org/t/p/w500" + body.PosterPath
 	}
 	return &Result{
-		TmdbID:    strconv.Itoa(body.ID),
-		Note:      body.VoteAverage,
-		TitreFR:   body.Name,
-		AnneeFR:   year,
-		TitreVO:   body.OriginalName,
-		URL:       "https://www.themoviedb.org/tv/" + strconv.Itoa(body.ID) + "?language=fr",
-		PosterURL: poster,
-		Overview:  body.Overview,
+		TmdbID:           strconv.Itoa(body.ID),
+		Note:             body.VoteAverage,
+		TitreFR:          body.Name,
+		AnneeFR:          year,
+		TitreVO:           body.OriginalName,
+		URL:              "https://www.themoviedb.org/tv/" + strconv.Itoa(body.ID) + "?language=fr",
+		PosterURL:        poster,
+		Overview:         body.Overview,
+		OriginalLanguage: body.OriginalLanguage,
 	}, nil
 }
 

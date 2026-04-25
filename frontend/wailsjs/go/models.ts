@@ -1,3 +1,30 @@
+export namespace audiosync {
+	
+	export class DetectionResult {
+	    offset_ms: number;
+	    confidence: number;
+	    drift_ms: number;
+	    method: string;
+	    tempo_factor: number;
+	    notes: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DetectionResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.offset_ms = source["offset_ms"];
+	        this.confidence = source["confidence"];
+	        this.drift_ms = source["drift_ms"];
+	        this.method = source["method"];
+	        this.tempo_factor = source["tempo_factor"];
+	        this.notes = source["notes"];
+	    }
+	}
+
+}
+
 export namespace config {
 	
 	export class Config {
@@ -55,6 +82,56 @@ export namespace main {
 	        this.message = source["message"];
 	    }
 	}
+	export class AudioSyncOffset {
+	    track_id: number;
+	    delay_ms: number;
+	    tempo_factor: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new AudioSyncOffset(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.track_id = source["track_id"];
+	        this.delay_ms = source["delay_ms"];
+	        this.tempo_factor = source["tempo_factor"];
+	    }
+	}
+	export class AudioSyncRequest {
+	    input_path: string;
+	    output_path: string;
+	    offsets: AudioSyncOffset[];
+	
+	    static createFrom(source: any = {}) {
+	        return new AudioSyncRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.input_path = source["input_path"];
+	        this.output_path = source["output_path"];
+	        this.offsets = this.convertValues(source["offsets"], AudioSyncOffset);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class LihdlOptions {
 	    audio_labels: string[];
 	    subtitle_labels: string[];
@@ -75,6 +152,28 @@ export namespace main {
 	        this.video_encoders = source["video_encoders"];
 	        this.video_sources = source["video_sources"];
 	        this.video_teams = source["video_teams"];
+	    }
+	}
+	export class MkvBasicInfo {
+	    duration_seconds: number;
+	    framerate: number;
+	    width: number;
+	    height: number;
+	    has_vfq_audio: boolean;
+	    vfq_track_info: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new MkvBasicInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.duration_seconds = source["duration_seconds"];
+	        this.framerate = source["framerate"];
+	        this.width = source["width"];
+	        this.height = source["height"];
+	        this.has_vfq_audio = source["has_vfq_audio"];
+	        this.vfq_track_info = source["vfq_track_info"];
 	    }
 	}
 	export class MuxRequest {
@@ -125,6 +224,26 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class SyncAudioTrack {
+	    id: number;
+	    codec: string;
+	    language: string;
+	    name: string;
+	    channels: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new SyncAudioTrack(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.codec = source["codec"];
+	        this.language = source["language"];
+	        this.name = source["name"];
+	        this.channels = source["channels"];
+	    }
+	}
 	export class TmdbTestResult {
 	    ok: boolean;
 	    message: string;
@@ -168,6 +287,8 @@ export namespace mkvtool {
 	    Language: string;
 	    Default: boolean;
 	    Forced: boolean;
+	    VisualImpaired: boolean;
+	    DelayMs: number;
 	    Order: number;
 	
 	    static createFrom(source: any = {}) {
@@ -181,6 +302,8 @@ export namespace mkvtool {
 	        this.Language = source["Language"];
 	        this.Default = source["Default"];
 	        this.Forced = source["Forced"];
+	        this.VisualImpaired = source["VisualImpaired"];
+	        this.DelayMs = source["DelayMs"];
 	        this.Order = source["Order"];
 	    }
 	}
@@ -212,6 +335,8 @@ export namespace mkvtool {
 	    Language: string;
 	    Default: boolean;
 	    Forced: boolean;
+	    VisualImpaired: boolean;
+	    DelayMs: number;
 	    Order: number;
 	
 	    static createFrom(source: any = {}) {
@@ -225,6 +350,8 @@ export namespace mkvtool {
 	        this.Language = source["Language"];
 	        this.Default = source["Default"];
 	        this.Forced = source["Forced"];
+	        this.VisualImpaired = source["VisualImpaired"];
+	        this.DelayMs = source["DelayMs"];
 	        this.Order = source["Order"];
 	    }
 	}
@@ -236,6 +363,8 @@ export namespace mkvtool {
 	    Language: string;
 	    Default: boolean;
 	    Forced: boolean;
+	    VisualImpaired: boolean;
+	    DelayMs: number;
 	    Order: number;
 	
 	    static createFrom(source: any = {}) {
@@ -251,6 +380,8 @@ export namespace mkvtool {
 	        this.Language = source["Language"];
 	        this.Default = source["Default"];
 	        this.Forced = source["Forced"];
+	        this.VisualImpaired = source["VisualImpaired"];
+	        this.DelayMs = source["DelayMs"];
 	        this.Order = source["Order"];
 	    }
 	}
@@ -304,6 +435,7 @@ export namespace tmdb {
 	    url: string;
 	    poster_url: string;
 	    overview: string;
+	    original_language: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Result(source);
@@ -320,6 +452,7 @@ export namespace tmdb {
 	        this.url = source["url"];
 	        this.poster_url = source["poster_url"];
 	        this.overview = source["overview"];
+	        this.original_language = source["original_language"];
 	    }
 	}
 

@@ -183,14 +183,16 @@ func DetectSubSDHFromContent(content string) (isSDH bool, score int) {
 
 // TrackSpec décrit comment renommer/traiter une piste lors du mux.
 type TrackSpec struct {
-	ID       int    // ID mkvmerge de la piste d'origine
-	Type     string // "audio" | "subtitles" | "video"
-	Keep     bool   // si false, la piste est exclue du mux (--audio-tracks / --subtitle-tracks)
-	Name     string // nouveau nom (--track-name)
-	Language string // code iso 639-2 (fre, eng, jpn, ita, ger, spa, und…)
-	Default  bool   // flag default
-	Forced   bool   // flag forced
-	Order    int    // position dans l'ordre final (plus petit = plus haut)
+	ID             int    // ID mkvmerge de la piste d'origine
+	Type           string // "audio" | "subtitles" | "video"
+	Keep           bool   // si false, la piste est exclue du mux (--audio-tracks / --subtitle-tracks)
+	Name           string // nouveau nom (--track-name)
+	Language       string // code iso 639-2 (fre, eng, jpn, ita, ger, spa, und…)
+	Default        bool   // flag default
+	Forced         bool   // flag forced
+	VisualImpaired bool   // flag malvoyant (--visual-impaired-flag) — pour les pistes AD
+	DelayMs        int    // décalage audio en ms (--sync TID:OFFSET), 0 = pas de décalage
+	Order          int    // position dans l'ordre final (plus petit = plus haut)
 }
 
 // ExternalSub décrit un fichier de sous-titres externe ajouté au mux.
@@ -205,23 +207,27 @@ type ExternalSub struct {
 
 // ExternalAudio décrit un fichier audio externe ajouté au mux.
 type ExternalAudio struct {
-	Path     string // chemin du fichier audio (.ac3/.eac3/.dts/.aac/.flac/.mka…)
-	Name     string // nom de piste LiHDL (--track-name)
-	Language string // code iso 639-2 (fre, eng, …)
-	Default  bool
-	Forced   bool
-	Order    int // position dans l'ordre final (plus petit = plus haut)
+	Path           string
+	Name           string
+	Language       string
+	Default        bool
+	Forced         bool
+	VisualImpaired bool // flag malvoyant pour les pistes AD
+	DelayMs        int  // décalage audio en ms (--sync 0:OFFSET sur le fichier ext)
+	Order          int
 }
 
 // SecondaryTrack décrit une piste à reprendre depuis un .mkv secondaire
 // (typiquement un release SUPPLY/FW pour récupérer ses audios/subs).
 type SecondaryTrack struct {
-	ID       int    // ID de la piste dans le mkv secondaire (depuis mkvmerge -J)
-	Name     string // nom de piste LiHDL
-	Language string // code iso 639-2
-	Default  bool
-	Forced   bool
-	Order    int // position dans l'ordre final
+	ID             int
+	Name           string
+	Language       string
+	Default        bool
+	Forced         bool
+	VisualImpaired bool // flag malvoyant pour les pistes AD
+	DelayMs        int  // décalage audio en ms (--sync TID:OFFSET sur le mkv secondaire)
+	Order          int
 }
 
 // MuxParams regroupe toutes les instructions pour exécuter le mux.
@@ -402,6 +408,12 @@ func buildArgs(p MuxParams) []string {
 		}
 		args = append(args, "--default-track-flag", id+":"+boolFlag(t.Default))
 		args = append(args, "--forced-display-flag", id+":"+boolFlag(t.Forced))
+		if t.VisualImpaired {
+			args = append(args, "--visual-impaired-flag", id+":1")
+		}
+		if t.DelayMs != 0 {
+			args = append(args, "--sync", id+":"+strconv.Itoa(t.DelayMs))
+		}
 	}
 
 	// Filtrage audio/subs internes.
@@ -453,6 +465,12 @@ func buildArgs(p MuxParams) []string {
 			}
 			args = append(args, "--default-track-flag", id+":"+boolFlag(st.Default))
 			args = append(args, "--forced-display-flag", id+":"+boolFlag(st.Forced))
+			if st.VisualImpaired {
+				args = append(args, "--visual-impaired-flag", id+":1")
+			}
+			if st.DelayMs != 0 {
+				args = append(args, "--sync", id+":"+strconv.Itoa(st.DelayMs))
+			}
 		}
 		for _, st := range p.SecondarySubs {
 			id := strconv.Itoa(st.ID)
@@ -497,6 +515,12 @@ func buildArgs(p MuxParams) []string {
 		}
 		args = append(args, "--default-track-flag", "0:"+boolFlag(a.Default))
 		args = append(args, "--forced-display-flag", "0:"+boolFlag(a.Forced))
+		if a.VisualImpaired {
+			args = append(args, "--visual-impaired-flag", "0:1")
+		}
+		if a.DelayMs != 0 {
+			args = append(args, "--sync", "0:"+strconv.Itoa(a.DelayMs))
+		}
 		args = append(args, a.Path)
 	}
 
