@@ -22,6 +22,10 @@ export function CheckUpdate() {
   return window['go']['main']['App']['CheckUpdate']();
 }
 
+export function CheckVFQ(arg1) {
+  return window['go']['main']['App']['CheckVFQ'](arg1);
+}
+
 export function FileSize(arg1) {
   return window['go']['main']['App']['FileSize'](arg1);
 }
@@ -46,6 +50,14 @@ export function LocateMkvmerge() {
   return window['go']['main']['App']['LocateMkvmerge']();
 }
 
+export function LookupHydrackerURL(arg1) {
+  return window['go']['main']['App']['LookupHydrackerURL'](arg1);
+}
+
+export function MoveToTrash(arg1) {
+  return window['go']['main']['App']['MoveToTrash'](arg1);
+}
+
 export function Mux(arg1) {
   return window['go']['main']['App']['Mux'](arg1);
 }
@@ -54,12 +66,20 @@ export function OpenFolder(arg1) {
   return window['go']['main']['App']['OpenFolder'](arg1);
 }
 
+export function OpenURL(arg1) {
+  return window['go']['main']['App']['OpenURL'](arg1);
+}
+
 export function SaveConfig(arg1) {
   return window['go']['main']['App']['SaveConfig'](arg1);
 }
 
 export function SearchTmdb(arg1) {
   return window['go']['main']['App']['SearchTmdb'](arg1);
+}
+
+export function SearchTmdbMovie(arg1) {
+  return window['go']['main']['App']['SearchTmdbMovie'](arg1);
 }
 
 export function SearchTmdbTV(arg1) {
@@ -82,8 +102,16 @@ export function SelectSubFiles() {
   return window['go']['main']['App']['SelectSubFiles']();
 }
 
+export function TestHydrackerKey(arg1) {
+  return window['go']['main']['App']['TestHydrackerKey'](arg1);
+}
+
 export function TestTmdbKey(arg1) {
   return window['go']['main']['App']['TestTmdbKey'](arg1);
+}
+
+export function TestUnfrKey(arg1) {
+  return window['go']['main']['App']['TestUnfrKey'](arg1);
 }
 
 export function VideoTrackName(arg1, arg2, arg3, arg4) {

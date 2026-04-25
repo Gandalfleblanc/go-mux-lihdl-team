@@ -4,7 +4,11 @@ export namespace config {
 	    tmdb_key: string;
 	    serveurperso_url: string;
 	    fallback_index: string;
+	    hydracker_key: string;
+	    unfr_key: string;
 	    output_dir: string;
+	    output_dir_lihdl: string;
+	    output_dir_psa: string;
 	    mkvmerge_path: string;
 	    default_encoder: string;
 	    default_team: string;
@@ -20,7 +24,11 @@ export namespace config {
 	        this.tmdb_key = source["tmdb_key"];
 	        this.serveurperso_url = source["serveurperso_url"];
 	        this.fallback_index = source["fallback_index"];
+	        this.hydracker_key = source["hydracker_key"];
+	        this.unfr_key = source["unfr_key"];
 	        this.output_dir = source["output_dir"];
+	        this.output_dir_lihdl = source["output_dir_lihdl"];
+	        this.output_dir_psa = source["output_dir_psa"];
 	        this.mkvmerge_path = source["mkvmerge_path"];
 	        this.default_encoder = source["default_encoder"];
 	        this.default_team = source["default_team"];
@@ -33,6 +41,20 @@ export namespace config {
 
 export namespace main {
 	
+	export class ApiKeyTestResult {
+	    ok: boolean;
+	    message: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ApiKeyTestResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ok = source["ok"];
+	        this.message = source["message"];
+	    }
+	}
 	export class LihdlOptions {
 	    audio_labels: string[];
 	    subtitle_labels: string[];
@@ -65,6 +87,7 @@ export namespace main {
 	    secondary_path: string;
 	    secondary_audios: mkvtool.SecondaryTrack[];
 	    secondary_subs: mkvtool.SecondaryTrack[];
+	    no_chapters: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new MuxRequest(source);
@@ -81,6 +104,7 @@ export namespace main {
 	        this.secondary_path = source["secondary_path"];
 	        this.secondary_audios = this.convertValues(source["secondary_audios"], mkvtool.SecondaryTrack);
 	        this.secondary_subs = this.convertValues(source["secondary_subs"], mkvtool.SecondaryTrack);
+	        this.no_chapters = source["no_chapters"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

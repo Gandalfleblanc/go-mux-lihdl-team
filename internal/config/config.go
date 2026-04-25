@@ -13,12 +13,16 @@ type Config struct {
 	TmdbKey         string `json:"tmdb_key"`
 	ServeurPersoURL string `json:"serveurperso_url"` // index TMDB primaire (par défaut tmdb.uklm.xyz)
 	FallbackIndex   string `json:"fallback_index"`   // index TMDB fallback (par défaut serveurperso)
-	OutputDir       string `json:"output_dir"`       // dossier de sortie pour les .mkv muxés
+	HydrackerKey    string `json:"hydracker_key"`    // clé API Hydracker (recherche fiches par TMDB ID)
+	UnfrKey         string `json:"unfr_key"`         // clé API UNFR.pw
+	OutputDir       string `json:"output_dir"`       // dossier de sortie par défaut (legacy / fallback)
+	OutputDirLihdl  string `json:"output_dir_lihdl"` // dossier de sortie spécifique au mode MUX LiHDL
+	OutputDirPSA    string `json:"output_dir_psa"`   // dossier de sortie spécifique au mode MUX CUSTOM PSA SERIES
 	MkvmergePath    string `json:"mkvmerge_path"`    // override manuel du binaire mkvmerge (sinon auto-détection)
-	DefaultEncoder  string `json:"default_encoder"`  // encodeur pré-sélectionné (ex: GANDALF)
-	DefaultTeam     string `json:"default_team"`     // team pré-sélectionnée (ex: LiHDL)
-	DefaultQuality  string `json:"default_quality"`  // qualité pré-sélectionnée (ex: HDLight)
-	DefaultSource   string `json:"default_source"`   // source pré-sélectionnée (ex: REMUX LiHDL)
+	DefaultEncoder  string `json:"default_encoder"`  // encodeur pré-sélectionné
+	DefaultTeam     string `json:"default_team"`     // team pré-sélectionnée
+	DefaultQuality  string `json:"default_quality"`  // qualité pré-sélectionnée
+	DefaultSource   string `json:"default_source"`   // source pré-sélectionnée
 }
 
 func configDir() (string, error) {

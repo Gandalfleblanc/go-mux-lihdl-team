@@ -15,6 +15,8 @@ export function CancelMux():Promise<void>;
 
 export function CheckUpdate():Promise<main.UpdateInfo>;
 
+export function CheckVFQ(arg1:string):Promise<boolean>;
+
 export function FileSize(arg1:string):Promise<number>;
 
 export function GetConfig():Promise<config.Config>;
@@ -27,13 +29,21 @@ export function InstallUpdate():Promise<void>;
 
 export function LocateMkvmerge():Promise<string>;
 
+export function LookupHydrackerURL(arg1:number):Promise<string>;
+
+export function MoveToTrash(arg1:Array<string>):Promise<void>;
+
 export function Mux(arg1:main.MuxRequest):Promise<void>;
 
 export function OpenFolder(arg1:string):Promise<void>;
 
+export function OpenURL(arg1:string):Promise<void>;
+
 export function SaveConfig(arg1:config.Config):Promise<void>;
 
 export function SearchTmdb(arg1:string):Promise<Array<tmdb.Result>>;
+
+export function SearchTmdbMovie(arg1:string):Promise<Array<tmdb.Result>>;
 
 export function SearchTmdbTV(arg1:string):Promise<Array<tmdb.Result>>;
 
@@ -45,6 +55,10 @@ export function SelectOutputDir():Promise<string>;
 
 export function SelectSubFiles():Promise<Array<string>>;
 
+export function TestHydrackerKey(arg1:string):Promise<main.ApiKeyTestResult>;
+
 export function TestTmdbKey(arg1:string):Promise<main.TmdbTestResult>;
+
+export function TestUnfrKey(arg1:string):Promise<main.ApiKeyTestResult>;
 
 export function VideoTrackName(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;

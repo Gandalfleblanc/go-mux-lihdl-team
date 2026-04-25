@@ -4,7 +4,7 @@
   import logo from './assets/images/logo.png';
   import {
     GetVersion, GetConfig, SaveConfig, GetLihdlOptions,
-    SelectMkvFile, SelectSubFiles, SelectAudioFiles, SelectOutputDir, LocateMkvmerge, OpenFolder, SearchTmdbTV, AnalyzeMkvSecondary,
+    SelectMkvFile, SelectSubFiles, SelectAudioFiles, SelectOutputDir, LocateMkvmerge, OpenFolder, SearchTmdbTV, SearchTmdbMovie, AnalyzeMkvSecondary, MoveToTrash, CheckVFQ, LookupHydrackerURL, TestHydrackerKey, TestUnfrKey, OpenURL,
     AnalyzeMkv, SearchTmdb, TestTmdbKey, FileSize,
     Mux, CancelMux,
     CheckUpdate, InstallUpdate,
@@ -85,6 +85,23 @@
     return `S${s}E${e}`;
   }
 
+  // Détecte le type de source depuis le nom de fichier selon les normes LiHDL.
+  // Priorité : REMUX CUSTOM > WEB-DL CUSTOM > WEB CUSTOM > REMUX > WEB-DL > WEBRip > WEB > COMPLETE BluRay
+  // "COMPLETE BluRay" exige les deux mots présents — sinon pas d'auto-detect.
+  function detectSourceType(filename) {
+    const n = String(filename || '').toUpperCase();
+    const hasCustom = /\bCUSTOM\b/.test(n);
+    if (/\bREMUX\b/.test(n) && hasCustom)  return 'REMUX CUSTOM';
+    if (/\bWEB-DL\b/.test(n) && hasCustom) return 'WEB-DL CUSTOM';
+    if (/\bWEB\b/.test(n) && hasCustom && !/\bWEB-DL\b/.test(n)) return 'WEB CUSTOM';
+    if (/\bREMUX\b/.test(n))   return 'REMUX';
+    if (/\bWEB-DL\b/.test(n))  return 'WEB-DL';
+    if (/\bWEBRIP\b/.test(n))  return 'WEBRip';
+    if (/\bWEB\b/.test(n))     return 'WEB';
+    if (/\bCOMPLETE\b/.test(n) && /\bBLURAY\b/.test(n)) return 'COMPLETE BluRay';
+    return '';
+  }
+
   // Parse infos d'un nom de fichier PSA (vidéo principale).
   // Retourne : { isPSA, source, videoCodec, team }.
   function parsePsaSourceInfo(filename) {
@@ -144,6 +161,115 @@
   let tmdbResults = [];
   let tmdbQuery = '';
   let tmdbMode = 'movie'; // 'movie' | 'tv'
+  // VFQ par défaut OFF (= la majorité des films n'ont pas de doublage québécois).
+  // Auto-check via CheckVFQ après pick TMDB peut le passer ON.
+  // L'utilisateur peut toggler manuellement à tout moment.
+  let vfqAvailable = false;
+  // Règle universelle pour les subs : un label "FR Forced" ou "FR VFF Forced"
+  // a default=true ET forced=true. Toutes les autres subs ont les 2 à false.
+  function isForcedFRLabel(label) {
+    return /^FR( VFF)? Forced\b/.test(label || '');
+  }
+  // Applique la règle Forced à tous les subs (internes + externes + secondaires).
+  // À appeler après tout changement de label sub.
+  function applySubForcedRule() {
+    tracks = tracks.map(t => {
+      if (t.type !== 'subtitles') return t;
+      const f = isForcedFRLabel(t.label);
+      return { ...t, default: f, forced: f };
+    });
+    externalSubs = externalSubs.map(s => {
+      const f = isForcedFRLabel(s.label);
+      return { ...s, default: f, forced: f };
+    });
+    secondarySelected = secondarySelected.map(t => {
+      if (t.type !== 'subtitles') return t;
+      const f = isForcedFRLabel(t.label);
+      return { ...t, default: f, forced: f };
+    });
+  }
+  // Appelé sur changement de dropdown sub. Mute uniquement la piste concernée.
+  function onSubLabelChange() {
+    applySubForcedRule();
+  }
+
+  // Swap immédiat des labels audio FR VFF ↔ FR VFQ quand le toggle change.
+  // Couvre aussi externalAudios + secondarySelected pour mode PSA.
+  // Swap immédiat FR VFF ↔ FR VFi selon vfqAvailable (sans vérif TMDB).
+  function applyVFQAvailableSwapOnly() {
+    const swapVFFtoVFi = (lbl) => /^FR VFF\b/.test(lbl) ? lbl.replace(/^FR VFF/, 'FR VFi') : lbl;
+    const swapVFitoVFF = (lbl) => /^FR VFi\b/.test(lbl) ? lbl.replace(/^FR VFi/, 'FR VFF') : lbl;
+    const fn = vfqAvailable ? swapVFitoVFF : swapVFFtoVFi;
+    tracks = tracks.map(t => t.type === 'audio'
+      ? { ...t, label: fn(t.label || '') }
+      : t);
+    externalAudios = externalAudios.map(a => ({ ...a, label: fn(a.label || '') }));
+    secondarySelected = secondarySelected.map(t => t.type === 'audio'
+      ? { ...t, label: fn(t.label || '') }
+      : t);
+    appendLog(vfqAvailable ? '↻ FR VFi → FR VFF' : '↻ FR VFF → FR VFi');
+  }
+
+  // Handler du toggle : applique le swap, puis si l'utilisateur a coché ON,
+  // vérifie via TMDB CheckVFQ. Si TMDB dit pas de trad fr-CA → décoche auto.
+  async function applyVFQAvailableSwap() {
+    applyVFQAvailableSwapOnly();
+    if (vfqAvailable && lastTmdbResult && lastTmdbResult.tmdb_id && config.tmdb_key) {
+      try {
+        const has = await CheckVFQ(lastTmdbResult.tmdb_id);
+        if (!has) {
+          vfqAvailable = false;
+          appendLog('⚠ TMDB : pas de trad fr-CA → toggle décoché automatiquement');
+          applyVFQAvailableSwapOnly();
+        }
+      } catch (_) { /* silencieux */ }
+    }
+  }
+
+  // URL fiche Hydracker (résolue via API à partir de l'ID TMDB ; vide si pas de clé)
+  let hydrackerURL = '';
+
+  // Réinitialiser tous les états de la session courante (source, secondaire,
+  // pistes, sous-titres externes, TMDB, status). Ne supprime pas les fichiers.
+  function resetAll() {
+    sourcePath = '';
+    sourceInfo = null;
+    tracks = [];
+    secondaryPath = '';
+    secondaryTracks = [];
+    secondarySelected = [];
+    externalSubs = [];
+    externalAudios = [];
+    lastTmdbResult = null;
+    tmdbResults = [];
+    tmdbQuery = '';
+    target = { ...target, title: '', year: '', episode: '', flagOverride: 'auto' };
+    filenameOverride = false;
+    manualFilename = '';
+    vfqAvailable = false;
+    hydrackerURL = '';
+    autoMuxStatus = '';
+    if (autoMuxStatusTimer) { clearTimeout(autoMuxStatusTimer); autoMuxStatusTimer = null; }
+    appendLog('↻ Réinitialisé');
+  }
+
+  // Auto-reset après mux réussi : envoie source + sous-titres + secondaire à
+  // la corbeille (réversible), puis reset l'état.
+  async function autoResetAfterMux() {
+    const toTrash = [];
+    if (sourcePath) toTrash.push(sourcePath);
+    if (secondaryPath) toTrash.push(secondaryPath);
+    for (const s of externalSubs) if (s.path) toTrash.push(s.path);
+    if (toTrash.length > 0) {
+      try {
+        await MoveToTrash(toTrash);
+        appendLog(`🗑 ${toTrash.length} fichier(s) envoyé(s) à la corbeille`);
+      } catch (e) {
+        appendLog('⚠ corbeille : ' + String(e));
+      }
+    }
+    resetAll();
+  }
   let filenameCopied = false;
   let filenameCopiedTimer = null;
   let filenameOverride = false;   // true = l'utilisateur a pris la main sur le nom
@@ -375,8 +501,8 @@
       let keepFlag = true;
       if (t.type === 'audio') {
         label = inferAudioLabel(t);
-        // Code langue : VFQ → fr-CA (BCP 47), VFF/VFi/AD → fre, sinon ISO ou langue d'origine.
-        if (/\bFR VFQ\b/.test(label))           language = 'fr-CA';
+        // Code langue : VFQ → fr-ca, VFF/VFi/AD → fre, sinon ISO ou langue d'origine.
+        if (/\bFR VFQ\b/.test(label))           language = 'fr-ca';
         else if (/^FR /.test(label))             language = 'fre';
         else if (/^ENG /.test(label))            language = 'eng';
         else if (/^JPN /.test(label))            language = 'jpn';
@@ -392,7 +518,7 @@
         const key = lang || 'und';
         seenLangSubs[key] = (seenLangSubs[key] ?? -1) + 1;
         label = inferSubLabel(t, seenLangSubs[key]);
-        if (/\bFR VFQ\b/.test(label))            language = 'fr-CA';
+        if (/\bFR VFQ\b/.test(label))            language = 'fr-ca';
         else if (/^FR /.test(label))             language = 'fre';
         else if (/^ENG /.test(label))            language = 'eng';
         else                                      language = lang || 'und';
@@ -424,6 +550,18 @@
     // Marque la 1ère piste audio FR comme default.
     const firstFr = secondarySelected.find(t => t.type === 'audio' && t.language === 'fre');
     if (firstFr) firstFr.default = true;
+
+    // Norme LiHDL : la piste FR Forced est placée EN PREMIER parmi les subs.
+    const subEntries = secondarySelected.filter(t => t.type === 'subtitles');
+    if (subEntries.length > 0) {
+      const minOrder = Math.min(...subEntries.map(t => t.order ?? 0));
+      for (const t of secondarySelected) {
+        if (t.type === 'subtitles' && /^FR( VFF)? Forced\b/.test(t.label || '')) {
+          t.order = minOrder - 1;
+          break;
+        }
+      }
+    }
 
     // Debug : log de chaque piste audio avec ses indicateurs Atmos depuis mediainfo
     for (const raw of secondaryTracks) {
@@ -548,9 +686,17 @@
   // Remplace espaces ET tirets par des points (pas de - dans le titre).
   // Puis compresse les points multiples.
   function dotify(s) {
-    return String(s || '').trim()
-      .replace(/[\s-]+/g, '.')
-      .replace(/\.+/g, '.');
+    // Convertit espaces/tirets en points, capitalise chaque segment.
+    // ex: "jurassic world: fallen kingdom" → "Jurassic.World.Fallen.Kingdom"
+    const cleaned = String(s || '').trim()
+      .replace(/[\s\-]+/g, '.')      // espaces et tirets → points
+      .replace(/[^\w.À-ſ]/g, '')  // retire les autres caractères (sauf accents)
+      .replace(/\.+/g, '.');           // points consécutifs → un seul
+    // Capitalise la 1ère lettre de chaque segment entre points
+    return cleaned.split('.').map(seg => {
+      if (!seg) return seg;
+      return seg.charAt(0).toUpperCase() + seg.slice(1);
+    }).join('.');
   }
 
   // Version FR uniquement si FRENCH / TRUEFRENCH / VOF apparaissent.
@@ -571,7 +717,19 @@
   function extractSourceTeam(path) {
     const name = basename(path || '').replace(/\.[^.]+$/, '');
     const m = /-([A-Za-z0-9]+)\s*$/.exec(name);
-    return m ? m[1] : '';
+    return m ? normalizeLihdl(m[1]) : '';
+  }
+
+  // Normalise un nom de team selon les conventions LiHDL :
+  //   - "lihdl" (n'importe quelle casse) → "LiHDL" exactement
+  //   - autres teams → MAJUSCULES sauf les "i" qui restent minuscules
+  // Ex : "psa" → "PSA", "supply" → "SUPPLY", "Alkaline" → "ALKALiNE"
+  function normalizeLihdl(s) {
+    if (!s) return s;
+    return String(s).replace(/\b[A-Za-z][A-Za-z0-9]*\b/g, (word) => {
+      if (/^lihdl$/i.test(word)) return 'LiHDL';
+      return word.toUpperCase().replace(/I/g, 'i');
+    });
   }
 
   // Suggestion auto du codec cible (ex : H264 si détecté AVC + source WEB-DL,
@@ -634,14 +792,18 @@
     const vc = videoCodecLihdl();
     if (vc) parts.push(vc);
     let name = parts.filter(Boolean).join('.');
+    // Team de sortie (LiHDL/GANDALF) : déjà canonique via dropdown.
     if (videoChoice.team) name += '-' + videoChoice.team;
     return name + '.mkv';
   }
 
   function videoTrackNameClient() {
     // Format LiHDL : "HDLight By GANDALF (Source COMPLETE BluRay Alkaline)"
-    const src = videoChoice.sourceTeam
-      ? `${videoChoice.sourceType} ${videoChoice.sourceTeam}`
+    // Seul le sourceTeam (release team extrait du nom source) est normalisé,
+    // les autres composants viennent des dropdowns avec leur casing canonique.
+    const sourceTeam = normalizeLihdl(videoChoice.sourceTeam || '');
+    const src = sourceTeam
+      ? `${videoChoice.sourceType} ${sourceTeam}`
       : videoChoice.sourceType;
     return `${videoChoice.quality} By ${videoChoice.encoder} (Source ${src})`;
   }
@@ -701,6 +863,13 @@
         if (psa.videoCodec) target.video_codec = psa.videoCodec;
         appendLog(`✓ PSA détecté : ${psa.source || '?'} ${psa.videoCodec || '?'} → Custom PSA / GANDALF`);
       }
+    } else if (muxMode === 'lihdl') {
+      // Mode LiHDL : auto-detect du sourceType depuis le nom (REMUX CUSTOM > REMUX > BluRay…)
+      const detected = detectSourceType(filename);
+      if (detected) {
+        videoChoice.sourceType = detected;
+        appendLog(`✓ Source détectée : ${detected}`);
+      }
     }
     AnalyzeMkv(path); // fire-and-forget, résultat via event 'analyze:result'
   }
@@ -710,7 +879,6 @@
     sourceInfo = { tracks: rawTracks };
     externalSubs = []; // reset les subs externes quand on recharge un mkv
     tracks = rawTracks.map((t, i) => {
-      // Les pistes viennent avec les champs aplatis (pas de .properties imbriqué).
       const base = {
         id: t.id,
         type: t.type,
@@ -723,13 +891,22 @@
         default: !!t.default_track,
         forced: !!t.forced_track,
         name: t.track_name || '',
-        order: i * 10, // pas de 10 pour laisser de la place aux externes
+        order: i * 10,
+        // Champs mediainfo (peuvent être absents) — utilisés par automateLihdl
+        mi_title: t.mi_title || '',
+        mi_format_profile: t.mi_format_profile || '',
+        mi_format_commercial: t.mi_format_commercial || '',
+        mi_format_commercial_if_any: t.mi_format_commercial_if_any || '',
+        mi_format_features: t.mi_format_features || '',
+        mi_service_kind: t.mi_service_kind || '',
+        mi_service_kind_name: t.mi_service_kind_name || '',
       };
       if (t.type === 'audio')     base.label = suggestAudioLabelFlat(base);
       if (t.type === 'subtitles') base.label = suggestSubLabelFlat(base);
       if (t.type === 'video')     base.label = '';
       return base;
     });
+    applySubForcedRule();
     if (sourcePath) maybeAutoFillTitle(sourcePath);
   }
 
@@ -818,6 +995,7 @@
     if (paths.length > 0) {
       appendLog('✓ ' + paths.length + ' sous-titre(s) ajouté(s)');
     }
+    applySubForcedRule();
   }
 
   async function pickSubsDialog() {
@@ -1014,19 +1192,28 @@
       tmdbSearching = true;
       let r;
       if (forceTV) {
+        // Mode PSA / série
         if (!config.tmdb_key) {
           appendLog('⚠ Clé API TMDB requise pour la recherche série — Réglages');
           r = await SearchTmdb(cleanedDotted);
         } else {
           try {
-            // API TMDB attend des espaces, pas des points
             r = await SearchTmdbTV(cleanedSpaces);
           } catch (e) {
             appendLog('⚠ Recherche TV : ' + String(e) + ' — fallback index');
             r = await SearchTmdb(cleanedDotted);
           }
         }
+      } else if (muxMode === 'lihdl' && config.tmdb_key) {
+        // Mode LiHDL avec clé API : recherche film officielle (homogène avec PSA TV)
+        try {
+          r = await SearchTmdbMovie(cleanedSpaces);
+        } catch (e) {
+          appendLog('⚠ Recherche film API : ' + String(e) + ' — fallback index');
+          r = await SearchTmdb(cleanedDotted);
+        }
       } else {
+        // Pas de clé : index générique (films + séries mélangés)
         r = await SearchTmdb(cleanedDotted);
       }
       tmdbResults = r || [];
@@ -1036,9 +1223,10 @@
         let picked = r[0];
         if (config.tmdb_key && picked.tmdb_id && !picked.overview) {
           try {
-            const detail = forceTV
-              ? await SearchTmdbTV(picked.tmdb_id)
-              : await SearchTmdb(picked.tmdb_id);
+            let detail;
+            if (forceTV) detail = await SearchTmdbTV(picked.tmdb_id);
+            else if (muxMode === 'lihdl') detail = await SearchTmdbMovie(picked.tmdb_id);
+            else detail = await SearchTmdb(picked.tmdb_id);
             if (detail && detail.length > 0) picked = detail[0];
           } catch (_) { /* fallback sur résultat de base */ }
         }
@@ -1047,6 +1235,34 @@
         target.year  = picked.annee_fr || '';
         const suffix = r.length > 1 ? ` (${r.length} résultats — top auto)` : '';
         appendLog('✓ TMDB' + (forceTV ? ' (série)' : '') + ' : ' + target.title + suffix);
+        // Mode LiHDL : vérifie automatiquement la présence d'une trad fr-CA
+        // sur TMDB (signal fort d'un VFQ existant). L'utilisateur peut
+        // toujours toggle manuellement après.
+        if (muxMode === 'lihdl' && picked.tmdb_id && config.tmdb_key) {
+          try {
+            const has = await CheckVFQ(picked.tmdb_id);
+            vfqAvailable = !!has;
+            appendLog(`📺 VFQ via TMDB : ${has ? 'trad fr-CA complète trouvée → VFF' : 'pas de trad fr-CA → VFi (par défaut)'}`);
+          } catch (_) { vfqAvailable = false; }
+        } else if (muxMode === 'lihdl') {
+          vfqAvailable = false;
+        }
+        // Mode LiHDL : résolution Hydracker en arrière-plan (cache 12h)
+        hydrackerURL = '';
+        if (muxMode === 'lihdl' && picked.tmdb_id && config.hydracker_key) {
+          try {
+            const id = parseInt(picked.tmdb_id, 10);
+            if (Number.isFinite(id)) {
+              const url = await LookupHydrackerURL(id);
+              if (url) {
+                hydrackerURL = url;
+                appendLog('🔗 Hydracker : fiche trouvée → ' + url);
+              } else {
+                appendLog('ℹ Hydracker : pas de fiche pour ce TMDB ID');
+              }
+            }
+          } catch (_) { /* silencieux, fallback search */ }
+        }
       } else {
         appendLog('ℹ Aucun résultat TMDB pour « ' + cleanedDotted + ' »');
       }
@@ -1086,15 +1302,31 @@
     if (p) openMkv(p);
   }
 
+  // Renvoie le dossier de sortie selon le mode courant (mode-specific puis fallback).
+  function effectiveOutputDir() {
+    if (muxMode === 'lihdl') return config.output_dir_lihdl || config.output_dir || '';
+    if (muxMode === 'psa')   return config.output_dir_psa   || config.output_dir || '';
+    return config.output_dir || '';
+  }
+
   async function pickOutputDir() {
     const d = await SelectOutputDir();
     if (d) config.output_dir = d;
   }
+  async function pickOutputDirLihdl() {
+    const d = await SelectOutputDir();
+    if (d) config.output_dir_lihdl = d;
+  }
+  async function pickOutputDirPSA() {
+    const d = await SelectOutputDir();
+    if (d) config.output_dir_psa = d;
+  }
 
   async function openOutputDir() {
-    if (!config.output_dir) { appendLog('⚠ Dossier de sortie non défini'); return; }
+    const dir = effectiveOutputDir();
+    if (!dir) { appendLog('⚠ Dossier de sortie non défini'); return; }
     try {
-      await OpenFolder(config.output_dir);
+      await OpenFolder(dir);
     } catch (e) {
       appendLog('❌ Ouvrir dossier : ' + String(e));
     }
@@ -1107,6 +1339,8 @@
   }
 
   let tmdbTest = { running: false, ok: null, message: '' };
+  let hydrackerTest = { running: false, ok: null, message: '' };
+  let unfrTest = { running: false, ok: null, message: '' };
 
   // Auto-update state.
   let updateInfo = null;       // {version, url, notes} si dispo
@@ -1154,9 +1388,30 @@
     }
   }
 
+  async function doTestHydrackerKey() {
+    hydrackerTest = { running: true, ok: null, message: '' };
+    try {
+      const r = await TestHydrackerKey(config.hydracker_key || '');
+      hydrackerTest = { running: false, ok: !!r.ok, message: r.message || '' };
+    } catch (e) {
+      hydrackerTest = { running: false, ok: false, message: String(e) };
+    }
+  }
+
+  async function doTestUnfrKey() {
+    unfrTest = { running: true, ok: null, message: '' };
+    try {
+      const r = await TestUnfrKey(config.unfr_key || '');
+      unfrTest = { running: false, ok: !!r.ok, message: r.message || '' };
+    } catch (e) {
+      unfrTest = { running: false, ok: false, message: String(e) };
+    }
+  }
+
   async function doMux() {
     if (!sourcePath)        { appendLog('⚠ Aucun .mkv source'); return; }
-    if (!config.output_dir) { appendLog('⚠ Dossier de sortie non défini — ouvre Réglages'); return; }
+    const outDir = effectiveOutputDir();
+    if (!outDir) { appendLog('⚠ Dossier de sortie non défini — ouvre Réglages'); return; }
     if (!effectiveFilename) { appendLog('⚠ Nom de fichier incomplet'); return; }
 
     // Construit le nom de piste vidéo LiHDL et rattache aux tracks.
@@ -1206,7 +1461,7 @@
       Order: t.order ?? 0,
     }));
 
-    const outputPath = config.output_dir.replace(/\/$/, '') + '/' + effectiveFilename;
+    const outputPath = outDir.replace(/\/$/, '') + '/' + effectiveFilename;
 
     muxing = true;
     muxPercent = 0;
@@ -1222,6 +1477,7 @@
         secondary_path: secondaryPath,
         secondary_audios: secAudios,
         secondary_subs: secSubs,
+        no_chapters: muxMode === 'lihdl', // LiHDL : on retire les chapitres ; PSA : on les garde
       });
       success = true;
     } catch (e) {
@@ -1233,6 +1489,115 @@
   }
 
   function stopMux() { CancelMux(); }
+
+  // ⚡ MUX MANUEL LiHDL : auto-label de toutes les pistes internes + réglages film.
+  // Navigue automatiquement vers Cible une fois les labels appliqués.
+  function automateLihdl(navigateToCible = true) {
+    if (!sourcePath) { appendLog('⚠ Charge un fichier d\'abord'); return; }
+    if (tracks.length === 0) { appendLog('⚠ Pistes pas encore analysées — patiente'); return; }
+    let firstFRdone = false;
+    let nbAudio = 0, nbSubs = 0;
+    tracks = tracks.map(t => {
+      if (t.type === 'video') return t;
+      const raw = {
+        language: t.lang,
+        track_name: t.name,
+        audio_channels: t.channels,
+        codec_id: t.codecId,
+        codec: t.codec,
+        forced_track: t.forced,
+        mi_title: t.mi_title,
+        mi_format_profile: t.mi_format_profile,
+        mi_format_commercial: t.mi_format_commercial,
+        mi_format_commercial_if_any: t.mi_format_commercial_if_any,
+        mi_format_features: t.mi_format_features,
+        mi_service_kind: t.mi_service_kind,
+        mi_service_kind_name: t.mi_service_kind_name,
+      };
+      if (t.type === 'audio') {
+        const newLabel = inferAudioLabel(raw);
+        const isFR = /^FR /.test(newLabel);
+        const isDefault = isFR && !firstFRdone;
+        if (isDefault) firstFRdone = true;
+        nbAudio++;
+        return { ...t, label: newLabel, keep: true, default: isDefault, forced: false };
+      } else { // subtitles
+        const newLabel = inferSubLabel(raw, 0);
+        const isForcedFR = /^FR( VFF)? Forced\b/.test(newLabel);
+        nbSubs++;
+        return {
+          ...t,
+          label: newLabel,
+          keep: true,
+          default: isForcedFR,
+          forced: isForcedFR,
+        };
+      }
+    });
+    // Si pas de VFQ (= un seul doublage français existe) → swap FR VFF en FR VFi
+    if (vfqAvailable === false) {
+      tracks = tracks.map(t => {
+        if (t.type !== 'audio') return t;
+        if (/^FR VFF\b/.test(t.label || '')) {
+          return { ...t, label: t.label.replace(/^FR VFF/, 'FR VFi') };
+        }
+        return t;
+      });
+      appendLog('↻ Pas de VFQ → labels FR VFF convertis en FR VFi');
+    }
+
+    // Subs externes : applique aussi la règle FR Forced → keep + default + forced
+    // (les externes ne passent pas par automateLihdl ci-dessus, on les traite ici).
+    externalSubs = externalSubs.map(s => {
+      const isForcedFR = /^FR( VFF)? Forced\b/.test(s.label || '');
+      return { ...s, keep: true, default: isForcedFR, forced: isForcedFR };
+    });
+
+    // Norme LiHDL : la piste FR Forced est toujours placée EN PREMIER parmi
+    // les sous-titres — qu'elle soit interne (tracks) OU externe (externalSubs).
+    const allSubs = [
+      ...tracks.filter(t => t.type === 'subtitles').map(t => t.order ?? 0),
+      ...externalSubs.map(s => s.order ?? 0),
+    ];
+    const minSubOrder = allSubs.length > 0 ? Math.min(...allSubs) : 0;
+    const fwdOrder = minSubOrder - 1;
+    let forcedFRDone = false;
+    tracks = tracks.map(t => {
+      if (!forcedFRDone && t.type === 'subtitles' && /^FR( VFF)? Forced\b/.test(t.label || '')) {
+        forcedFRDone = true;
+        return { ...t, order: fwdOrder };
+      }
+      return t;
+    });
+    if (!forcedFRDone) {
+      externalSubs = externalSubs.map(s => {
+        if (!forcedFRDone && /^FR( VFF)? Forced\b/.test(s.label || '')) {
+          forcedFRDone = true;
+          return { ...s, order: fwdOrder };
+        }
+        return s;
+      });
+    }
+    if (forcedFRDone) appendLog('↑ FR Forced placé en 1er dans les sous-titres');
+
+    videoChoice.team = 'LiHDL';
+    target.episode = '';
+    appendLog(`⚡ LiHDL automatisé : ${nbAudio} audio(s) + ${nbSubs} sub(s) labellisés → Cible`);
+    if (navigateToCible) screen = 'cible';
+  }
+
+  // 🚀 MUX AUTO LiHDL : automateLihdl puis doMux direct (sans nav vers Cible).
+  async function muxAutoLihdl() {
+    if (!sourcePath) { appendLog('⚠ Charge un fichier d\'abord'); return; }
+    autoMuxStatus = '';
+    if (autoMuxStatusTimer) { clearTimeout(autoMuxStatusTimer); autoMuxStatusTimer = null; }
+    automateLihdl(false); // pas de navigation, on reste sur source pour la barre de progress
+    await new Promise(r => setTimeout(r, 200));
+    const ok = await doMux();
+    autoMuxStatus = ok ? 'success' : 'error';
+    autoMuxStatusTimer = setTimeout(() => { autoMuxStatus = ''; }, 12000);
+    if (ok) await autoResetAfterMux();
+  }
 
   // MUX AUTO : automate puis lance le mux directement, sans passer par Cible.
   let autoMuxStatus = '';   // '' | 'success' | 'error'
@@ -1251,6 +1616,7 @@
     const ok = await doMux();
     autoMuxStatus = ok ? 'success' : 'error';
     autoMuxStatusTimer = setTimeout(() => { autoMuxStatus = ''; }, 12000);
+    if (ok) await autoResetAfterMux();
   }
 
   onMount(async () => {
@@ -1341,6 +1707,10 @@
           <span class="version-label">{appVersion}</span>
         </button>
       {/if}
+      <button class="reset-btn" on:click={resetAll} disabled={muxing} title="Réinitialiser la session">
+        <span>↻</span>
+        <span class="reset-label">RESET</span>
+      </button>
       <button class="settings-btn" on:click={() => screen = 'reglages'}>
         <span class="gear">⚙</span>
         <span class="settings-label">SETTINGS</span>
@@ -1405,9 +1775,86 @@
             </button>
           </div>
         {/if}
+
+        <!-- Ligne ② Sous-titres externes (mode LiHDL uniquement) -->
+        {#if muxMode === 'lihdl'}
+          <div class="source-row secondary">
+            <div class="source-info">
+              <div class="source-label">
+                <span class="source-num">②</span>
+                Sous-titres
+                <span class="source-hint">(SRT/PGS/ASS · optionnel)</span>
+              </div>
+              {#if externalSubs.length > 0}
+                <div class="source-meta">{externalSubs.length} sous-titre(s) chargé(s)</div>
+                {#each externalSubs as s}
+                  <div class="source-filename mono">• {basename(s.path)}</div>
+                {/each}
+              {:else}
+                <div class="source-empty">— Aucun sous-titre chargé —</div>
+              {/if}
+            </div>
+            <div style:display="flex" style:flex-direction="column" style:gap="6px" style:flex-shrink="0">
+              <button class="btn-primary" on:click={pickSubsDialog}>+ Ajouter</button>
+              {#if externalSubs.length > 0}
+                <button class="btn-ghost" on:click={() => externalSubs = []}>Vider</button>
+              {/if}
+            </div>
+          </div>
+        {/if}
       </div>
 
       <!-- Actions : barre d'automatisation (mode PSA, après chargement des 2) -->
+      <!-- Barre d'actions mode LiHDL : MUX MANUEL / MUX AUTO / Suivant -->
+      {#if muxMode === 'lihdl' && sourcePath && tracks.length > 0}
+        <div class="card automate-bar">
+          <div class="actions-row" style:gap="8px">
+            <button class="btn-primary" on:click={() => automateLihdl()} disabled={muxing}>⚡ MUX MANUEL</button>
+            <button class="btn-primary btn-auto" on:click={muxAutoLihdl} disabled={muxing}>🚀 MUX AUTO</button>
+            <button class="btn-primary" on:click={() => screen = 'cible'} disabled={muxing}>Suivant → Cible</button>
+          </div>
+          <!-- Recherche sous-titres SRT : liens externes (via Wails BrowserOpenURL) -->
+          {#if lastTmdbResult && lastTmdbResult.tmdb_id}
+            <div class="vfq-toggle" style:margin-top="8px">
+              <span class="srt-label">🔍 Recherche sous-titres SRT</span>
+              <button class="vfq-link" type="button" on:click={() => OpenURL(hydrackerURL || `https://hydracker.com/titles?search=${encodeURIComponent(lastTmdbResult.titre_fr || lastTmdbResult.titre_vo || '')}`)}>vérifier sur Hydra ↗</button>
+              <button class="vfq-link" type="button" on:click={() => OpenURL(`https://unfr.pw/?d=fiche&movieid=${lastTmdbResult.tmdb_id}`)}>vérifier sur UNFR ↗</button>
+            </div>
+          {/if}
+          <label class="vfq-toggle" style:margin-top="8px">
+            <input type="checkbox" bind:checked={vfqAvailable} on:change={applyVFQAvailableSwap} />
+            <span class:vfq-yes={vfqAvailable} class:vfq-no={!vfqAvailable}>
+              {vfqAvailable ? '✓ Doublage québécois disponible (FR → VFF)' : '✗ Pas de VFQ — FR sera labellisé VFi'}
+            </span>
+            {#if lastTmdbResult && lastTmdbResult.tmdb_id}
+              <button class="vfq-link" type="button" on:click={() => OpenURL(`https://www.themoviedb.org/movie/${lastTmdbResult.tmdb_id}/translations`)}>vérifier sur TMDB ↗</button>
+              <button class="vfq-link" type="button" on:click={() => OpenURL(`https://fr.wikipedia.org/w/index.php?title=Special:Search&go=Go&search=${encodeURIComponent(lastTmdbResult.titre_fr || lastTmdbResult.titre_vo || '')}`)}>vérifier sur Wikipédia ↗</button>
+            {/if}
+          </label>
+
+          {#if muxing}
+            <div class="auto-progress">
+              <div class="auto-progress-row">
+                <button class="btn-cancel btn-stop" on:click={stopMux}>⏹ Stop</button>
+                <div class="progress-bar"><div class="progress-fill" style:width="{muxPercent}%"></div></div>
+                <span class="mono">{muxPercent}%</span>
+              </div>
+              <div class="auto-status">Mux en cours…</div>
+            </div>
+          {:else if autoMuxStatus === 'success'}
+            <div class="auto-progress">
+              <div class="progress-bar done"><div class="progress-fill done-fill" style:width="100%"></div></div>
+              <div class="auto-status done">✅ Mux terminé avec succès — fichier prêt dans ton dossier de sortie</div>
+            </div>
+          {:else if autoMuxStatus === 'error'}
+            <div class="auto-progress">
+              <div class="progress-bar error"><div class="progress-fill error-fill" style:width="100%"></div></div>
+              <div class="auto-status error">❌ Mux échoué — vérifie les logs en bas</div>
+            </div>
+          {/if}
+        </div>
+      {/if}
+
       {#if muxMode === 'psa' && secondaryPath && secondaryTracks.length > 0}
         <div class="card automate-bar">
           <div class="actions-row" style:gap="8px">
@@ -1605,7 +2052,7 @@
                   </div>
                 </div>
                 <div class="track-controls">
-                  <select bind:value={item.ref.label}>
+                  <select bind:value={item.ref.label} on:change={onSubLabelChange}>
                     <option value="">— choisir —</option>
                     {#each options.subtitle_labels as lbl}<option>{lbl}</option>{/each}
                   </select>
@@ -1656,6 +2103,17 @@
               <div class="tmdb-picked-meta">
                 {#if lastTmdbResult.duree}{lastTmdbResult.duree} · {/if}⭐ {lastTmdbResult.note || '?'} · ID {lastTmdbResult.tmdb_id}
               </div>
+              {#if muxMode === 'lihdl'}
+                <label class="vfq-toggle">
+                  <input type="checkbox" bind:checked={vfqAvailable} />
+                  <span class:vfq-yes={vfqAvailable} class:vfq-no={!vfqAvailable}>
+                    {vfqAvailable ? '✓ Doublage québécois disponible (FR → VFF)' : '✗ Pas de VFQ — FR sera labellisé VFi'}
+                  </span>
+                  {#if lastTmdbResult.tmdb_id}
+                    <button class="vfq-link" type="button" on:click|preventDefault|stopPropagation={() => OpenURL(`https://www.themoviedb.org/movie/${lastTmdbResult.tmdb_id}/translations`)}>vérifier sur TMDB ↗</button>
+                  {/if}
+                </label>
+              {/if}
               {#if lastTmdbResult.overview}
                 <div class="tmdb-picked-overview">{lastTmdbResult.overview}</div>
               {:else if !config.tmdb_key}
@@ -1782,7 +2240,7 @@
             {/if}
             {#if effectiveFilename}
               <button class="btn-copy" on:click={copyFilename} title="Copier">{filenameCopied ? '✓ Copié' : '📋 Copier'}</button>
-              <button class="btn-copy" on:click={openOutputDir} disabled={!config.output_dir} title="Ouvrir dossier de sortie">📂 Dossier</button>
+              <button class="btn-copy" on:click={openOutputDir} disabled={!effectiveOutputDir()} title="Ouvrir dossier de sortie">📂 Dossier</button>
             {/if}
           </div>
         </div>
@@ -1831,11 +2289,59 @@
       </div>
 
       <div class="card">
-        <div class="section-title">Dossier de sortie</div>
-        <div class="field-row">
-          <input type="text" bind:value={config.output_dir} placeholder="/Users/…/Mux" readonly />
-          <button class="btn-test" on:click={pickOutputDir}>Choisir…</button>
-          <button class="btn-test" on:click={openOutputDir} disabled={!config.output_dir} title="Ouvrir dans le Finder">📂 Ouvrir</button>
+        <div class="section-title">Recherche sous-titres SRT</div>
+        <div class="field"><label>Clé API Hydracker</label>
+          <div class="field-row">
+            <input type="password" bind:value={config.hydracker_key} placeholder="ex: a1b2c3d4… (hydracker.com/account-settings)" />
+            <button class="btn-test" on:click={doTestHydrackerKey} disabled={hydrackerTest.running}>
+              {hydrackerTest.running ? '…' : 'Test'}
+            </button>
+          </div>
+          {#if hydrackerTest.ok !== null}
+            <div class="result-badge {hydrackerTest.ok ? 'ok' : 'err'}">{hydrackerTest.message}</div>
+          {/if}
+          <div class="field-hint">
+            Utilisée pour récupérer la fiche Hydracker à partir d'un ID TMDB (lien direct vers /titles/&lt;id&gt;/&lt;slug&gt;).
+          </div>
+        </div>
+        <div class="field"><label>Clé API UNFR.pw</label>
+          <div class="field-row">
+            <input type="password" bind:value={config.unfr_key} placeholder="ex: token-unfr…" />
+            <button class="btn-test" on:click={doTestUnfrKey} disabled={unfrTest.running}>
+              {unfrTest.running ? '…' : 'Test'}
+            </button>
+          </div>
+          {#if unfrTest.ok !== null}
+            <div class="result-badge {unfrTest.ok ? 'ok' : 'err'}">{unfrTest.message}</div>
+          {/if}
+          <div class="field-hint">
+            Utilisée pour authentifier les requêtes vers l'API UNFR.
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="section-title">Dossiers de sortie</div>
+        <div class="field"><label>⚡ MUX LiHDL (films)</label>
+          <div class="field-row">
+            <input type="text" bind:value={config.output_dir_lihdl} placeholder="/Users/…/Mux/LiHDL" readonly />
+            <button class="btn-test" on:click={pickOutputDirLihdl}>Choisir…</button>
+            <button class="btn-test" on:click={() => config.output_dir_lihdl && OpenFolder(config.output_dir_lihdl)} disabled={!config.output_dir_lihdl} title="Ouvrir dans le Finder">📂</button>
+          </div>
+        </div>
+        <div class="field"><label>🎬 MUX CUSTOM PSA SERIES</label>
+          <div class="field-row">
+            <input type="text" bind:value={config.output_dir_psa} placeholder="/Users/…/Mux/PSA" readonly />
+            <button class="btn-test" on:click={pickOutputDirPSA}>Choisir…</button>
+            <button class="btn-test" on:click={() => config.output_dir_psa && OpenFolder(config.output_dir_psa)} disabled={!config.output_dir_psa} title="Ouvrir dans le Finder">📂</button>
+          </div>
+        </div>
+        <div class="field"><label>Dossier fallback (si l'un des 2 ci-dessus est vide)</label>
+          <div class="field-row">
+            <input type="text" bind:value={config.output_dir} placeholder="/Users/…/Mux" readonly />
+            <button class="btn-test" on:click={pickOutputDir}>Choisir…</button>
+            <button class="btn-test" on:click={() => config.output_dir && OpenFolder(config.output_dir)} disabled={!config.output_dir} title="Ouvrir dans le Finder">📂</button>
+          </div>
         </div>
       </div>
 
@@ -1845,28 +2351,6 @@
           <input type="text" bind:value={config.mkvmerge_path} placeholder="/opt/homebrew/bin/mkvmerge" />
         </div>
         <div class="field-hint">Détecté actuellement : <b class="mono">{mkvmergePath || 'introuvable'}</b></div>
-      </div>
-
-      <div class="card">
-        <div class="section-title">Valeurs par défaut</div>
-        <div class="field"><label>Qualité</label>
-          <select bind:value={config.default_quality}>
-            {#each options.video_qualities as q}<option>{q}</option>{/each}
-          </select>
-        </div>
-        <div class="field"><label>Encodeur</label>
-          <select bind:value={config.default_encoder}>
-            {#each options.video_encoders as e}<option>{e}</option>{/each}
-          </select>
-        </div>
-        <div class="field"><label>Type source piste vidéo</label>
-          <select bind:value={config.default_source}>
-            {#each VIDEO_SOURCE_TYPE_OPTIONS as s}<option>{s}</option>{/each}
-          </select>
-        </div>
-        <div class="field"><label>Team de sortie (dans le filename)</label>
-          <input type="text" bind:value={config.default_team} placeholder="LiHDL" />
-        </div>
       </div>
 
       <div class="actions-row">
@@ -2023,6 +2507,26 @@
   }
   .gear { font-size: 14px; }
 
+  .reset-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 7px 13px; border-radius: 10px;
+    border: 1px solid var(--border);
+    background: rgba(255,255,255,0.04);
+    color: var(--text2);
+    font: inherit; font-size: 11px; font-weight: 700;
+    letter-spacing: 1.5px;
+    cursor: pointer; transition: all 150ms;
+  }
+  .reset-btn:hover:not(:disabled) {
+    background: rgba(239,68,68,0.18);
+    border-color: rgba(239,68,68,0.5);
+    color: rgb(255,180,180);
+  }
+  .reset-btn:hover:not(:disabled) span:first-child { transform: rotate(-180deg); }
+  .reset-btn span:first-child { transition: transform 200ms; font-size: 14px; display: inline-block; }
+  .reset-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .reset-label { font-size: 11px; }
+
   .mux-mode-tabs {
     display: flex; gap: 8px; padding: 8px 20px;
     background: var(--bg-tint);
@@ -2114,7 +2618,22 @@
   .source-filename { font-size: 13px; color: var(--green); margin-top: 4px; word-break: break-all; }
   .source-empty { font-size: 12px; color: var(--text3); margin-top: 4px; font-style: italic; }
   .source-meta { font-size: 11px; color: var(--text3); margin-top: 2px; }
-  .automate-bar { padding: 14px 16px; border-color: rgba(230,57,70,0.4); background: linear-gradient(180deg, rgba(230,57,70,0.06), rgba(0,0,0,0.2)); }
+  .automate-bar { padding: 14px 16px; border-color: rgba(230,57,70,0.4); background: linear-gradient(180deg, rgba(230,57,70,0.06), rgba(0,0,0,0.2)); position: relative; }
+  .btn-reset-corner {
+    position: absolute; top: 10px; right: 10px;
+    width: 28px; height: 28px; border-radius: 50%;
+    background: rgba(0,0,0,0.35); border: 1px solid var(--border);
+    color: var(--text3); font-size: 14px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 150ms;
+  }
+  .btn-reset-corner:hover:not(:disabled) {
+    background: rgba(239,68,68,0.18);
+    border-color: rgba(239,68,68,0.5);
+    color: rgb(255,150,150);
+    transform: rotate(-90deg);
+  }
+  .btn-reset-corner:disabled { opacity: 0.4; cursor: not-allowed; }
   .btn-auto {
     background: linear-gradient(180deg, rgb(180,140,40), rgb(140,100,20));
     border-color: rgb(220,180,80);
@@ -2369,6 +2888,18 @@
   .tmdb-picked-vo { font-size: 12px; color: var(--text2); margin-top: 2px; font-style: italic; }
   .tmdb-picked-meta { font-size: 11px; color: var(--text3); margin-top: 4px; }
   .tmdb-picked-overview { font-size: 12px; color: var(--text2); margin-top: 8px; line-height: 1.5; }
+  .vfq-toggle {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    margin-top: 6px; font-size: 11px; cursor: pointer;
+  }
+  .vfq-toggle input[type="checkbox"] { cursor: pointer; }
+  .vfq-toggle .vfq-yes { color: rgb(80,220,120); font-weight: 600; }
+  .vfq-toggle .vfq-no { color: rgb(255,200,100); font-weight: 600; }
+  .vfq-link {
+    color: var(--text3); text-decoration: underline; font-size: 10px;
+    background: none; border: none; padding: 0; cursor: pointer; font-family: inherit;
+  }
+  .vfq-link:hover { color: var(--text); }
 
   .mono { font-family: "JetBrains Mono", "SF Mono", ui-monospace, monospace; font-size: 11px; }
 

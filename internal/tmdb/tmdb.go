@@ -76,6 +76,54 @@ func decodeHTML(s string) string {
 	return s
 }
 
+// HasVFQViaTranslations vérifie via l'API TMDB /movie/{id}/translations si une
+// traduction fr-CA (avec titre ou synopsis non vide) existe pour le film.
+// C'est un signal très fort de l'existence d'un doublage québécois.
+// Nécessite une clé API TMDB.
+func HasVFQViaTranslations(id, apiKey string) (bool, error) {
+	if id == "" || apiKey == "" {
+		return false, fmt.Errorf("id ou clé TMDB manquants")
+	}
+	u := "https://api.themoviedb.org/3/movie/" + url.PathEscape(id) + "/translations?api_key=" + url.QueryEscape(apiKey)
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(u)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return false, fmt.Errorf("TMDB HTTP %d", resp.StatusCode)
+	}
+	var body struct {
+		Translations []struct {
+			Iso3166_1 string `json:"iso_3166_1"`
+			Iso639_1  string `json:"iso_639_1"`
+			Data      struct {
+				Title    string `json:"title"`
+				Overview string `json:"overview"`
+				Tagline  string `json:"tagline"`
+			} `json:"data"`
+		} `json:"translations"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return false, err
+	}
+	for _, tr := range body.Translations {
+		// Match Canada french : iso_3166_1=CA et iso_639_1=fr
+		if tr.Iso3166_1 == "CA" && tr.Iso639_1 == "fr" {
+			// STRICT : titre ET synopsis tous deux non vides. Une simple
+			// entrée fr-CA avec champs vides peut être créée automatiquement
+			// par TMDB sans doublage québécois réel.
+			hasTitle := strings.TrimSpace(tr.Data.Title) != ""
+			hasOverview := strings.TrimSpace(tr.Data.Overview) != ""
+			if hasTitle && hasOverview {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
 // FetchByID récupère une fiche TMDB directement via l'API officielle par son ID
 // numérique. Nécessite une clé API TMDB. Retourne un Result unique.
 func FetchByID(id, apiKey string) (*Result, error) {
@@ -131,6 +179,63 @@ func FetchByID(id, apiKey string) (*Result, error) {
 		PosterURL: poster,
 		Overview:  body.Overview,
 	}, nil
+}
+
+// SearchMovie recherche des films via l'API TMDB /3/search/movie (nécessite clé API).
+// Pendant LiHDL (films uniquement), c'est l'équivalent de SearchTV pour PSA séries.
+func SearchMovie(query, apiKey string) ([]Result, error) {
+	if apiKey == "" {
+		return nil, fmt.Errorf("clé API TMDB requise pour la recherche film")
+	}
+	if strings.TrimSpace(query) == "" {
+		return nil, nil
+	}
+	u := "https://api.themoviedb.org/3/search/movie?language=fr&query=" + url.QueryEscape(query) + "&api_key=" + url.QueryEscape(apiKey)
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Get(u)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("TMDB HTTP %d", resp.StatusCode)
+	}
+	var body struct {
+		Results []struct {
+			ID            int     `json:"id"`
+			Title         string  `json:"title"`
+			OriginalTitle string  `json:"original_title"`
+			ReleaseDate   string  `json:"release_date"`
+			PosterPath    string  `json:"poster_path"`
+			VoteAverage   float64 `json:"vote_average"`
+			Overview      string  `json:"overview"`
+		} `json:"results"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return nil, err
+	}
+	out := make([]Result, 0, len(body.Results))
+	for _, r := range body.Results {
+		year := ""
+		if len(r.ReleaseDate) >= 4 {
+			year = r.ReleaseDate[:4]
+		}
+		poster := ""
+		if r.PosterPath != "" {
+			poster = "https://image.tmdb.org/t/p/w500" + r.PosterPath
+		}
+		out = append(out, Result{
+			TmdbID:    strconv.Itoa(r.ID),
+			Note:      r.VoteAverage,
+			TitreFR:   r.Title,
+			AnneeFR:   year,
+			TitreVO:   r.OriginalTitle,
+			URL:       "https://www.themoviedb.org/movie/" + strconv.Itoa(r.ID) + "?language=fr",
+			PosterURL: poster,
+			Overview:  r.Overview,
+		})
+	}
+	return out, nil
 }
 
 // SearchTV recherche des séries via l'API TMDB /3/search/tv (nécessite clé API).

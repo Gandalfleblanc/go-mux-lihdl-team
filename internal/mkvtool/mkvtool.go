@@ -235,6 +235,7 @@ type MuxParams struct {
 	SecondaryPath   string           // .mkv secondaire (audios/subs uniquement, sans vidéo)
 	SecondaryAudios []SecondaryTrack // audios à reprendre depuis le secondaire
 	SecondarySubs   []SecondaryTrack // subs à reprendre depuis le secondaire
+	NoChapters      bool             // si true, ajoute --no-chapters sur l'input primaire
 }
 
 // MuxProgress est émis pendant le mux (0..100).
@@ -433,6 +434,9 @@ func buildArgs(p MuxParams) []string {
 		} else {
 			args = append(args, "--subtitle-tracks", strings.Join(subsKept, ","))
 		}
+	}
+	if p.NoChapters {
+		args = append(args, "--no-chapters")
 	}
 	args = append(args, p.InputPath)
 

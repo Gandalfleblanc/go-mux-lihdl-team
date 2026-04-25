@@ -19,6 +19,7 @@ import (
 	wr "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"go-mux-lihdl-team/internal/config"
+	"go-mux-lihdl-team/internal/hydracker"
 	"go-mux-lihdl-team/internal/mediainfo"
 	"go-mux-lihdl-team/internal/mkvtool"
 	"go-mux-lihdl-team/internal/naming"
@@ -88,7 +89,7 @@ func (a *App) startup(ctx context.Context) {
 
 // AppVersion est lue par le frontend (pill dans le header) et utilisée pour
 // comparer avec la dernière release GitHub lors du check de mise à jour.
-const AppVersion = "v3.12.0"
+const AppVersion = "v4.0.0"
 
 func (a *App) GetVersion() string { return AppVersion }
 
@@ -175,6 +176,61 @@ func (a *App) SelectOutputDir() (string, error) {
 	})
 }
 
+// OpenURL ouvre une URL dans le navigateur système.
+// Wails ne suit pas les <a target="_blank"> par défaut — on passe par
+// runtime.BrowserOpenURL pour les liens externes.
+func (a *App) OpenURL(url string) {
+	if url != "" {
+		wr.BrowserOpenURL(a.ctx, url)
+	}
+}
+
+// MoveToTrash envoie un ou plusieurs fichiers à la corbeille (réversible).
+// macOS  : AppleScript via Finder (revient au dossier d'origine si annulé)
+// Linux  : gio trash (si dispo) sinon best-effort
+// Windows: pas implémenté (renvoie une erreur)
+func (a *App) MoveToTrash(paths []string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	switch runtime.GOOS {
+	case "darwin":
+		// AppleScript : passer chaque chemin en POSIX file via Finder
+		var sb strings.Builder
+		sb.WriteString(`tell application "Finder" to delete every item of {`)
+		for i, p := range paths {
+			if p == "" {
+				continue
+			}
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			esc := strings.ReplaceAll(p, `"`, `\"`)
+			sb.WriteString(`(POSIX file "` + esc + `")`)
+		}
+		sb.WriteString(`}`)
+		cmd := exec.Command("osascript", "-e", sb.String())
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return errors.New("osascript : " + err.Error() + " — " + string(out))
+		}
+		return nil
+	case "linux":
+		for _, p := range paths {
+			if p == "" {
+				continue
+			}
+			if err := exec.Command("gio", "trash", p).Run(); err != nil {
+				// fallback : ignore l'erreur, on log côté front
+				wr.EventsEmit(a.ctx, "log", "⚠ corbeille : "+p+" "+err.Error())
+			}
+		}
+		return nil
+	default:
+		return errors.New("MoveToTrash : non supporté sur " + runtime.GOOS)
+	}
+}
+
 // OpenFolder ouvre un dossier dans l'explorateur de fichiers natif.
 // macOS → open, Linux → xdg-open, Windows → explorer.
 func (a *App) OpenFolder(path string) error {
@@ -228,11 +284,35 @@ func (a *App) AnalyzeMkv(path string) {
 		var info mkvtool.Info
 		_ = json.Unmarshal([]byte(raw), &info)
 		wr.EventsEmit(a.ctx, "log", "✓ "+pluralTracks(len(info.Tracks))+" détectée(s)")
-		// On rebuild en []map[string]any — Wails EventsEmit a des soucis
-		// avec les slices de structs imbriqués, mais accepte bien les maps.
+
+		// Enrichissement mediainfo (audio/sub) : mêmes champs qu'AnalyzeMkvSecondary.
+		mediainfoByID := map[int]mediainfo.Track{}
+		if mibin, mErr := mediainfo.Locate(""); mErr == nil {
+			if mi, mErr2 := mediainfo.Identify(a.ctx, mibin, path); mErr2 == nil {
+				audIdx, subIdx := 0, 0
+				audTracks, subTracks := []mkvtool.Track{}, []mkvtool.Track{}
+				for _, t := range info.Tracks {
+					if t.Type == "audio" {
+						audTracks = append(audTracks, t)
+					} else if t.Type == "subtitles" {
+						subTracks = append(subTracks, t)
+					}
+				}
+				for _, mt := range mi.Media.Track {
+					if mt.Type == "Audio" && audIdx < len(audTracks) {
+						mediainfoByID[audTracks[audIdx].ID] = mt
+						audIdx++
+					} else if mt.Type == "Text" && subIdx < len(subTracks) {
+						mediainfoByID[subTracks[subIdx].ID] = mt
+						subIdx++
+					}
+				}
+			}
+		}
+
 		tracksPayload := make([]map[string]any, 0, len(info.Tracks))
 		for _, t := range info.Tracks {
-			tracksPayload = append(tracksPayload, map[string]any{
+			row := map[string]any{
 				"id":               t.ID,
 				"type":             t.Type,
 				"codec":            t.Codec,
@@ -243,7 +323,20 @@ func (a *App) AnalyzeMkv(path string) {
 				"default_track":    t.Properties.DefaultTrack,
 				"forced_track":     t.Properties.ForcedTrack,
 				"pixel_dimensions": t.Properties.PixelDimensions,
-			})
+			}
+			if mt, ok := mediainfoByID[t.ID]; ok {
+				row["mi_title"] = mt.Title
+				row["mi_format"] = mt.Format
+				row["mi_format_profile"] = mt.FormatProfile
+				row["mi_format_commercial"] = mt.FormatCommercial
+				row["mi_format_commercial_if_any"] = mt.FormatCommercialIfAny
+				row["mi_format_features"] = mt.FormatAdditionalFeatures
+				row["mi_service_kind"] = mt.ServiceKind
+				row["mi_service_kind_name"] = mt.ServiceKindNames
+				row["mi_stream_size"] = mt.StreamSize
+				row["mi_element_count"] = mt.ElementCount
+			}
+			tracksPayload = append(tracksPayload, row)
 		}
 		wr.EventsEmit(a.ctx, "log", "🔔 emit analyze:start n="+itoa(len(tracksPayload)))
 		wr.EventsEmit(a.ctx, "analyze:start", len(tracksPayload))
@@ -378,6 +471,102 @@ func (a *App) SearchTmdb(query string) ([]tmdb.Result, error) {
 	return tmdb.Search(c.ServeurPersoURL, c.FallbackIndex, query)
 }
 
+// TestHydrackerKey teste une clé API Hydracker en hitant /user-profile/me.
+type ApiKeyTestResult struct {
+	OK      bool   `json:"ok"`
+	Message string `json:"message"`
+}
+
+func (a *App) TestHydrackerKey(key string) ApiKeyTestResult {
+	ok, msg := hydracker.TestKey(strings.TrimSpace(key))
+	return ApiKeyTestResult{OK: ok, Message: msg}
+}
+
+// TestUnfrKey teste une clé API UNFR en faisant un HEAD/GET sur une URL fiche
+// avec la clé en header Authorization. Best-effort : l'API UNFR n'a pas
+// d'endpoint /me documenté.
+func (a *App) TestUnfrKey(key string) ApiKeyTestResult {
+	k := strings.TrimSpace(key)
+	if k == "" {
+		return ApiKeyTestResult{OK: false, Message: "clé vide"}
+	}
+	// Test : ping la racine UNFR avec le bearer
+	req, err := http.NewRequest("GET", "https://unfr.pw/?d=fiche&movieid=550", nil)
+	if err != nil {
+		return ApiKeyTestResult{OK: false, Message: err.Error()}
+	}
+	req.Header.Set("Authorization", "Bearer "+k)
+	req.Header.Set("User-Agent", "GoMuxLiHDLTeam/1.0 (mux-app)")
+	req.Header.Set("Accept", "application/json")
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return ApiKeyTestResult{OK: false, Message: err.Error()}
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case 200:
+		return ApiKeyTestResult{OK: true, Message: "endpoint accessible (200) ✓"}
+	case 401:
+		return ApiKeyTestResult{OK: false, Message: "clé invalide (401)"}
+	case 403:
+		return ApiKeyTestResult{OK: false, Message: "accès refusé (403)"}
+	default:
+		return ApiKeyTestResult{OK: false, Message: "HTTP " + resp.Status}
+	}
+}
+
+// LookupHydrackerURL résout l'URL fiche Hydracker pour un ID TMDB donné.
+// Retourne chaîne vide si pas de clé API, pas trouvé, ou erreur.
+func (a *App) LookupHydrackerURL(tmdbID int) string {
+	c := config.Load()
+	if c.HydrackerKey == "" {
+		return ""
+	}
+	url, err := hydracker.LookupURL(tmdbID, c.HydrackerKey)
+	if err != nil {
+		wr.EventsEmit(a.ctx, "log", "⚠ Hydracker lookup : "+err.Error())
+		return ""
+	}
+	return url
+}
+
+// CheckVFQ vérifie si un film (par son ID TMDB) a une traduction fr-CA
+// dans TMDB. Présence = signal très fort de l'existence d'un VFQ.
+// Nécessite la clé API TMDB. Retourne false si pas de clé ou pas de trad.
+func (a *App) CheckVFQ(tmdbID string) bool {
+	c := config.Load()
+	if c.TmdbKey == "" {
+		return false
+	}
+	ok, err := tmdb.HasVFQViaTranslations(tmdbID, c.TmdbKey)
+	if err != nil {
+		wr.EventsEmit(a.ctx, "log", "⚠ CheckVFQ : "+err.Error())
+		return false
+	}
+	return ok
+}
+
+// SearchTmdbMovie cherche un film via l'API TMDB officielle (nom ou ID numérique).
+// Nécessite une clé API TMDB. Utilisé en mode LiHDL pour avoir une recherche
+// précise et homogène avec PSA SERIES (qui utilise SearchTmdbTV).
+func (a *App) SearchTmdbMovie(query string) ([]tmdb.Result, error) {
+	c := config.Load()
+	if c.TmdbKey == "" {
+		return nil, errors.New("clé API TMDB requise pour la recherche film (Réglages)")
+	}
+	q := strings.TrimSpace(query)
+	if q == "" {
+		return nil, nil
+	}
+	if isAllDigits(q) {
+		if r, err := tmdb.FetchByID(q, c.TmdbKey); err == nil && r != nil {
+			return []tmdb.Result{*r}, nil
+		}
+	}
+	return tmdb.SearchMovie(q, c.TmdbKey)
+}
+
 // SearchTmdbTV cherche une série TV via l'API TMDB (nom ou ID numérique).
 // Nécessite une clé API TMDB renseignée dans Réglages.
 func (a *App) SearchTmdbTV(query string) ([]tmdb.Result, error) {
@@ -459,6 +648,7 @@ type MuxRequest struct {
 	SecondaryPath   string                   `json:"secondary_path"`
 	SecondaryAudios []mkvtool.SecondaryTrack `json:"secondary_audios"`
 	SecondarySubs   []mkvtool.SecondaryTrack `json:"secondary_subs"`
+	NoChapters      bool                     `json:"no_chapters"`
 }
 
 func (a *App) Mux(req MuxRequest) error {
@@ -485,6 +675,7 @@ func (a *App) Mux(req MuxRequest) error {
 		SecondaryPath:   req.SecondaryPath,
 		SecondaryAudios: req.SecondaryAudios,
 		SecondarySubs:   req.SecondarySubs,
+		NoChapters:      req.NoChapters,
 	},
 		func(p mkvtool.MuxProgress) {
 			wr.EventsEmit(a.ctx, "mux:progress", p)
