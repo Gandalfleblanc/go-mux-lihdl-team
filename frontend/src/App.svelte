@@ -182,8 +182,14 @@
 
   function inferAudioLabel(track) {
     const lang = String(track.language || '').toLowerCase();
-    const name = String(track.track_name || '').toLowerCase();
+    // On combine track_name (mkvmerge) + mi_title + mi_service_kind_name (mediainfo)
+    const hints = [
+      String(track.track_name || ''),
+      String(track.mi_title || ''),
+      String(track.mi_service_kind_name || ''),
+    ].join(' ').toLowerCase();
     const codecId = String(track.codec_id || track.codec || '').toUpperCase();
+    const miFormatProfile = String(track.mi_format_profile || '').toUpperCase();
     const ch = Number(track.audio_channels || 0);
     // Codec
     let codec = 'AC3';
@@ -197,15 +203,18 @@
     else if (ch === 2) chans = '2.0';
     else if (ch === 6) chans = '5.1';
     else if (ch === 8) chans = '7.1';
-    // Atmos (souvent dans track_name pour ENG VO EAC3)
-    const isAtmos = /atmos/i.test(name);
-    // Préfixe langue + variante (FR uniquement) via track_name
+    // Atmos : track_name OU format_profile mediainfo (JOC = E-AC-3 with Atmos)
+    const isAtmos = /atmos/i.test(hints) || miFormatProfile.includes('JOC');
+    // Service kind mediainfo : VI = Visual Impaired (audiodescription), HI = Hearing Impaired
+    const isAD = /^vi$/i.test(String(track.mi_service_kind || '')) ||
+                 /audio.?descrip|\bad\b|vmal|malvoyant|visual.?impair/i.test(hints);
+    // Préfixe langue + variante FR
     let prefix = 'ENG VO';
     if (lang === 'fre' || lang === 'fra' || lang === 'fr') {
-      if (/audio.?descrip|\bad\b|vmal|malvoyant/i.test(name)) prefix = 'FR AD';
-      else if (/canad|québ|quebec|vfq/i.test(name))           prefix = 'FR VFQ';
-      else if (/internat|vfi/i.test(name))                     prefix = 'FR VFi';
-      else                                                     prefix = 'FR VFF';
+      if (isAD)                                            prefix = 'FR AD';
+      else if (/canad|québ|quebec|vfq/i.test(hints))       prefix = 'FR VFQ';
+      else if (/internat|vfi/i.test(hints))                 prefix = 'FR VFi';
+      else                                                  prefix = 'FR VFF';
     }
     else if (lang === 'eng' || lang === 'en') prefix = 'ENG VO';
     else if (lang === 'jpn' || lang === 'ja') prefix = 'JPN VO';
@@ -214,29 +223,33 @@
     else if (lang === 'ger' || lang === 'de') prefix = 'GER VO';
     else if (lang === 'chi' || lang === 'zho' || lang === 'zh') prefix = 'CHI VO';
     else if (lang === 'rus' || lang === 'ru') prefix = 'RUS VO';
-    // ATMOS uniquement quand combinaison existante dans AudioLabels (ENG VO EAC3 5.1)
     const atmosSuffix = (isAtmos && prefix === 'ENG VO' && codec === 'EAC3' && chans === '5.1') ? ' ATMOS' : '';
     return `${prefix} : ${codec} ${chans}${atmosSuffix}`;
   }
 
   function inferSubLabel(track, indexAmongSameLang) {
     const lang = String(track.language || '').toLowerCase();
-    const name = String(track.track_name || '').toLowerCase();
+    const hints = [
+      String(track.track_name || ''),
+      String(track.mi_title || ''),
+      String(track.mi_service_kind_name || ''),
+    ].join(' ').toLowerCase();
     const codecId = String(track.codec_id || track.codec || '').toUpperCase();
     const forced = !!track.forced_track;
+    const isHI = /^hi$/i.test(String(track.mi_service_kind || '')); // Hearing Impaired = SDH
     let fmt = 'SRT';
     if (codecId.includes('PGS') || codecId.includes('HDMV')) fmt = 'PGS';
-    // Préfixe langue + variante FR via track_name
+    // Préfixe langue + variante FR
     let prefix = 'ENG';
     if (lang === 'fre' || lang === 'fra' || lang === 'fr') {
-      if (/canad|québ|quebec|vfq/i.test(name)) prefix = 'FR VFQ';
-      else if (/vff|france/i.test(name))       prefix = 'FR VFF';
-      else                                      prefix = 'FR';
+      if (/canad|québ|quebec|vfq/i.test(hints)) prefix = 'FR VFQ';
+      else if (/vff|france/i.test(hints))       prefix = 'FR VFF';
+      else                                       prefix = 'FR';
     } else if (lang === 'eng' || lang === 'en') prefix = 'ENG';
     // Type
     let kind;
-    if (forced || /forc(é|e)/i.test(name)) kind = 'Forced';
-    else if (/sdh|sourds|hearing/i.test(name)) kind = 'SDH';
+    if (forced || /forc(é|e)/i.test(hints)) kind = 'Forced';
+    else if (isHI || /sdh|sourds|hearing/i.test(hints)) kind = 'SDH';
     else if (indexAmongSameLang === 0) kind = 'Full';
     else kind = 'SDH';
     return `${prefix} ${kind} : ${fmt}`;

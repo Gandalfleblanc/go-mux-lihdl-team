@@ -18,6 +18,7 @@ import (
 	wr "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"go-mux-lihdl-team/internal/config"
+	"go-mux-lihdl-team/internal/mediainfo"
 	"go-mux-lihdl-team/internal/mkvtool"
 	"go-mux-lihdl-team/internal/naming"
 	"go-mux-lihdl-team/internal/tmdb"
@@ -86,7 +87,7 @@ func (a *App) startup(ctx context.Context) {
 
 // AppVersion est lue par le frontend (pill dans le header) et utilisée pour
 // comparer avec la dernière release GitHub lors du check de mise à jour.
-const AppVersion = "v3.6.0"
+const AppVersion = "v3.7.0"
 
 func (a *App) GetVersion() string { return AppVersion }
 
@@ -259,7 +260,9 @@ func (a *App) AnalyzeMkv(path string) {
 }
 
 // AnalyzeMkvSecondary analyse un mkv secondaire (SUPPLY/FW) et émet
-// un événement "secondary:tracks" avec la liste des pistes audio + subs.
+// un événement "secondary:tracks" avec la liste des pistes audio + subs,
+// enrichies par mediainfo quand disponible (track title détaillé,
+// service kind, format profile).
 func (a *App) AnalyzeMkvSecondary(path string) {
 	binary := a.LocateMkvmerge()
 	if binary == "" {
@@ -274,12 +277,40 @@ func (a *App) AnalyzeMkvSecondary(path string) {
 		}
 		var info mkvtool.Info
 		_ = json.Unmarshal([]byte(raw), &info)
+
+		// Tente d'enrichir avec mediainfo (best-effort, silencieux si absent).
+		mediainfoByID := map[int]mediainfo.Track{}
+		if mibin, err := mediainfo.Locate(""); err == nil {
+			if mi, err := mediainfo.Identify(a.ctx, mibin, path); err == nil {
+				// Mapping par index : 1ère audio mediainfo = 1ère audio mkvmerge
+				audIdx, subIdx := 0, 0
+				audTracks, subTracks := []mkvtool.Track{}, []mkvtool.Track{}
+				for _, t := range info.Tracks {
+					if t.Type == "audio" {
+						audTracks = append(audTracks, t)
+					} else if t.Type == "subtitles" {
+						subTracks = append(subTracks, t)
+					}
+				}
+				for _, mt := range mi.Media.Track {
+					if mt.Type == "Audio" && audIdx < len(audTracks) {
+						mediainfoByID[audTracks[audIdx].ID] = mt
+						audIdx++
+					} else if mt.Type == "Text" && subIdx < len(subTracks) {
+						mediainfoByID[subTracks[subIdx].ID] = mt
+						subIdx++
+					}
+				}
+				wr.EventsEmit(a.ctx, "log", "✓ mediainfo : enrichi "+itoa(len(mediainfoByID))+" piste(s)")
+			}
+		}
+
 		tracksPayload := make([]map[string]any, 0, len(info.Tracks))
 		for _, t := range info.Tracks {
 			if t.Type != "audio" && t.Type != "subtitles" {
 				continue
 			}
-			tracksPayload = append(tracksPayload, map[string]any{
+			row := map[string]any{
 				"id":             t.ID,
 				"type":           t.Type,
 				"codec":          t.Codec,
@@ -289,7 +320,15 @@ func (a *App) AnalyzeMkvSecondary(path string) {
 				"codec_id":       t.Properties.CodecID,
 				"default_track":  t.Properties.DefaultTrack,
 				"forced_track":   t.Properties.ForcedTrack,
-			})
+			}
+			if mt, ok := mediainfoByID[t.ID]; ok {
+				row["mi_title"] = mt.Title
+				row["mi_format"] = mt.Format
+				row["mi_format_profile"] = mt.FormatProfile
+				row["mi_service_kind"] = mt.ServiceKind
+				row["mi_service_kind_name"] = mt.ServiceKindNames
+			}
+			tracksPayload = append(tracksPayload, row)
 		}
 		b, _ := json.Marshal(tracksPayload)
 		wr.EventsEmit(a.ctx, "secondary:tracks", string(b))

@@ -16,12 +16,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Install MKVToolNix + embed mkvmerge
+      - name: Install MKVToolNix + MediaInfo + embed binaries
         run: |
-          brew install mkvtoolnix
+          brew install mkvtoolnix mediainfo
           mkdir -p internal/mkvtool/binaries/darwin-arm64
           cp "$(which mkvmerge)" internal/mkvtool/binaries/darwin-arm64/mkvmerge
           chmod +x internal/mkvtool/binaries/darwin-arm64/mkvmerge
+          mkdir -p internal/mediainfo/binaries/darwin-arm64
+          cp "$(which mediainfo)" internal/mediainfo/binaries/darwin-arm64/mediainfo
+          chmod +x internal/mediainfo/binaries/darwin-arm64/mediainfo
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
       - name: Build
@@ -45,12 +48,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Install MKVToolNix + embed mkvmerge
+      - name: Install MKVToolNix + MediaInfo + embed binaries
         run: |
-          brew install mkvtoolnix
+          brew install mkvtoolnix mediainfo
           mkdir -p internal/mkvtool/binaries/darwin-amd64
           cp "$(which mkvmerge)" internal/mkvtool/binaries/darwin-amd64/mkvmerge
           chmod +x internal/mkvtool/binaries/darwin-amd64/mkvmerge
+          mkdir -p internal/mediainfo/binaries/darwin-amd64
+          cp "$(which mediainfo)" internal/mediainfo/binaries/darwin-amd64/mediainfo
+          chmod +x internal/mediainfo/binaries/darwin-amd64/mediainfo
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
       - name: Build
@@ -74,13 +80,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Install system dependencies + mkvmerge
+      - name: Install system dependencies + mkvmerge + mediainfo
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev mkvtoolnix
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev mkvtoolnix mediainfo
           mkdir -p internal/mkvtool/binaries/linux-amd64
           cp "$(which mkvmerge)" internal/mkvtool/binaries/linux-amd64/mkvmerge
           chmod +x internal/mkvtool/binaries/linux-amd64/mkvmerge
+          mkdir -p internal/mediainfo/binaries/linux-amd64
+          cp "$(which mediainfo)" internal/mediainfo/binaries/linux-amd64/mediainfo
+          chmod +x internal/mediainfo/binaries/linux-amd64/mediainfo
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
       - name: Build
@@ -100,13 +109,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Download MKVToolNix + embed mkvmerge.exe
+      - name: Download MKVToolNix + MediaInfo + embed binaries
         shell: bash
         run: |
           mkdir -p internal/mkvtool/binaries/windows-amd64
           curl -L -o mkv.7z https://mkvtoolnix.download/windows/releases/98.0/mkvtoolnix-64-bit-98.0.7z
           7z x mkv.7z -o./mkv-extract
           cp ./mkv-extract/mkvtoolnix/mkvmerge.exe internal/mkvtool/binaries/windows-amd64/mkvmerge.exe
+          mkdir -p internal/mediainfo/binaries/windows-amd64
+          curl -L -o mi.zip https://mediaarea.net/download/binary/mediainfo/24.12/MediaInfo_CLI_24.12_Windows_x64.zip
+          7z x mi.zip -o./mi-extract
+          cp ./mi-extract/MediaInfo.exe internal/mediainfo/binaries/windows-amd64/mediainfo.exe
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
       - name: Build
