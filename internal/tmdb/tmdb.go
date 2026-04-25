@@ -25,6 +25,7 @@ type Result struct {
 	Duree     string  `json:"duree"`
 	URL       string  `json:"url"`
 	PosterURL string  `json:"poster_url"`
+	Overview  string  `json:"overview"`
 }
 
 var regexOgImage = regexp.MustCompile(`<meta\s+property="og:image"\s+content="([^"]+)"`)
@@ -99,6 +100,7 @@ func FetchByID(id, apiKey string) (*Result, error) {
 		Runtime       int     `json:"runtime"`
 		PosterPath    string  `json:"poster_path"`
 		VoteAverage   float64 `json:"vote_average"`
+		Overview      string  `json:"overview"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		return nil, err
@@ -127,6 +129,7 @@ func FetchByID(id, apiKey string) (*Result, error) {
 		Duree:     duree,
 		URL:       "https://www.themoviedb.org/movie/" + strconv.Itoa(body.ID) + "?language=fr",
 		PosterURL: poster,
+		Overview:  body.Overview,
 	}, nil
 }
 
@@ -156,6 +159,7 @@ func SearchTV(query, apiKey string) ([]Result, error) {
 			FirstAirDate string  `json:"first_air_date"`
 			PosterPath   string  `json:"poster_path"`
 			VoteAverage  float64 `json:"vote_average"`
+			Overview     string  `json:"overview"`
 		} `json:"results"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
@@ -179,6 +183,7 @@ func SearchTV(query, apiKey string) ([]Result, error) {
 			TitreVO:   r.OriginalName,
 			URL:       "https://www.themoviedb.org/tv/" + strconv.Itoa(r.ID) + "?language=fr",
 			PosterURL: poster,
+			Overview:  r.Overview,
 		})
 	}
 	return out, nil
@@ -206,6 +211,7 @@ func FetchTVByID(id, apiKey string) (*Result, error) {
 		FirstAirDate string  `json:"first_air_date"`
 		PosterPath   string  `json:"poster_path"`
 		VoteAverage  float64 `json:"vote_average"`
+		Overview     string  `json:"overview"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		return nil, err
@@ -229,6 +235,7 @@ func FetchTVByID(id, apiKey string) (*Result, error) {
 		TitreVO:   body.OriginalName,
 		URL:       "https://www.themoviedb.org/tv/" + strconv.Itoa(body.ID) + "?language=fr",
 		PosterURL: poster,
+		Overview:  body.Overview,
 	}, nil
 }
 

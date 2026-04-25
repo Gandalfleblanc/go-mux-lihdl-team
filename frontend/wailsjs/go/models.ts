@@ -279,6 +279,7 @@ export namespace tmdb {
 	    duree: string;
 	    url: string;
 	    poster_url: string;
+	    overview: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Result(source);
@@ -294,6 +295,7 @@ export namespace tmdb {
 	        this.duree = source["duree"];
 	        this.url = source["url"];
 	        this.poster_url = source["poster_url"];
+	        this.overview = source["overview"];
 	    }
 	}
 

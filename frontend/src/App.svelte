@@ -987,7 +987,6 @@
       tmdbSearching = true;
       let r;
       if (isSeries) {
-        // Série : essaie TMDB API série (clé requise), fallback sur l'index générique.
         try { r = await SearchTmdbTV(cleaned); }
         catch (_) { r = await SearchTmdb(cleaned); }
         if (!r || r.length === 0) r = await SearchTmdb(cleaned);
@@ -996,10 +995,20 @@
       }
       tmdbResults = r || [];
       if (r && r.length >= 1) {
-        // Auto-pick le 1er résultat (top match) — l'utilisateur peut changer.
-        lastTmdbResult = r[0];
-        target.title = composeTmdbTitle(r[0]);
-        target.year  = r[0].annee_fr || '';
+        let picked = r[0];
+        // Enrichit le 1er résultat (overview/durée) si la clé TMDB est dispo
+        // — la 2e requête utilise l'API officielle (FetchByID/FetchTVByID).
+        if (config.tmdb_key && picked.tmdb_id && !picked.overview) {
+          try {
+            const detail = isSeries
+              ? await SearchTmdbTV(picked.tmdb_id)
+              : await SearchTmdb(picked.tmdb_id);
+            if (detail && detail.length > 0) picked = detail[0];
+          } catch (_) { /* on garde le résultat de base */ }
+        }
+        lastTmdbResult = picked;
+        target.title = composeTmdbTitle(picked);
+        target.year  = picked.annee_fr || '';
         appendLog('✓ TMDB : ' + target.title + (r.length > 1 ? ` (${r.length} résultats — choix possible)` : ''));
       } else {
         appendLog('ℹ Aucun résultat TMDB pour « ' + cleaned + ' »');
@@ -1282,7 +1291,7 @@
 
   <nav class="mux-mode-tabs">
     <button class:active={muxMode === 'lihdl'} on:click={() => switchMuxMode('lihdl')}>⚡ MUX LiHDL</button>
-    <button class:active={muxMode === 'psa'}   on:click={() => switchMuxMode('psa')}>🎬 MUX PSA</button>
+    <button class:active={muxMode === 'psa'}   on:click={() => switchMuxMode('psa')}>🎬 MUX CUSTOM PSA</button>
   </nav>
 
   <nav class="tabs">
@@ -1321,6 +1330,7 @@
           <div class="drop-sub">{secondaryTracks.length} piste(s) audio/sub détectée(s)</div>
           <div class="actions-row" style:gap="8px" style:margin-top="8px">
             <button class="btn-primary" on:click={automate} disabled={!sourcePath || secondaryTracks.length === 0}>⚡ Automatiser</button>
+            <button class="btn-primary" on:click={() => screen = 'cible'}>Suivant → Cible</button>
             <button class="btn-ghost" on:click={pickSecondaryDialog}>Changer</button>
             <button class="btn-ghost" on:click={clearSecondary}>Retirer</button>
           </div>
@@ -1526,6 +1536,31 @@
         </div>
         {#if tmdbMode === 'tv' && !config.tmdb_key}
           <div class="field-hint">⚠ Clé API TMDB requise pour chercher des séries — Réglages.</div>
+        {/if}
+        <!-- Card de vérification : fiche TMDB sélectionnée -->
+        {#if lastTmdbResult}
+          <div class="tmdb-picked">
+            {#if lastTmdbResult.poster_url}
+              <img class="tmdb-picked-poster" src={lastTmdbResult.poster_url} alt="" />
+            {/if}
+            <div class="tmdb-picked-body">
+              <div class="tmdb-picked-title">
+                {lastTmdbResult.titre_fr || lastTmdbResult.titre_vo}
+                {#if lastTmdbResult.annee_fr}<span class="tmdb-year">({lastTmdbResult.annee_fr})</span>{/if}
+              </div>
+              {#if lastTmdbResult.titre_vo && lastTmdbResult.titre_vo !== lastTmdbResult.titre_fr}
+                <div class="tmdb-picked-vo">VO : {lastTmdbResult.titre_vo}</div>
+              {/if}
+              <div class="tmdb-picked-meta">
+                {#if lastTmdbResult.duree}{lastTmdbResult.duree} · {/if}⭐ {lastTmdbResult.note || '?'} · ID {lastTmdbResult.tmdb_id}
+              </div>
+              {#if lastTmdbResult.overview}
+                <div class="tmdb-picked-overview">{lastTmdbResult.overview}</div>
+              {:else if !config.tmdb_key}
+                <div class="field-hint">💡 Renseigne ta clé API TMDB dans Réglages pour afficher la description.</div>
+              {/if}
+            </div>
+          </div>
         {/if}
         {#if tmdbResults.length > 0}
           <ul class="tmdb-list">
@@ -2149,6 +2184,19 @@
   .tmdb-title { font-weight: 600; font-size: 13px; }
   .tmdb-year { color: var(--text3); font-weight: 400; }
   .tmdb-meta { font-size: 11px; color: var(--text2); margin-top: 2px; }
+
+  .tmdb-picked {
+    display: flex; gap: 14px; align-items: flex-start;
+    margin-top: 12px; padding: 12px;
+    background: linear-gradient(180deg, rgba(230,57,70,0.08), rgba(230,57,70,0.02));
+    border: 1px solid rgba(230,57,70,0.4); border-radius: 10px;
+  }
+  .tmdb-picked-poster { width: 90px; height: 135px; object-fit: cover; border-radius: 6px; flex-shrink: 0; }
+  .tmdb-picked-body { flex: 1; min-width: 0; }
+  .tmdb-picked-title { font-weight: 700; font-size: 15px; color: var(--text); }
+  .tmdb-picked-vo { font-size: 12px; color: var(--text2); margin-top: 2px; font-style: italic; }
+  .tmdb-picked-meta { font-size: 11px; color: var(--text3); margin-top: 4px; }
+  .tmdb-picked-overview { font-size: 12px; color: var(--text2); margin-top: 8px; line-height: 1.5; }
 
   .mono { font-family: "JetBrains Mono", "SF Mono", ui-monospace, monospace; font-size: 11px; }
 
