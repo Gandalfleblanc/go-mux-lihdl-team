@@ -336,6 +336,14 @@
     secondarySelected = [];
   }
 
+  function removeSecondaryTrack(idx, type) {
+    // idx = position dans la sous-liste filtrée par type (audio ou subtitles)
+    const filtered = secondarySelected.filter(t => t.type === type);
+    if (idx < 0 || idx >= filtered.length) return;
+    const target = filtered[idx];
+    secondarySelected = secondarySelected.filter(t => t !== target);
+  }
+
   // ⚡ Automatiser : drop tous audios/subs internes du PSA, prend ceux du SUPPLY,
   // applique les labels LiHDL automatiques, et règle Team=GANDALF + mode série.
   function automate() {
@@ -375,9 +383,17 @@
         else if (/^FR /.test(label))             language = 'fre';
         else if (/^ENG /.test(label))            language = 'eng';
         else                                      language = lang || 'und';
-        // Mode PSA : on ne garde QUE les FR Forced (générique ou VFF) — tout
-        // le reste est désactivé. Si l'utilisateur en veut d'autres, il coche.
-        keepFlag = /^FR( VFF)? Forced/.test(label);
+        // Tous les subs sont gardés. Default + Forced cochés UNIQUEMENT
+        // pour "FR VFF Forced" ou "FR Forced" (générique).
+        keepFlag = true;
+        const isForcedFR = /^FR( VFF)? Forced\b/.test(label);
+        if (isForcedFR) {
+          defaultFlag = true;
+          forcedFlag = true;
+        } else {
+          defaultFlag = false;
+          forcedFlag = false;
+        }
       }
       return {
         id: t.id,
@@ -835,6 +851,7 @@
     const all = [
       ...tracks.filter(t => t.type === 'audio').map((t, i) => ({ kind: 'internal', idx: i, ref: t })),
       ...externalAudios.map((a, i) => ({ kind: 'external', idx: i, ref: a })),
+      ...secondarySelected.filter(t => t.type === 'audio').map((s, i) => ({ kind: 'secondary', idx: i, ref: s })),
     ].sort((a, b) => (a.ref.order ?? 0) - (b.ref.order ?? 0));
     const pos = all.findIndex(x => x.kind === kind && x.idx === idx);
     const newPos = pos + dir;
@@ -845,6 +862,7 @@
     oth.order = tmp;
     tracks = [...tracks];
     externalAudios = [...externalAudios];
+    secondarySelected = [...secondarySelected];
   }
 
   // --- Ordre global des pistes (internes + externes) ---
@@ -864,27 +882,28 @@
   }
 
   function moveTrack(kind, idx, dir) {
-    // kind = 'internal' | 'external' ; dir = -1 (up) / +1 (down)
-    const subs = [...tracks.filter(t => t.type === 'subtitles'), ...externalSubs];
+    // kind = 'internal' | 'external' | 'secondary' ; dir = -1 (up) / +1 (down)
+    const secondarySubs = secondarySelected.filter(t => t.type === 'subtitles');
+    const subs = [...tracks.filter(t => t.type === 'subtitles'), ...externalSubs, ...secondarySubs];
     subs.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-    // Trouve la piste concernée dans le tableau trié.
     let target;
     if (kind === 'internal') {
       target = tracks.filter(t => t.type === 'subtitles')[idx];
+    } else if (kind === 'secondary') {
+      target = secondarySubs[idx];
     } else {
       target = externalSubs[idx];
     }
     const pos = subs.indexOf(target);
     const newPos = pos + dir;
     if (newPos < 0 || newPos >= subs.length) return;
-    // Swap orders.
     const other = subs[newPos];
     const tmp = target.order ?? 0;
     target.order = other.order ?? 0;
     other.order = tmp;
-    // Force reactivity.
     tracks = [...tracks];
     externalSubs = [...externalSubs];
+    secondarySelected = [...secondarySelected];
   }
 
   // Versions des suggest adaptées à la structure aplatie.
@@ -1377,11 +1396,13 @@
             <div class="section-title">Pistes audio</div>
             <button class="btn-tiny" on:click={pickAudioDialog}>+ Ajouter un fichier</button>
           </div>
-          {#if tracks.some(t => t.type === 'audio') || externalAudios.length > 0}
+          {#if tracks.some(t => t.type === 'audio') || externalAudios.length > 0 || secondarySelected.some(t => t.type === 'audio')}
             {@const internalAudios = tracks.filter(t => t.type === 'audio')}
+            {@const secondaryAudios = secondarySelected.filter(t => t.type === 'audio')}
             {@const mergedAudios = [
               ...internalAudios.map((t, i) => ({ kind: 'internal', idx: i, ref: t, order: t.order ?? 0 })),
               ...externalAudios.map((a, i) => ({ kind: 'external', idx: i, ref: a, order: a.order ?? 0 })),
+              ...secondaryAudios.map((s, i) => ({ kind: 'secondary', idx: i, ref: s, order: s.order ?? 0 })),
             ].sort((a, b) => a.order - b.order)}
             {#each mergedAudios as item (item.kind + '-' + item.idx)}
               <div class="track-row" class:dropped={!item.ref.keep}>
@@ -1390,6 +1411,9 @@
                     <span class="badge audio">AUDIO</span>
                     <span class="mono">#{item.ref.id} · {item.ref.codec} · {item.ref.lang || '??'} · {item.ref.channels || '?'}ch</span>
                     {#if item.ref.name}<span class="track-current">« {item.ref.name} »</span>{/if}
+                  {:else if item.kind === 'secondary'}
+                    <span class="badge audio-ext">SUPPLY/FW</span>
+                    <span class="mono">#{item.ref.id} · {item.ref.codec || ''} · {item.ref.language || '??'}</span>
                   {:else}
                     <span class="badge audio-ext">AUDIO EXT</span>
                     <span class="mono">{basename(item.ref.path)}</span>
@@ -1402,6 +1426,8 @@
                     <button class="btn-arrow" title="Descendre" on:click={() => moveAudioTrack(item.kind, item.idx, +1)}>↓</button>
                     {#if item.kind === 'internal'}
                       <button class="btn-arrow danger" title="Supprimer" on:click={() => removeInternalTrack(item.ref.id)}>✕</button>
+                    {:else if item.kind === 'secondary'}
+                      <button class="btn-arrow danger" title="Retirer du SUPPLY" on:click={() => removeSecondaryTrack(item.idx, 'audio')}>✕</button>
                     {:else}
                       <button class="btn-arrow danger" title="Supprimer" on:click={() => removeExternalAudio(item.idx)}>✕</button>
                     {/if}
@@ -1429,11 +1455,13 @@
             <div class="section-title">Sous-titres</div>
             <button class="btn-tiny" on:click={pickSubsDialog}>+ Ajouter un fichier</button>
           </div>
-          {#if tracks.some(t => t.type === 'subtitles') || externalSubs.length > 0}
+          {#if tracks.some(t => t.type === 'subtitles') || externalSubs.length > 0 || secondarySelected.some(t => t.type === 'subtitles')}
             {@const internalSubs = tracks.filter(t => t.type === 'subtitles')}
+            {@const secondarySubs = secondarySelected.filter(t => t.type === 'subtitles')}
             {@const mergedSubs = [
               ...internalSubs.map((t, i) => ({ kind: 'internal', idx: i, ref: t, order: t.order ?? 0 })),
               ...externalSubs.map((s, i) => ({ kind: 'external', idx: i, ref: s, order: s.order ?? 0 })),
+              ...secondarySubs.map((s, i) => ({ kind: 'secondary', idx: i, ref: s, order: s.order ?? 0 })),
             ].sort((a, b) => a.order - b.order)}
             {#each mergedSubs as item (item.kind + '-' + item.idx)}
               <div class="track-row">
@@ -1442,6 +1470,9 @@
                     <span class="badge subs">SUBS</span>
                     <span class="mono">#{item.ref.id} · {item.ref.codec} · {item.ref.lang || '??'}</span>
                     {#if item.ref.name}<span class="track-current">« {item.ref.name} »</span>{/if}
+                  {:else if item.kind === 'secondary'}
+                    <span class="badge subs-ext">SUPPLY/FW</span>
+                    <span class="mono">#{item.ref.id} · {item.ref.codec || ''} · {item.ref.language || '??'}</span>
                   {:else}
                     <span class="badge subs-ext">SUBS EXT</span>
                     <span class="mono">{basename(item.ref.path)}</span>
@@ -1454,6 +1485,8 @@
                     <button class="btn-arrow" title="Descendre" on:click={() => moveTrack(item.kind, item.idx, +1)}>↓</button>
                     {#if item.kind === 'internal'}
                       <button class="btn-arrow danger" title="Supprimer" on:click={() => removeInternalTrack(item.ref.id)}>✕</button>
+                    {:else if item.kind === 'secondary'}
+                      <button class="btn-arrow danger" title="Retirer du SUPPLY" on:click={() => removeSecondaryTrack(item.idx, 'subtitles')}>✕</button>
                     {:else}
                       <button class="btn-arrow danger" title="Supprimer" on:click={() => removeExternalSub(item.idx)}>✕</button>
                     {/if}
