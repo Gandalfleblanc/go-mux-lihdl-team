@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -108,6 +109,76 @@ func IdentifyRaw(ctx context.Context, binary, mkvPath string) (string, error) {
 		return "", fmt.Errorf("mkvmerge -J : %w", err)
 	}
 	return string(out), nil
+}
+
+// ExtractTrackToTemp extrait une piste via mkvextract dans un fichier
+// temporaire. Le binaire mkvextract est cherché à côté de mkvmerge ; sinon
+// sur le PATH système. Retourne le chemin du fichier extrait — l'appelant
+// doit le supprimer (os.Remove) après usage.
+func ExtractTrackToTemp(ctx context.Context, mkvmergePath, mkvPath string, trackID int, ext string) (string, error) {
+	extractBin := findMkvextract(mkvmergePath)
+	if extractBin == "" {
+		return "", errors.New("mkvextract introuvable (à côté de mkvmerge ni sur PATH)")
+	}
+	tmp, err := os.CreateTemp("", "submux-extract-*."+ext)
+	if err != nil {
+		return "", err
+	}
+	tmpPath := tmp.Name()
+	tmp.Close()
+	os.Remove(tmpPath) // mkvextract recrée le fichier
+	cmd := exec.CommandContext(ctx, extractBin, "tracks", mkvPath, fmt.Sprintf("%d:%s", trackID, tmpPath))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		os.Remove(tmpPath)
+		return "", fmt.Errorf("mkvextract : %w (%s)", err, string(out))
+	}
+	return tmpPath, nil
+}
+
+// findMkvextract cherche le binaire mkvextract à côté de mkvmerge.
+func findMkvextract(mkvmergePath string) string {
+	if mkvmergePath == "" {
+		if p, err := exec.LookPath("mkvextract"); err == nil {
+			return p
+		}
+		return ""
+	}
+	dir := filepath.Dir(mkvmergePath)
+	name := "mkvextract"
+	// Sur Windows, le nom du binaire est .exe (similaire à mkvmerge.exe)
+	if strings.HasSuffix(strings.ToLower(mkvmergePath), ".exe") {
+		name = "mkvextract.exe"
+	}
+	candidate := filepath.Join(dir, name)
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate
+	}
+	if p, err := exec.LookPath("mkvextract"); err == nil {
+		return p
+	}
+	return ""
+}
+
+// DetectSubSDHFromContent détecte un sous-titre SDH en cherchant des marqueurs
+// SPÉCIFIQUES (mots descriptifs en crochets ou notes de musique). Le but est
+// d'éviter les faux positifs sur les pistes Full qui contiennent occasionnellement
+// des crochets/parenthèses (notes de doublage, didascalies, etc.).
+//
+// Une piste est SDH si :
+//   - 15+ crochets contenant un mot descriptif type sound-effect, OU
+//   - 10+ notes de musique (♪, ♬, 🎵, 🎶)
+//
+// Tout autre cas (parenthèses, locuteurs, crochets vides) est ignoré pour
+// rester conservateur (par défaut Full).
+func DetectSubSDHFromContent(content string) (isSDH bool, score int) {
+	// Crochets contenant des mots-clés sound-effect (FR + EN).
+	sfxRe := regexp.MustCompile(`(?i)\[(bruit|son|sound|music|musique|chant|sing|sirène|siren|rire|laugh|applaudisse|applause|gasp|soupir|sigh|sanglot|sob|cri|scream|shout|chuchot|whisper|cogner|knock|frapper|fracas|crash|bang|bell|sonner|honk|klaxon|footstep|pas\b|respira|breathing|sniff|reniflé|moteur|engine|téléphone|telephone|sonnerie|ringtone|ordinateur|computer|vent|wind|eau|water|silence|porte|door|verre|glass|coup|hit|pleur|cry|halète|pant|tousse|cough|éternue|sneeze|fredonne|hum|grogne|growl|craquement|creak|tonnerre|thunder|explosion|tic-tac|tick|battement|beat|musique|music)`)
+	musicRe := regexp.MustCompile(`[♪♬🎵🎶]`)
+	sfxCount := len(sfxRe.FindAllStringIndex(content, -1))
+	musicCount := len(musicRe.FindAllStringIndex(content, -1))
+	score = sfxCount + musicCount
+	isSDH = sfxCount >= 15 || musicCount >= 10
+	return
 }
 
 // TrackSpec décrit comment renommer/traiter une piste lors du mux.

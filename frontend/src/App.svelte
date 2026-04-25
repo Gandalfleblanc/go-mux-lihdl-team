@@ -245,8 +245,17 @@
     else if (ch === 2) chans = '2.0';
     else if (ch === 6) chans = '5.1';
     else if (ch === 8) chans = '7.1';
-    // Atmos : track_name OU format_profile mediainfo (JOC = E-AC-3 with Atmos)
-    const isAtmos = /atmos/i.test(hints) || miFormatProfile.includes('JOC');
+    // Atmos : on cherche "atmos" ou "JOC" dans tous les champs mediainfo dispo
+    // (Format_Profile, Format_Commercial, Format_AdditionalFeatures, etc.)
+    const atmosFields = [
+      String(track.track_name || ''),
+      String(track.mi_title || ''),
+      String(track.mi_format_profile || ''),
+      String(track.mi_format_commercial || ''),
+      String(track.mi_format_commercial_if_any || ''),
+      String(track.mi_format_features || ''),
+    ].join(' ').toUpperCase();
+    const isAtmos = atmosFields.includes('ATMOS') || atmosFields.includes('JOC');
     // Service kind mediainfo : VI = Visual Impaired (audiodescription), HI = Hearing Impaired
     const isAD = /^vi$/i.test(String(track.mi_service_kind || '')) ||
                  /audio.?descrip|\bad\b|vmal|malvoyant|visual.?impair/i.test(hints);
@@ -265,11 +274,13 @@
     else if (lang === 'ger' || lang === 'de') prefix = 'GER VO';
     else if (lang === 'chi' || lang === 'zho' || lang === 'zh') prefix = 'CHI VO';
     else if (lang === 'rus' || lang === 'ru') prefix = 'RUS VO';
-    const atmosSuffix = (isAtmos && prefix === 'ENG VO' && codec === 'EAC3' && chans === '5.1') ? ' ATMOS' : '';
+    // ATMOS : suffixe ajouté pour toute langue dès lors qu'on est en EAC3 5.1
+    // ET que mediainfo signale JOC (Atmos) ou que track_name contient "atmos".
+    const atmosSuffix = (isAtmos && codec === 'EAC3' && chans === '5.1') ? ' ATMOS' : '';
     return `${prefix} : ${codec} ${chans}${atmosSuffix}`;
   }
 
-  function inferSubLabel(track, indexAmongSameLang) {
+  function inferSubLabel(track, _indexAmongSameLang) {
     const lang = String(track.language || '').toLowerCase();
     const hints = [
       String(track.track_name || ''),
@@ -278,22 +289,24 @@
     ].join(' ').toLowerCase();
     const codecId = String(track.codec_id || track.codec || '').toUpperCase();
     const forced = !!track.forced_track;
-    const isHI = /^hi$/i.test(String(track.mi_service_kind || '')); // Hearing Impaired = SDH
+    const isHI = /^hi$/i.test(String(track.mi_service_kind || ''));
     let fmt = 'SRT';
     if (codecId.includes('PGS') || codecId.includes('HDMV')) fmt = 'PGS';
-    // Préfixe langue + variante FR
     let prefix = 'ENG';
     if (lang === 'fre' || lang === 'fra' || lang === 'fr') {
       if (/canad|québ|quebec|vfq/i.test(hints)) prefix = 'FR VFQ';
       else if (/vff|france/i.test(hints))       prefix = 'FR VFF';
       else                                       prefix = 'FR';
     } else if (lang === 'eng' || lang === 'en') prefix = 'ENG';
-    // Type
-    let kind;
-    if (forced || /forc(é|e)/i.test(hints)) kind = 'Forced';
-    else if (isHI || /sdh|sourds|hearing/i.test(hints)) kind = 'SDH';
-    else if (indexAmongSameLang === 0) kind = 'Full';
-    else kind = 'SDH';
+    // Règle simplifiée : Forced > SDH (explicite uniquement) > Full (défaut).
+    // SDH ne se déclenche QUE si mediainfo dit ServiceKind=HI OU si le nom
+    // de piste contient un mot-clé Sourds/Malentendants explicite.
+    let kind = 'Full';
+    if (forced || /forc(é|e)/i.test(hints)) {
+      kind = 'Forced';
+    } else if (isHI || /\bsdh\b|sourds|hearing|malentend/i.test(hints)) {
+      kind = 'SDH';
+    }
     return `${prefix} ${kind} : ${fmt}`;
   }
 
@@ -411,6 +424,14 @@
     // Marque la 1ère piste audio FR comme default.
     const firstFr = secondarySelected.find(t => t.type === 'audio' && t.language === 'fre');
     if (firstFr) firstFr.default = true;
+
+    // Debug : log de chaque piste audio avec ses indicateurs Atmos depuis mediainfo
+    for (const raw of secondaryTracks) {
+      if (raw.type !== 'audio') continue;
+      appendLog(`[audio] id=${raw.id} lang=${raw.language} name="${raw.track_name||''}" format_profile="${raw.mi_format_profile||''}" features="${raw.mi_format_features||''}" commercial="${raw.mi_format_commercial||''}"`);
+    }
+    // Plus de 2ᵉ passe sur les subs : par défaut Full, SDH uniquement si
+    // mediainfo (ServiceKind=HI) ou track_name explicite (sourds/hearing/SDH).
     secondarySelected = [...secondarySelected];
     // 3. Réglages série + GANDALF.
     videoChoice.team = 'GANDALF';
@@ -961,9 +982,11 @@
     appendLog('✓ Titre ' + (target.lang || 'auto').toUpperCase() + ' : ' + newTitle);
   }
 
-  // Nettoie un nom de fichier pour en faire une requête TMDB lisible :
-  //   Boston.Blue.S01E15.1080p.10bit.WEBRip.6CH.x265.HEVC-PSA → "Boston Blue"
-  //   In.the.Name.of.Ben.Hur.2016.HDLight... → "In the Name of Ben Hur"
+  // Nettoie un nom de fichier pour en faire une requête TMDB indexée
+  // (forme dotée, comme attendue par serveurperso/uklm.xyz) :
+  //   Boston.Blue.S01E15.1080p.WEBRip.x265-PSA → "Boston.Blue"
+  //   The.Boys.S04E08.WEB-DL... → "The.Boys"
+  //   In.the.Name.of.Ben.Hur.2016... → "In.the.Name.of.Ben.Hur"
   function cleanQueryFromFilename(filename) {
     let name = String(filename || '').replace(/\.[^.]+$/, '');
     // Série : tout avant SxxExx
@@ -974,44 +997,58 @@
       const my = /^(.+?)\.(?:19|20)\d{2}\b/.exec(name);
       if (my) name = my[1];
     }
-    return name.replace(/\./g, ' ').trim();
+    // Strip un éventuel ".2024" en suffixe (cas: Title.2024.S01E15...)
+    name = name.replace(/\.(?:19|20)\d{2}$/, '');
+    return name.trim();
   }
 
   async function maybeAutoFillTitle(path) {
     const filename = path.split('/').pop() || '';
-    const cleaned = cleanQueryFromFilename(filename);
+    const cleanedDotted = cleanQueryFromFilename(filename);          // "The.Boys" — pour l'index
+    const cleanedSpaces = cleanedDotted.replace(/\./g, ' ').trim();  // "The Boys" — pour l'API TMDB
     const isSeries = /\bS\d{1,2}E\d{1,3}\b/i.test(filename);
-    tmdbQuery = cleaned;
-    if (isSeries) tmdbMode = 'tv';
+    const forceTV = isSeries || muxMode === 'psa';
+    tmdbQuery = cleanedDotted;
+    if (forceTV) tmdbMode = 'tv';
     try {
       tmdbSearching = true;
       let r;
-      if (isSeries) {
-        try { r = await SearchTmdbTV(cleaned); }
-        catch (_) { r = await SearchTmdb(cleaned); }
-        if (!r || r.length === 0) r = await SearchTmdb(cleaned);
+      if (forceTV) {
+        if (!config.tmdb_key) {
+          appendLog('⚠ Clé API TMDB requise pour la recherche série — Réglages');
+          r = await SearchTmdb(cleanedDotted);
+        } else {
+          try {
+            // API TMDB attend des espaces, pas des points
+            r = await SearchTmdbTV(cleanedSpaces);
+          } catch (e) {
+            appendLog('⚠ Recherche TV : ' + String(e) + ' — fallback index');
+            r = await SearchTmdb(cleanedDotted);
+          }
+        }
       } else {
-        r = await SearchTmdb(cleaned);
+        r = await SearchTmdb(cleanedDotted);
       }
       tmdbResults = r || [];
       if (r && r.length >= 1) {
+        // Auto-pick TOUJOURS le 1er résultat (top match TMDB).
+        // L'utilisateur stoppe le mux via Stop si le match est faux.
         let picked = r[0];
-        // Enrichit le 1er résultat (overview/durée) si la clé TMDB est dispo
-        // — la 2e requête utilise l'API officielle (FetchByID/FetchTVByID).
         if (config.tmdb_key && picked.tmdb_id && !picked.overview) {
           try {
-            const detail = isSeries
+            const detail = forceTV
               ? await SearchTmdbTV(picked.tmdb_id)
               : await SearchTmdb(picked.tmdb_id);
             if (detail && detail.length > 0) picked = detail[0];
-          } catch (_) { /* on garde le résultat de base */ }
+          } catch (_) { /* fallback sur résultat de base */ }
         }
         lastTmdbResult = picked;
         target.title = composeTmdbTitle(picked);
         target.year  = picked.annee_fr || '';
-        appendLog('✓ TMDB : ' + target.title + (r.length > 1 ? ` (${r.length} résultats — choix possible)` : ''));
+        const suffix = r.length > 1 ? ` (${r.length} résultats — top auto)` : '';
+        appendLog('✓ TMDB' + (forceTV ? ' (série)' : '') + ' : ' + target.title + suffix);
       } else {
-        appendLog('ℹ Aucun résultat TMDB pour « ' + cleaned + ' »');
+        appendLog('ℹ Aucun résultat TMDB pour « ' + cleanedDotted + ' »');
       }
     } catch (e) {
       appendLog('⚠ TMDB : ' + String(e));
@@ -1173,6 +1210,7 @@
 
     muxing = true;
     muxPercent = 0;
+    let success = false;
     try {
       await Mux({
         input_path: sourcePath,
@@ -1185,14 +1223,35 @@
         secondary_audios: secAudios,
         secondary_subs: secSubs,
       });
+      success = true;
     } catch (e) {
       appendLog('❌ ' + String(e));
     } finally {
       muxing = false;
     }
+    return success;
   }
 
   function stopMux() { CancelMux(); }
+
+  // MUX AUTO : automate puis lance le mux directement, sans passer par Cible.
+  let autoMuxStatus = '';   // '' | 'success' | 'error'
+  let autoMuxStatusTimer = null;
+  async function muxAuto() {
+    if (!sourcePath) { appendLog('⚠ Charge le fichier PSA d\'abord'); return; }
+    if (!secondaryPath || secondaryTracks.length === 0) {
+      appendLog('⚠ Charge le fichier SUPPLY/FW d\'abord');
+      return;
+    }
+    autoMuxStatus = '';
+    if (autoMuxStatusTimer) { clearTimeout(autoMuxStatusTimer); autoMuxStatusTimer = null; }
+    automate();
+    // Petit délai pour que Svelte propage les updates de state avant doMux.
+    await new Promise(r => setTimeout(r, 200));
+    const ok = await doMux();
+    autoMuxStatus = ok ? 'success' : 'error';
+    autoMuxStatusTimer = setTimeout(() => { autoMuxStatus = ''; }, 12000);
+  }
 
   onMount(async () => {
     try { appVersion = await GetVersion(); } catch {}
@@ -1291,7 +1350,7 @@
 
   <nav class="mux-mode-tabs">
     <button class:active={muxMode === 'lihdl'} on:click={() => switchMuxMode('lihdl')}>⚡ MUX LiHDL</button>
-    <button class:active={muxMode === 'psa'}   on:click={() => switchMuxMode('psa')}>🎬 MUX CUSTOM PSA</button>
+    <button class:active={muxMode === 'psa'}   on:click={() => switchMuxMode('psa')}>🎬 CUSTOM PSA SERIES</button>
   </nav>
 
   <nav class="tabs">
@@ -1302,43 +1361,86 @@
 
   <section class="content">
     {#if screen === 'source'}
-      <!-- Drop zone source primaire -->
-      <div class="card drop-target" style:--wails-drop-target="drop">
-        <div class="drop-icon">🎬</div>
-        <div class="drop-label">{muxMode === 'psa' ? 'Source PSA' : 'Source LiHDL'} <span class="drop-hint">(vidéo gardée)</span></div>
-        {#if !sourcePath}
-          <div class="drop-title">Glisse un fichier .mkv ici</div>
-          <div class="drop-sub">ou plusieurs pour batcher · puis audios/subs externes</div>
-          <button class="btn-primary" on:click={pickMkvDialog}>Choisir un fichier</button>
-        {:else}
-          <div class="drop-title">{sourcePath.split('/').pop()}</div>
-          <div class="drop-sub">{sourcePath}</div>
-          <button class="btn-ghost" on:click={pickMkvDialog}>Changer</button>
+      <!-- Card unifiée : PSA + SUPPLY/FW (en mode PSA) ou seul (en mode LiHDL) -->
+      <div class="card sources-card drop-target" style:--wails-drop-target="drop">
+        <div class="section-title">Sources</div>
+
+        <!-- Ligne ① PSA -->
+        <div class="source-row">
+          <div class="source-info">
+            <div class="source-label">
+              <span class="source-num">①</span>
+              {muxMode === 'psa' ? 'Source PSA' : 'Source LiHDL'}
+              <span class="source-hint">(vidéo gardée)</span>
+            </div>
+            {#if sourcePath}
+              <div class="source-filename mono">{sourcePath.split('/').pop()}</div>
+            {:else}
+              <div class="source-empty">— Aucun fichier sélectionné —</div>
+            {/if}
+          </div>
+          <button class="btn-primary" on:click={pickMkvDialog}>
+            {sourcePath ? 'Changer' : (muxMode === 'psa' ? 'Choisir un fichier PSA' : 'Choisir un fichier')}
+          </button>
+        </div>
+
+        <!-- Ligne ② SUPPLY/FW (mode PSA uniquement) -->
+        {#if muxMode === 'psa'}
+          <div class="source-row secondary">
+            <div class="source-info">
+              <div class="source-label">
+                <span class="source-num">②</span>
+                Source SUPPLY / FW
+                <span class="source-hint">(audios + subs)</span>
+              </div>
+              {#if secondaryPath}
+                <div class="source-filename mono">{secondaryPath.split('/').pop()}</div>
+                <div class="source-meta">{secondaryTracks.length} piste(s) audio/sub détectée(s)</div>
+              {:else}
+                <div class="source-empty">— Aucun fichier sélectionné —</div>
+              {/if}
+            </div>
+            <button class="btn-primary" on:click={pickSecondaryDialog}>
+              {secondaryPath ? 'Changer' : 'Choisir un fichier SUPPLY/FW'}
+            </button>
+          </div>
         {/if}
       </div>
 
-      <!-- Drop zone SUPPLY/FW (audios + subs à récupérer) — mode PSA uniquement -->
-      {#if muxMode === 'psa'}
-      <div class="card">
-        <div class="drop-icon">🔊</div>
-        <div class="drop-label">Source SUPPLY / FW <span class="drop-hint">(audios + subs à récupérer)</span></div>
-        {#if !secondaryPath}
-          <div class="drop-sub">.mkv contenant les pistes audio FR + sous-titres à reprendre</div>
-          <button class="btn-ghost" on:click={pickSecondaryDialog}>Choisir un fichier</button>
-        {:else}
-          <div class="drop-title">{secondaryPath.split('/').pop()}</div>
-          <div class="drop-sub">{secondaryTracks.length} piste(s) audio/sub détectée(s)</div>
-          <div class="actions-row" style:gap="8px" style:margin-top="8px">
-            <button class="btn-primary" on:click={automate} disabled={!sourcePath || secondaryTracks.length === 0}>⚡ Automatiser</button>
-            <button class="btn-primary" on:click={() => screen = 'cible'}>Suivant → Cible</button>
-            <button class="btn-ghost" on:click={pickSecondaryDialog}>Changer</button>
-            <button class="btn-ghost" on:click={clearSecondary}>Retirer</button>
+      <!-- Actions : barre d'automatisation (mode PSA, après chargement des 2) -->
+      {#if muxMode === 'psa' && secondaryPath && secondaryTracks.length > 0}
+        <div class="card automate-bar">
+          <div class="actions-row" style:gap="8px">
+            <button class="btn-primary" on:click={automate} disabled={muxing || !sourcePath}>⚡ MUX MANUEL</button>
+            <button class="btn-primary btn-auto" on:click={muxAuto} disabled={muxing || !sourcePath}>🚀 MUX AUTO</button>
+            <button class="btn-primary" on:click={() => screen = 'cible'} disabled={muxing}>Suivant → Cible</button>
           </div>
-          {#if secondarySelected.length > 0}
-            <div class="field-hint" style:margin-top="8px">✓ {secondarySelected.filter(t=>t.type==='audio').length} audio(s) + {secondarySelected.filter(t=>t.type==='subtitles').length} sub(s) prêts à muxer</div>
+
+          {#if muxing}
+            <div class="auto-progress">
+              <div class="auto-progress-row">
+                <button class="btn-cancel btn-stop" on:click={stopMux}>⏹ Stop</button>
+                <div class="progress-bar"><div class="progress-fill" style:width="{muxPercent}%"></div></div>
+                <span class="mono">{muxPercent}%</span>
+              </div>
+              <div class="auto-status">Mux en cours…</div>
+            </div>
+          {:else if autoMuxStatus === 'success'}
+            <div class="auto-progress">
+              <div class="progress-bar done"><div class="progress-fill done-fill" style:width="100%"></div></div>
+              <div class="auto-status done">✅ Mux terminé avec succès — fichier prêt dans ton dossier de sortie</div>
+            </div>
+          {:else if autoMuxStatus === 'error'}
+            <div class="auto-progress">
+              <div class="progress-bar error"><div class="progress-fill error-fill" style:width="100%"></div></div>
+              <div class="auto-status error">❌ Mux échoué — vérifie les logs en bas</div>
+            </div>
+          {:else if secondarySelected.length > 0}
+            <div class="field-hint" style:margin-top="8px">
+              ✓ {secondarySelected.filter(t=>t.type==='audio').length} audio(s) + {secondarySelected.filter(t=>t.type==='subtitles').length} sub(s) prêts à muxer
+            </div>
           {/if}
-        {/if}
-      </div>
+        </div>
       {/if}
 
       <!-- Queue batch -->
@@ -1562,9 +1664,11 @@
             </div>
           </div>
         {/if}
-        {#if tmdbResults.length > 0}
+        <!-- Liste affichée seulement si pas encore picked OU si l'utilisateur
+             veut explicitement voir les alternatives. Limitée à 3 résultats. -->
+        {#if tmdbResults.length > 0 && !lastTmdbResult}
           <ul class="tmdb-list">
-            {#each tmdbResults as r}
+            {#each tmdbResults.slice(0, 3) as r}
               <li>
                 <button class="tmdb-item" on:click={() => pickTmdb(r)}>
                   {#if r.poster_url}<img class="tmdb-poster" src={r.poster_url} alt=""/>{/if}
@@ -1576,6 +1680,23 @@
               </li>
             {/each}
           </ul>
+        {:else if tmdbResults.length > 1 && lastTmdbResult}
+          <details class="tmdb-alts">
+            <summary>Voir les autres résultats ({Math.min(tmdbResults.length - 1, 2)})</summary>
+            <ul class="tmdb-list">
+              {#each tmdbResults.filter(r => r.tmdb_id !== lastTmdbResult.tmdb_id).slice(0, 2) as r}
+                <li>
+                  <button class="tmdb-item" on:click={() => pickTmdb(r)}>
+                    {#if r.poster_url}<img class="tmdb-poster" src={r.poster_url} alt=""/>{/if}
+                    <div class="tmdb-body">
+                      <div class="tmdb-title">{r.titre_fr || r.titre_vo} <span class="tmdb-year">({r.annee_fr})</span></div>
+                      <div class="tmdb-meta">{r.duree || ''} · ⭐ {r.note || '?'}</div>
+                    </div>
+                  </button>
+                </li>
+              {/each}
+            </ul>
+          </details>
         {/if}
       </div>
 
@@ -1669,7 +1790,7 @@
 
       <div class="actions-row">
         {#if muxing}
-          <button class="btn-cancel" on:click={stopMux}>Stop</button>
+          <button class="btn-cancel btn-stop" on:click={stopMux}>⏹ Stop</button>
           <div class="progress-bar"><div class="progress-fill" style:width="{muxPercent}%"></div></div>
           <span class="mono">{muxPercent}%</span>
         {:else}
@@ -1695,13 +1816,16 @@
             Sans clé, fallback sur l'index ci-dessous (films seulement).
           </div>
         </div>
-        <div class="field"><label>URL de l'index TMDB primaire</label>
+        <div class="field"><label>Index TMDB primaire (proxy uklm)</label>
           <input type="text" bind:value={config.serveurperso_url} placeholder="https://tmdb.uklm.xyz/search.php" />
+          <div class="field-hint">
+            Index principal — par défaut <b>tmdb.uklm.xyz</b> (réécrit, plus complet).
+          </div>
         </div>
-        <div class="field"><label>URL de l'index TMDB fallback</label>
+        <div class="field"><label>Index TMDB fallback (serveurperso query)</label>
           <input type="text" bind:value={config.fallback_index} placeholder="https://www.serveurperso.com/stats/search.php" />
           <div class="field-hint">
-            Si le primaire ne renvoie aucun résultat, l'app interroge automatiquement le fallback.
+            Endpoint <b>?query=</b> de serveurperso. Interrogé automatiquement si le primaire renvoie 0 résultat.
           </div>
         </div>
       </div>
@@ -1969,6 +2093,45 @@
   .drop-label { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
   .drop-hint { color: var(--text2); text-transform: none; letter-spacing: 0; }
 
+  /* Card unifiée Sources (PSA + SUPPLY dans une même fenêtre) */
+  .sources-card .section-title { margin-bottom: 12px; }
+  .source-row {
+    display: flex; align-items: center; gap: 14px;
+    padding: 12px 14px;
+    background: rgba(0,0,0,0.25);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 8px;
+  }
+  .source-row:last-child { margin-bottom: 0; }
+  .source-row.secondary { border-left: 3px solid rgba(50,130,200,0.55); }
+  .source-row .btn-primary { white-space: nowrap; flex-shrink: 0; }
+  .source-info { flex: 1; min-width: 0; }
+  .source-label { font-size: 12px; color: var(--text2); font-weight: 600; }
+  .source-num { color: var(--red-hot); font-weight: 700; margin-right: 6px; }
+  .source-row.secondary .source-num { color: rgb(120,170,220); }
+  .source-hint { color: var(--text3); font-weight: 400; margin-left: 4px; font-size: 11px; }
+  .source-filename { font-size: 13px; color: var(--green); margin-top: 4px; word-break: break-all; }
+  .source-empty { font-size: 12px; color: var(--text3); margin-top: 4px; font-style: italic; }
+  .source-meta { font-size: 11px; color: var(--text3); margin-top: 2px; }
+  .automate-bar { padding: 14px 16px; border-color: rgba(230,57,70,0.4); background: linear-gradient(180deg, rgba(230,57,70,0.06), rgba(0,0,0,0.2)); }
+  .btn-auto {
+    background: linear-gradient(180deg, rgb(180,140,40), rgb(140,100,20));
+    border-color: rgb(220,180,80);
+    color: white;
+  }
+  .btn-auto:hover:not(:disabled) { background: linear-gradient(180deg, rgb(220,180,80), rgb(180,140,40)); }
+  .auto-progress { margin-top: 12px; }
+  .auto-progress-row { display: flex; align-items: center; gap: 10px; }
+  .auto-progress .progress-bar { flex: 1; }
+  .progress-bar.done { background: rgba(40,180,80,0.15); border-color: rgba(40,180,80,0.4); }
+  .progress-bar.error { background: rgba(220,60,60,0.15); border-color: rgba(220,60,60,0.4); }
+  .progress-fill.done-fill { background: linear-gradient(90deg, rgb(40,180,80), rgb(60,220,120)); }
+  .progress-fill.error-fill { background: linear-gradient(90deg, rgb(220,60,60), rgb(255,100,100)); }
+  .auto-status { font-size: 12px; color: var(--text2); margin-top: 6px; text-align: center; }
+  .auto-status.done { color: rgb(80,220,120); font-weight: 600; }
+  .auto-status.error { color: rgb(255,120,120); font-weight: 600; }
+
   .track-row {
     padding: 10px 0;
     border-top: 1px dashed var(--border);
@@ -2099,6 +2262,12 @@
     font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
   }
   .btn-cancel:hover { background: rgba(239,68,68,0.22); border-color: rgba(239,68,68,0.7); }
+  .btn-stop {
+    font-weight: 700; padding: 10px 18px; font-size: 14px;
+    border-width: 2px; border-color: rgba(239,68,68,0.7);
+    background: rgba(239,68,68,0.18); color: rgb(255,180,180);
+  }
+  .btn-stop:hover { background: rgba(239,68,68,0.32); color: white; }
 
   .progress-bar {
     flex: 1; height: 8px; background: rgba(255,255,255,0.06);
@@ -2173,6 +2342,9 @@
   .btn-xs { padding: 2px 8px; font-size: 11px; }
 
   .tmdb-list { list-style: none; padding: 0; margin: 10px 0 0; display: flex; flex-direction: column; gap: 6px; }
+  .tmdb-alts { margin-top: 8px; }
+  .tmdb-alts summary { cursor: pointer; font-size: 11px; color: var(--text3); padding: 4px 0; }
+  .tmdb-alts summary:hover { color: var(--text); }
   .tmdb-item {
     display: flex; gap: 10px; align-items: flex-start; width: 100%; text-align: left;
     padding: 8px; background: rgba(0,0,0,0.25); border: 1px solid var(--border);

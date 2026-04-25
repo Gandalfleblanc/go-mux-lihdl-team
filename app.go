@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -87,7 +88,7 @@ func (a *App) startup(ctx context.Context) {
 
 // AppVersion est lue par le frontend (pill dans le header) et utilisée pour
 // comparer avec la dernière release GitHub lors du check de mise à jour.
-const AppVersion = "v3.11.0"
+const AppVersion = "v3.12.0"
 
 func (a *App) GetVersion() string { return AppVersion }
 
@@ -325,8 +326,35 @@ func (a *App) AnalyzeMkvSecondary(path string) {
 				row["mi_title"] = mt.Title
 				row["mi_format"] = mt.Format
 				row["mi_format_profile"] = mt.FormatProfile
+				row["mi_format_commercial"] = mt.FormatCommercial
+				row["mi_format_commercial_if_any"] = mt.FormatCommercialIfAny
+				row["mi_format_features"] = mt.FormatAdditionalFeatures
 				row["mi_service_kind"] = mt.ServiceKind
 				row["mi_service_kind_name"] = mt.ServiceKindNames
+				row["mi_stream_size"] = mt.StreamSize
+				row["mi_element_count"] = mt.ElementCount
+			}
+			// Pour les subs texte (SRT/ASS/SSA) en FR, extraire le contenu
+			// et compter les marqueurs SDH ([bruit], (musique), ♪, "Speaker:").
+			if t.Type == "subtitles" {
+				lang := strings.ToLower(t.Properties.Language)
+				codecID := strings.ToUpper(t.Properties.CodecID)
+				isText := strings.Contains(codecID, "TEXT") || strings.Contains(codecID, "UTF") ||
+					strings.Contains(codecID, "ASS") || strings.Contains(codecID, "SSA")
+				isFR := lang == "fre" || lang == "fra" || lang == "fr"
+				if isText && isFR {
+					tmpPath, exErr := mkvtool.ExtractTrackToTemp(a.ctx, binary, path, t.ID, "srt")
+					if exErr == nil {
+						content, _ := os.ReadFile(tmpPath)
+						os.Remove(tmpPath)
+						isSDH, score := mkvtool.DetectSubSDHFromContent(string(content))
+						row["sdh_detected"] = isSDH
+						row["sdh_score"] = score
+						wr.EventsEmit(a.ctx, "log", fmt.Sprintf("✓ sub #%d FR : score SDH = %d → %s", t.ID, score, map[bool]string{true: "SDH", false: "Full"}[isSDH]))
+					} else {
+						wr.EventsEmit(a.ctx, "log", "⚠ extract sub #"+itoa(t.ID)+" : "+exErr.Error())
+					}
+				}
 			}
 			tracksPayload = append(tracksPayload, row)
 		}

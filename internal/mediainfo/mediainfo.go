@@ -37,19 +37,24 @@ func Locate(appBinDir string) (string, error) {
 
 // Track est la vue simplifiée d'une piste depuis mediainfo JSON.
 type Track struct {
-	Type             string `json:"@type"`              // "Video" | "Audio" | "Text" | "General"
-	ID               string `json:"ID"`                 // ID de la piste (string dans mediainfo)
-	Title            string `json:"Title"`              // titre de la piste (équivalent track_name)
-	Language         string `json:"Language"`           // code ISO
-	Format           string `json:"Format"`             // ex: "AC-3", "E-AC-3", "DTS"
-	FormatProfile    string `json:"Format_Profile"`     // ex: "MA", "Core", "JOC"
-	Channels         string `json:"Channels"`           // string "6", "2", etc.
-	Default          string `json:"Default"`            // "Yes" / "No"
-	Forced           string `json:"Forced"`             // "Yes" / "No"
-	ServiceKind      string `json:"ServiceKind"`        // ex: "VI" (Visual Impaired), "HI" (Hearing Impaired)
-	ServiceKindNames string `json:"ServiceKind/String"` // version texte du service kind
-	Width            string `json:"Width"`
-	Height           string `json:"Height"`
+	Type                     string `json:"@type"`                    // "Video" | "Audio" | "Text" | "General"
+	ID                       string `json:"ID"`                       // ID de la piste (string dans mediainfo)
+	Title                    string `json:"Title"`                    // titre de la piste (équivalent track_name)
+	Language                 string `json:"Language"`                 // code ISO
+	Format                   string `json:"Format"`                   // ex: "AC-3", "E-AC-3", "DTS"
+	FormatProfile            string `json:"Format_Profile"`           // ex: "MA", "Core", "JOC"
+	FormatCommercial         string `json:"Format_Commercial"`        // ex: "Dolby Digital Plus with Dolby Atmos"
+	FormatCommercialIfAny    string `json:"Format_Commercial_IfAny"`  // alternative key (présente sur certaines versions)
+	FormatAdditionalFeatures string `json:"Format_AdditionalFeatures"` // ex: "JOC", "XLL"
+	Channels                 string `json:"Channels"`                 // string "6", "2", etc.
+	Default                  string `json:"Default"`                  // "Yes" / "No"
+	Forced                   string `json:"Forced"`                   // "Yes" / "No"
+	ServiceKind              string `json:"ServiceKind"`              // ex: "VI", "HI"
+	ServiceKindNames         string `json:"ServiceKind/String"`       // texte du service kind
+	StreamSize               string `json:"StreamSize"`               // octets
+	ElementCount             string `json:"ElementCount"`             // nombre d'éléments (subs)
+	Width                    string `json:"Width"`
+	Height                   string `json:"Height"`
 }
 
 // Info est la structure renvoyée par mediainfo --Output=JSON.
