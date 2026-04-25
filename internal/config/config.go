@@ -84,7 +84,7 @@ func Save(c Config) error {
 
 func defaultConfig() Config {
 	return Config{
-		ServeurPersoURL: "https://www.serveurperso.com/stats/search.php",
+		ServeurPersoURL: "https://tmdb.uklm.xyz/search.php",
 		DefaultTeam:     "LiHDL",
 		DefaultQuality:  "HDLight",
 		DefaultSource:   "REMUX LiHDL",

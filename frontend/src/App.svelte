@@ -84,6 +84,48 @@
     const e = m[2].padStart(2, '0');
     return `S${s}E${e}`;
   }
+
+  // Parse infos d'un nom de fichier PSA (vidéo principale).
+  // Retourne : { isPSA, source, videoCodec, team }.
+  function parsePsaSourceInfo(filename) {
+    const n = String(filename || '');
+    const stripped = n.replace(/\.[^.]+$/, '');
+    const teamMatch = /-([A-Za-z0-9]+)\s*$/.exec(stripped);
+    const team = teamMatch ? teamMatch[1].toUpperCase() : '';
+    const isPSA = team === 'PSA';
+    let source = '';
+    if (/\bWEBRip\b/i.test(n)) source = 'WEBRip';
+    else if (/\bWEB-DL\b/i.test(n)) source = 'WEB-DL';
+    else if (/\bBluRay\b/i.test(n)) source = 'BluRay';
+    else if (/\bWEB\b/i.test(n)) source = 'WEB';
+    let videoCodec = '';
+    if (/\bx265\b/i.test(n)) videoCodec = 'x265';
+    else if (/\bx264\b/i.test(n)) videoCodec = 'x264';
+    else if (/\b[Hh]\.?265\b|\bHEVC\b/.test(n)) videoCodec = 'H265';
+    else if (/\b[Hh]\.?264\b|\bAVC\b/.test(n)) videoCodec = 'H264';
+    return { isPSA, source, videoCodec, team };
+  }
+
+  // Parse infos d'un nom de fichier SUPPLY/FW (audios+subs source).
+  // Retourne : { team, langFlag }.
+  function parseSupplyInfo(filename) {
+    const n = String(filename || '');
+    const stripped = n.replace(/\.[^.]+$/, '');
+    const teamMatch = /-([A-Za-z0-9]+)\s*$/.exec(stripped);
+    const team = teamMatch ? teamMatch[1] : '';
+    let langFlag = '';
+    if (/\bFASTSUB\.VOSTFR\b/i.test(n)) langFlag = 'FASTSUB.VOSTFR';
+    else if (/\bFASTSUB\.FR\b/i.test(n)) langFlag = 'FASTSUB.FR';
+    else if (/\bMULTi?\.VF2\b/i.test(n)) langFlag = 'MULTi.VF2';
+    else if (/\bMULTi?\.VFF\b/i.test(n)) langFlag = 'MULTi.VFF';
+    else if (/\bMULTi?\.VFQ\b/i.test(n)) langFlag = 'MULTi.VFQ';
+    else if (/\bMULTi?\.VFi\b/i.test(n)) langFlag = 'MULTi.VFi';
+    else if (/\bVFF\b/i.test(n)) langFlag = 'VFF';
+    else if (/\bVFQ\b/i.test(n)) langFlag = 'VFQ';
+    else if (/\bVFi\b/i.test(n)) langFlag = 'VFi';
+    else if (/\bVOSTFR\b/i.test(n)) langFlag = 'FASTSUB.VOSTFR';
+    return { team, langFlag };
+  }
   // Dernière fiche TMDB sélectionnée — permet de basculer VF/VO sans re-chercher.
   let lastTmdbResult = null;
 
@@ -261,8 +303,31 @@
     secondaryPath = p;
     secondaryTracks = [];
     secondarySelected = [];
+    const filename = p.split('/').pop() || '';
     AnalyzeMkvSecondary(p);
-    appendLog('🔍 Analyse secondaire : ' + p.split('/').pop());
+    appendLog('🔍 Analyse secondaire : ' + filename);
+
+    // Auto-fill depuis le nom de fichier SUPPLY/FW.
+    const supply = parseSupplyInfo(filename);
+    const psaName = (sourcePath || '').split('/').pop() || '';
+    const psa = parsePsaSourceInfo(psaName);
+    // sourceType combiné PSA + SUPPLY (ex: "WEBRip PSA Audio Supply").
+    if (psa.isPSA && psa.source && supply.team) {
+      videoChoice.sourceType = `${psa.source} PSA Audio ${supply.team}`;
+      appendLog(`✓ sourceType : ${videoChoice.sourceType}`);
+    }
+    // Lang flag depuis SUPPLY → override automatique.
+    if (supply.langFlag) {
+      target.flagOverride = supply.langFlag;
+      appendLog(`✓ Flag langue : ${supply.langFlag}`);
+    }
+    // S/E : si pas déjà détecté sur PSA, prends celui de SUPPLY ; sinon valide.
+    const supplyEp = detectEpisode(filename);
+    if (!target.episode && supplyEp) {
+      target.episode = supplyEp;
+    } else if (supplyEp && target.episode && supplyEp !== target.episode) {
+      appendLog(`⚠ S/E PSA (${target.episode}) ≠ SUPPLY (${supplyEp})`);
+    }
   }
 
   function clearSecondary() {
@@ -288,18 +353,27 @@
       let label, language, defaultFlag = false, forcedFlag = !!t.forced_track;
       if (t.type === 'audio') {
         label = inferAudioLabel(t);
-        language = (t.language === 'fre' || t.language === 'fra' || t.language === 'fr') ? 'fre' :
-                   (t.language === 'eng' || t.language === 'en') ? 'eng' :
-                   t.language || 'und';
+        // Code langue : VFQ → fr-CA (BCP 47), VFF/VFi/AD → fre, sinon ISO ou langue d'origine.
+        if (/\bFR VFQ\b/.test(label))           language = 'fr-CA';
+        else if (/^FR /.test(label))             language = 'fre';
+        else if (/^ENG /.test(label))            language = 'eng';
+        else if (/^JPN /.test(label))            language = 'jpn';
+        else if (/^ITA /.test(label))            language = 'ita';
+        else if (/^SPA /.test(label))            language = 'spa';
+        else if (/^GER /.test(label))            language = 'ger';
+        else if (/^CHI /.test(label))            language = 'zho';
+        else if (/^RUS /.test(label))            language = 'rus';
+        else                                      language = t.language || 'und';
         defaultFlag = false; // 1ère piste FR sera default plus tard
       } else {
         const lang = String(t.language || '').toLowerCase();
         const key = lang || 'und';
         seenLangSubs[key] = (seenLangSubs[key] ?? -1) + 1;
         label = inferSubLabel(t, seenLangSubs[key]);
-        language = (lang === 'fre' || lang === 'fra' || lang === 'fr') ? 'fre' :
-                   (lang === 'eng' || lang === 'en') ? 'eng' :
-                   lang || 'und';
+        if (/\bFR VFQ\b/.test(label))            language = 'fr-CA';
+        else if (/^FR /.test(label))             language = 'fre';
+        else if (/^ENG /.test(label))            language = 'eng';
+        else                                      language = lang || 'und';
       }
       return {
         id: t.id,
@@ -379,17 +453,24 @@
   // Codec+canaux de la 1re piste audio FR VFx gardée (VFF/VFQ/VFi).
   // Fallback : 1re piste audio gardée tout court. Ex : "AC3.5.1".
   function firstAudioCodecForFilename() {
-    const kept = tracks.filter(t => t.type === 'audio' && t.keep);
-    const firstFR = kept.find(t => /\bVF[FQi]\b/.test(t.label || ''));
-    const chosen = firstFR || kept[0];
+    // Combine internes + secondaire — secondaire prioritaire (workflow PSA+SUPPLY)
+    const internal = tracks.filter(t => t.type === 'audio' && t.keep);
+    const secondary = secondarySelected.filter(t => t.type === 'audio' && t.keep);
+    const all = [...secondary, ...internal];
+    const firstFR = all.find(t => /\bVF[FQi]\b/.test(t.label || ''));
+    const chosen = firstFR || all[0];
     if (!chosen) return '';
-    const m = /: (AC3|EAC3) (\d\.\d)/.exec(chosen.label || '');
-    return m ? `${m[1]}.${m[2]}` : '';
+    // Match: "FR VFF : EAC3 5.1" ou "ENG VO : EAC3 5.1 ATMOS"
+    const m = /: (AC3|EAC3|DTS|TrueHD) (\d\.\d)(?: (ATMOS))?/.exec(chosen.label || '');
+    if (!m) return '';
+    return m[3] ? `${m[1]}.${m[2]}.${m[3]}` : `${m[1]}.${m[2]}`;
   }
 
   // Vrai si au moins une piste audio gardée porte un label "FR AD".
   function hasAudioDescription() {
-    return tracks.some(t => t.type === 'audio' && t.keep && /\bFR AD\b/.test(t.label || ''));
+    const internalAD = tracks.some(t => t.type === 'audio' && t.keep && /\bFR AD\b/.test(t.label || ''));
+    const secondaryAD = secondarySelected.some(t => t.type === 'audio' && t.keep && /\bFR AD\b/.test(t.label || ''));
+    return internalAD || secondaryAD;
   }
 
   function keptAudioLabels() {
@@ -557,12 +638,29 @@
     sourcePath = path;
     sourceInfo = null;
     tracks = [];
+    const filename = path.split('/').pop() || '';
     // Auto-fill la team de la source depuis le nom de fichier.
     const st = extractSourceTeam(path);
     if (st) videoChoice.sourceTeam = st;
     target.video_codec = ''; // reset pour que l'auto-suggest se réapplique
     // Auto-detect SxxExx → mode série
-    target.episode = detectEpisode(path.split('/').pop() || '');
+    target.episode = detectEpisode(filename);
+    // Mode PSA : auto-fill complet depuis le nom du fichier PSA.
+    if (muxMode === 'psa') {
+      const psa = parsePsaSourceInfo(filename);
+      if (psa.isPSA) {
+        videoChoice.quality = 'Custom PSA';
+        videoChoice.encoder = 'GANDALF';
+        videoChoice.team = 'GANDALF';
+        videoChoice.sourceTeam = ''; // norme : pas de team de source pour PSA
+        if (psa.source) {
+          target.source = psa.source;
+          videoChoice.sourceType = psa.source + ' PSA';
+        }
+        if (psa.videoCodec) target.video_codec = psa.videoCodec;
+        appendLog(`✓ PSA détecté : ${psa.source || '?'} ${psa.videoCodec || '?'} → Custom PSA / GANDALF`);
+      }
+    }
     AnalyzeMkv(path); // fire-and-forget, résultat via event 'analyze:result'
   }
 

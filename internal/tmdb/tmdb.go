@@ -232,12 +232,25 @@ func FetchTVByID(id, apiKey string) (*Result, error) {
 	}, nil
 }
 
-// Search interroge l'index serveurperso et retourne les fiches TMDB matchées.
-// baseURL par défaut = https://www.serveurperso.com/stats/search.php
+// Search interroge l'index TMDB (par défaut tmdb.uklm.xyz) et retourne les
+// fiches matchées. Si le primaire ne renvoie rien, fallback automatique sur
+// serveurperso (les deux indexes ont le même format HTML, retro-compat).
 func Search(baseURL, query string) ([]Result, error) {
+	const fallbackURL = "https://www.serveurperso.com/stats/search.php"
 	if baseURL == "" {
-		baseURL = "https://www.serveurperso.com/stats/search.php"
+		baseURL = "https://tmdb.uklm.xyz/search.php"
 	}
+	results, err := searchOne(baseURL, query)
+	if (err != nil || len(results) == 0) && baseURL != fallbackURL {
+		if alt, altErr := searchOne(fallbackURL, query); altErr == nil && len(alt) > 0 {
+			return alt, nil
+		}
+	}
+	return results, err
+}
+
+// searchOne fait une seule requête HTTP vers un index donné et parse le HTML.
+func searchOne(baseURL, query string) ([]Result, error) {
 	requete := videoExtRe.ReplaceAllString(query, "")
 	u := baseURL + "?query=" + url.QueryEscape(requete)
 	client := &http.Client{Timeout: 20 * time.Second}
