@@ -232,16 +232,18 @@ func FetchTVByID(id, apiKey string) (*Result, error) {
 	}, nil
 }
 
-// Search interroge l'index TMDB (par défaut tmdb.uklm.xyz) et retourne les
-// fiches matchées. Si le primaire ne renvoie rien, fallback automatique sur
-// serveurperso (les deux indexes ont le même format HTML, retro-compat).
-func Search(baseURL, query string) ([]Result, error) {
-	const fallbackURL = "https://www.serveurperso.com/stats/search.php"
-	if baseURL == "" {
-		baseURL = "https://tmdb.uklm.xyz/search.php"
+// Search interroge l'index TMDB primaire (par défaut tmdb.uklm.xyz). Si zéro
+// résultat, bascule sur l'index fallback (par défaut serveurperso). Les deux
+// indexes ont le même format HTML (retro-compat).
+func Search(primaryURL, fallbackURL, query string) ([]Result, error) {
+	if primaryURL == "" {
+		primaryURL = "https://tmdb.uklm.xyz/search.php"
 	}
-	results, err := searchOne(baseURL, query)
-	if (err != nil || len(results) == 0) && baseURL != fallbackURL {
+	if fallbackURL == "" {
+		fallbackURL = "https://www.serveurperso.com/stats/search.php"
+	}
+	results, err := searchOne(primaryURL, query)
+	if (err != nil || len(results) == 0) && primaryURL != fallbackURL {
 		if alt, altErr := searchOne(fallbackURL, query); altErr == nil && len(alt) > 0 {
 			return alt, nil
 		}

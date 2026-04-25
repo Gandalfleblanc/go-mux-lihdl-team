@@ -10,14 +10,15 @@ import (
 )
 
 type Config struct {
-	TmdbKey          string `json:"tmdb_key"`
-	ServeurPersoURL  string `json:"serveurperso_url"` // base URL de l'index serveurperso (ex: https://www.serveurperso.com/stats/search.php)
-	OutputDir        string `json:"output_dir"`       // dossier de sortie pour les .mkv muxés
-	MkvmergePath     string `json:"mkvmerge_path"`    // override manuel du binaire mkvmerge (sinon auto-détection)
-	DefaultEncoder   string `json:"default_encoder"`  // encodeur pré-sélectionné (ex: GANDALF)
-	DefaultTeam      string `json:"default_team"`     // team pré-sélectionnée (ex: LiHDL)
-	DefaultQuality   string `json:"default_quality"`  // qualité pré-sélectionnée (ex: HDLight)
-	DefaultSource    string `json:"default_source"`   // source pré-sélectionnée (ex: REMUX LiHDL)
+	TmdbKey         string `json:"tmdb_key"`
+	ServeurPersoURL string `json:"serveurperso_url"` // index TMDB primaire (par défaut tmdb.uklm.xyz)
+	FallbackIndex   string `json:"fallback_index"`   // index TMDB fallback (par défaut serveurperso)
+	OutputDir       string `json:"output_dir"`       // dossier de sortie pour les .mkv muxés
+	MkvmergePath    string `json:"mkvmerge_path"`    // override manuel du binaire mkvmerge (sinon auto-détection)
+	DefaultEncoder  string `json:"default_encoder"`  // encodeur pré-sélectionné (ex: GANDALF)
+	DefaultTeam     string `json:"default_team"`     // team pré-sélectionnée (ex: LiHDL)
+	DefaultQuality  string `json:"default_quality"`  // qualité pré-sélectionnée (ex: HDLight)
+	DefaultSource   string `json:"default_source"`   // source pré-sélectionnée (ex: REMUX LiHDL)
 }
 
 func configDir() (string, error) {
@@ -85,6 +86,7 @@ func Save(c Config) error {
 func defaultConfig() Config {
 	return Config{
 		ServeurPersoURL: "https://tmdb.uklm.xyz/search.php",
+		FallbackIndex:   "https://www.serveurperso.com/stats/search.php",
 		DefaultTeam:     "LiHDL",
 		DefaultQuality:  "HDLight",
 		DefaultSource:   "REMUX LiHDL",

@@ -3,6 +3,7 @@ export namespace config {
 	export class Config {
 	    tmdb_key: string;
 	    serveurperso_url: string;
+	    fallback_index: string;
 	    output_dir: string;
 	    mkvmerge_path: string;
 	    default_encoder: string;
@@ -18,6 +19,7 @@ export namespace config {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.tmdb_key = source["tmdb_key"];
 	        this.serveurperso_url = source["serveurperso_url"];
+	        this.fallback_index = source["fallback_index"];
 	        this.output_dir = source["output_dir"];
 	        this.mkvmerge_path = source["mkvmerge_path"];
 	        this.default_encoder = source["default_encoder"];

@@ -351,6 +351,7 @@
     let order = 100; // après la vidéo (qui sera order=0..99)
     secondarySelected = secondaryTracks.map(t => {
       let label, language, defaultFlag = false, forcedFlag = !!t.forced_track;
+      let keepFlag = true;
       if (t.type === 'audio') {
         label = inferAudioLabel(t);
         // Code langue : VFQ → fr-CA (BCP 47), VFF/VFi/AD → fre, sinon ISO ou langue d'origine.
@@ -374,6 +375,9 @@
         else if (/^FR /.test(label))             language = 'fre';
         else if (/^ENG /.test(label))            language = 'eng';
         else                                      language = lang || 'und';
+        // Mode PSA : on ne garde QUE les FR Forced (générique ou VFF) — tout
+        // le reste est désactivé. Si l'utilisateur en veut d'autres, il coche.
+        keepFlag = /^FR( VFF)? Forced/.test(label);
       }
       return {
         id: t.id,
@@ -382,7 +386,7 @@
         codec_id: t.codec_id,
         language,
         label,
-        keep: true,
+        keep: keepFlag,
         default: defaultFlag,
         forced: forcedFlag,
         order: order++,
@@ -938,20 +942,48 @@
     appendLog('✓ Titre ' + (target.lang || 'auto').toUpperCase() + ' : ' + newTitle);
   }
 
+  // Nettoie un nom de fichier pour en faire une requête TMDB lisible :
+  //   Boston.Blue.S01E15.1080p.10bit.WEBRip.6CH.x265.HEVC-PSA → "Boston Blue"
+  //   In.the.Name.of.Ben.Hur.2016.HDLight... → "In the Name of Ben Hur"
+  function cleanQueryFromFilename(filename) {
+    let name = String(filename || '').replace(/\.[^.]+$/, '');
+    // Série : tout avant SxxExx
+    const ms = /^(.+?)\.S\d{1,2}E\d{1,3}\b/i.exec(name);
+    if (ms) name = ms[1];
+    else {
+      // Film : tout avant l'année (4 chiffres 19xx ou 20xx)
+      const my = /^(.+?)\.(?:19|20)\d{2}\b/.exec(name);
+      if (my) name = my[1];
+    }
+    return name.replace(/\./g, ' ').trim();
+  }
+
   async function maybeAutoFillTitle(path) {
-    const name = path.split('/').pop().replace(/\.[^.]+$/, '');
-    tmdbQuery = name;
+    const filename = path.split('/').pop() || '';
+    const cleaned = cleanQueryFromFilename(filename);
+    const isSeries = /\bS\d{1,2}E\d{1,3}\b/i.test(filename);
+    tmdbQuery = cleaned;
+    if (isSeries) tmdbMode = 'tv';
     try {
       tmdbSearching = true;
-      const r = await SearchTmdb(name);
+      let r;
+      if (isSeries) {
+        // Série : essaie TMDB API série (clé requise), fallback sur l'index générique.
+        try { r = await SearchTmdbTV(cleaned); }
+        catch (_) { r = await SearchTmdb(cleaned); }
+        if (!r || r.length === 0) r = await SearchTmdb(cleaned);
+      } else {
+        r = await SearchTmdb(cleaned);
+      }
       tmdbResults = r || [];
-      if (r && r.length === 1) {
+      if (r && r.length >= 1) {
+        // Auto-pick le 1er résultat (top match) — l'utilisateur peut changer.
         lastTmdbResult = r[0];
         target.title = composeTmdbTitle(r[0]);
         target.year  = r[0].annee_fr || '';
-        appendLog('✓ TMDB : ' + target.title);
-      } else if (r && r.length > 1) {
-        appendLog('ℹ ' + r.length + ' résultats TMDB — choisis dans Cible');
+        appendLog('✓ TMDB : ' + target.title + (r.length > 1 ? ` (${r.length} résultats — choix possible)` : ''));
+      } else {
+        appendLog('ℹ Aucun résultat TMDB pour « ' + cleaned + ' »');
       }
     } catch (e) {
       appendLog('⚠ TMDB : ' + String(e));
@@ -1580,9 +1612,9 @@
     {:else if screen === 'reglages'}
       <div class="card">
         <div class="section-title">TMDB</div>
-        <div class="field"><label>Clé API TMDB (optionnelle)</label>
+        <div class="field"><label>Clé API TMDB</label>
           <div class="field-row">
-            <input type="password" bind:value={config.tmdb_key} placeholder="laisse vide si tu utilises juste serveurperso" />
+            <input type="password" bind:value={config.tmdb_key} placeholder="ex: a1b2c3d4e5f6… (themoviedb.org → Settings → API)" />
             <button class="btn-test" on:click={doTestTmdbKey} disabled={tmdbTest.running}>
               {tmdbTest.running ? '…' : 'Test'}
             </button>
@@ -1590,9 +1622,19 @@
           {#if tmdbTest.ok !== null}
             <div class="result-badge {tmdbTest.ok ? 'ok' : 'err'}">{tmdbTest.message}</div>
           {/if}
+          <div class="field-hint">
+            Requise pour : <b>recherche par ID numérique</b>, <b>recherche série TV</b>.
+            Sans clé, fallback sur l'index ci-dessous (films seulement).
+          </div>
         </div>
-        <div class="field"><label>URL de l'index</label>
-          <input type="text" bind:value={config.serveurperso_url} />
+        <div class="field"><label>URL de l'index TMDB primaire</label>
+          <input type="text" bind:value={config.serveurperso_url} placeholder="https://tmdb.uklm.xyz/search.php" />
+        </div>
+        <div class="field"><label>URL de l'index TMDB fallback</label>
+          <input type="text" bind:value={config.fallback_index} placeholder="https://www.serveurperso.com/stats/search.php" />
+          <div class="field-hint">
+            Si le primaire ne renvoie aucun résultat, l'app interroge automatiquement le fallback.
+          </div>
         </div>
       </div>
 

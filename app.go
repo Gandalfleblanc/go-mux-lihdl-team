@@ -87,7 +87,7 @@ func (a *App) startup(ctx context.Context) {
 
 // AppVersion est lue par le frontend (pill dans le header) et utilisée pour
 // comparer avec la dernière release GitHub lors du check de mise à jour.
-const AppVersion = "v3.8.0"
+const AppVersion = "v3.9.0"
 
 func (a *App) GetVersion() string { return AppVersion }
 
@@ -347,7 +347,7 @@ func (a *App) SearchTmdb(query string) ([]tmdb.Result, error) {
 			return []tmdb.Result{*r}, nil
 		}
 	}
-	return tmdb.Search(c.ServeurPersoURL, query)
+	return tmdb.Search(c.ServeurPersoURL, c.FallbackIndex, query)
 }
 
 // SearchTmdbTV cherche une série TV via l'API TMDB (nom ou ID numérique).
