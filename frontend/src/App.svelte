@@ -4,7 +4,7 @@
   import logo from './assets/images/logo.png';
   import {
     GetVersion, GetConfig, SaveConfig, GetLihdlOptions,
-    SelectMkvFile, SelectSubFiles, SelectAudioFiles, SelectOutputDir, LocateMkvmerge, OpenFolder, SearchTmdbTV, SearchTmdbMovie, AnalyzeMkvSecondary, MoveToTrash, LookupHydrackerURL, TestHydrackerKey, TestUnfrKey, OpenURL, GetMkvBasicInfo, ExtractRefSubs,
+    SelectMkvFile, SelectSubFiles, SelectAudioFiles, SelectOutputDir, LocateMkvmerge, OpenFolder, SearchTmdbTV, SearchTmdbMovie, AnalyzeMkvSecondary, MoveToTrash, MoveDirContentsToTrash, LookupHydrackerURL, TestHydrackerKey, TestUnfrKey, OpenURL, GetMkvBasicInfo, ExtractRefSubs, ExtractFRAudios, CheckSubsSync,
     AnalyzeMkv, SearchTmdb, TestTmdbKey, FileSize,
     Mux, CancelMux,
     CheckUpdate, InstallUpdate,
@@ -281,9 +281,15 @@
     referenceMkvInfo = await GetMkvBasicInfo(p).catch(() => null);
     appendLog('🔍 Référence : ' + p.split('/').pop() + (referenceMkvInfo ? ` (${formatDuration(referenceMkvInfo.duration_seconds)}, ${referenceMkvInfo.framerate} fps)` : ''));
     // Auto-extraction des sous-titres FR/ENG en SRT (texte uniquement, exclut PGS/VobSub).
+    // Si la source LiHDL est chargée, détecte aussi le décalage et l'applique au mux.
+    srtExtracting = true;
+    srtExtractionResult = '';
+    srtPhase = '';
+    srtAssConverted = false;
+    srtPercent = 0;
     try {
       appendLog('⏳ Extraction des sous-titres FR/ENG compatibles…');
-      const subs = await ExtractRefSubs(p);
+      const subs = await ExtractRefSubs(p, sourcePath || '');
       if (subs && subs.length > 0) {
         let maxOrder = 0;
         for (const t of tracks) maxOrder = Math.max(maxOrder, t.order ?? 0);
@@ -292,30 +298,263 @@
           maxOrder += 10;
           let size = -1;
           try { size = await FileSize(s.path); } catch {}
+          // Nom lisible dérivé du label LiHDL (ex: "FR Forced.srt", "ENG Full.srt")
+          // au lieu de "submux-extract-XXX.srt".
+          const friendlyName = (s.label || '').replace(/\s*:\s*SRT/i, '').replace(/\s+/g, '.') + '.srt';
           externalSubs = [...externalSubs, {
             path: s.path,
-            name: basename(s.path),
+            name: friendlyName || basename(s.path),
             size,
             keep: true,
             default: false,
             forced: !!s.forced,
             label: s.label,
+            delayMs: s.delay_ms || 0,
+            tempoFactor: s.tempo_factor || 1.0,
             order: maxOrder,
           }];
         }
-        appendLog(`✓ ${subs.length} sous-titre(s) FR/ENG extrait(s) et ajouté(s)`);
+        const tempoInfo = subs[0] && subs[0].tempo_factor && subs[0].tempo_factor !== 1.0 ? ` + tempo ${subs[0].tempo_factor.toFixed(6)}` : '';
+        const delayInfo = subs[0] && subs[0].delay_ms ? ` (sync : ${subs[0].delay_ms} ms${tempoInfo} appliqué)` : '';
+        appendLog(`✓ ${subs.length} sous-titre(s) FR/ENG extrait(s) et ajouté(s)${delayInfo}`);
         applySubForcedRule();
+        // Tri LiHDL des subs (FR avant ENG ; Forced avant Full avant SDH).
+        applyLihdlTrackOrder();
+        srtExtractionResult = 'success';
+        // Trigger auto-sync alass après extraction SRT.
+        setTimeout(maybeAutoSubSyncCheck, 100);
       } else {
         appendLog('ℹ Aucun sous-titre FR/ENG texte trouvé dans la référence.');
+        srtExtractionResult = 'success'; // Pas d'erreur, juste rien à extraire.
       }
     } catch (e) {
       appendLog('❌ Extraction subs : ' + String(e));
+      srtExtractionResult = 'error';
+    } finally {
+      srtExtracting = false;
+      srtPhase = '';
+      srtPercent = 0;
     }
   }
 
   function clearReference() {
     referencePath = '';
     referenceMkvInfo = null;
+    srtExtractionResult = '';
+    frAudioExtractionResult = '';
+    frAudioConvertedSummary = '';
+    extractFRVFF = false;
+    extractFRVFQ = false;
+    extractENG = false;
+  }
+
+  // ---- Extraction FR Audio (VFF/VFQ depuis la source de référence) ----
+  // Utilise referencePath comme unique source — pas de fichier séparé.
+  let extractFRVFF = false;
+  let extractFRVFQ = false;
+  let extractENG = false;
+  let frAudioExtracting = false;
+  let frAudioExtractionResult = ''; // '' | 'success' | 'error'
+  let frAudioPhase = ''; // 'sync' | 'convert:CODEC,VARIANT' — phase courante pour le label de la progress bar
+  let frAudioConvertPercent = 0; // 0-100 pendant la conversion AC3 (event ac3convert:progress)
+  let frAudioConvertedSummary = ''; // "448 kb/s 5.1" ou "192 kb/s 2.0" ou "448 kb/s 5.1 / 192 kb/s 2.0" selon les conversions réelles
+  let srtExtracting = false; // true pendant l'extraction SRT auto au pick d'une référence
+  let srtExtractionResult = ''; // '' | 'success' | 'error'
+  let srtPhase = ''; // '' | 'convert_ass' — phase courante pour le label de la SRT progress bar
+  let srtAssConverted = false; // true si au moins un sub ASS a été converti en SRT pendant cette extraction
+  let srtPercent = 0; // 0-100 progression de l'extraction SRT (event srtprogress)
+
+  // ---- Vérification sync subs externes vs audio source LiHDL ----
+  let subSyncChecking = false;
+  let subSyncResults = []; // [{path, offset_ms, raw_offset_ms, confidence, method, error}]
+  let subSyncPercent = 0;
+  let subSyncCurrentName = '';
+  let subSyncAppliedMsg = ''; // "✓ N SRT resyncronisé(s)" persistant après apply
+
+  // Hash des paths SRT externes — pour éviter de relancer alass plusieurs fois
+  // sur le même état après auto-trigger.
+  let lastSyncedSrtPathsHash = '';
+
+  // Déclenchement auto : appelé quand source LiHDL ET au moins un SRT externe
+  // sont chargés. Ne refait pas l'analyse si elle a déjà été faite pour les
+  // mêmes paths (state hash).
+  async function maybeAutoSubSyncCheck() {
+    if (!sourcePath) return;
+    const srtSubs = externalSubs.filter(s => s.path && /\.(srt|ass|ssa)$/i.test(s.path));
+    if (srtSubs.length === 0) return;
+    const hash = srtSubs.map(s => s.path).sort().join('|');
+    if (hash === lastSyncedSrtPathsHash) return; // déjà fait pour ce set
+    if (subSyncChecking) return;
+    lastSyncedSrtPathsHash = hash;
+    appendLog('🤖 Vérification sync SRT automatique…');
+    await runSubSyncCheck();
+  }
+
+  async function runSubSyncCheck() {
+    if (!sourcePath) { appendLog('⚠ Charge la source LiHDL d\'abord'); return; }
+    const srtSubs = externalSubs.filter(s => s.path && /\.(srt|ass|ssa)$/i.test(s.path));
+    if (srtSubs.length === 0) { appendLog('ℹ Aucun SRT/ASS/SSA externe à vérifier'); return; }
+    subSyncChecking = true;
+    subSyncResults = [];
+    subSyncPercent = 0;
+    subSyncCurrentName = '';
+    subSyncAppliedMsg = '';
+    try {
+      appendLog(`🔎 Sync alass de ${srtSubs.length} sous-titre(s) vs source…`);
+      const reqs = srtSubs.map(s => ({ path: s.path }));
+      subSyncResults = await CheckSubsSync(reqs, sourcePath);
+    } catch (e) {
+      appendLog('❌ alass sync : ' + String(e));
+    } finally {
+      subSyncChecking = false;
+      subSyncPercent = 0;
+      subSyncCurrentName = '';
+    }
+  }
+
+  function applySubSyncResults() {
+    let applied = 0;
+    for (const r of subSyncResults) {
+      if (!r || r.error) continue;
+      if (!r.synced_path) continue;
+      const idx = externalSubs.findIndex(s => s.path === r.path);
+      if (idx >= 0) {
+        // Le SRT corrigé par alass remplace le SRT original. Reset delayMs/tempoFactor
+        // car les corrections sont déjà BAKED dans le fichier corrigé.
+        externalSubs[idx].path = r.synced_path;
+        externalSubs[idx].name = basename(r.synced_path);
+        externalSubs[idx].delayMs = 0;
+        externalSubs[idx].tempoFactor = 1.0;
+        applied++;
+      }
+    }
+    externalSubs = [...externalSubs];
+    appendLog(`✓ ${applied} sous-titre(s) remplacé(s) par version corrigée alass`);
+    subSyncAppliedMsg = `✓ ${applied} sous-titre(s) resynchronisé(s) via alass`;
+    subSyncResults = [];
+  }
+
+  function dismissSubSyncResults() {
+    subSyncResults = [];
+    subSyncAppliedMsg = '';
+  }
+
+  async function runFRAudioExtraction() {
+    if (!referencePath) { appendLog('⚠ Choisis d\'abord une source de référence'); return; }
+    if (!extractFRVFF && !extractFRVFQ && !extractENG) { appendLog('⚠ Coche au moins VFF, VFQ ou ENG'); return; }
+    if (!sourcePath) { appendLog('⚠ Charge la source LiHDL d\'abord (pour la sync)'); return; }
+    frAudioExtracting = true;
+    frAudioExtractionResult = '';
+    frAudioConvertPercent = 0;
+    frAudioConvertedSummary = '';
+    try {
+      const variants = [extractFRVFF && 'VFF', extractFRVFQ && 'VFQ', extractENG && 'ENG'].filter(Boolean).join(' + ');
+      appendLog(`⏳ Extraction ${variants} + détection sync…`);
+      const extractionsRaw = await ExtractFRAudios(referencePath, !!extractFRVFF, !!extractFRVFQ, !!extractENG, sourcePath);
+      if (!extractionsRaw || extractionsRaw.length === 0) {
+        appendLog('ℹ Aucune piste correspondante trouvée dans la source FR audio.');
+        return;
+      }
+      // Tri norme LiHDL : FR VFF (ou VFi/VOF) en 1er, puis FR VFQ, puis ENG VO.
+      const extractions = [...extractionsRaw].sort((a, b) => {
+        const rank = (v) => {
+          if (v === 'VFF' || v === 'VFi' || v === 'VOF') return 0;
+          if (v === 'VFQ') return 1;
+          if (v === 'ENG') return 4;
+          return 9;
+        };
+        return rank(a.variant) - rank(b.variant);
+      });
+      // Drop des pistes FR/ENG/autres VO internes correspondant aux variantes extraites.
+      // Si l'utilisateur extrait ENG VO, on supprime aussi toutes les autres pistes VO
+      // (JPN VO, ITA VO, etc.) qui deviennent superflues — on garde uniquement la ENG VO extraite.
+      tracks = tracks.map(t => {
+        if (t.type !== 'audio') return t;
+        const isVFForVFi = /^FR (VFF|VFi|VOF) /.test(t.label || '');
+        const isVFQ = /^FR VFQ /.test(t.label || '');
+        const isFR = /^FR /.test(t.label || '');
+        if (extractFRVFF && isVFForVFi) return { ...t, keep: false };
+        if (extractFRVFQ && isVFQ) return { ...t, keep: false };
+        if (extractENG && !isFR) return { ...t, keep: false }; // drop tous les non-FR (ENG, JPN, ITA, etc.)
+        return { ...t, default: false };
+      });
+      // Ajout brut des extractions ; l'ordre + default seront recomputés
+      // globalement après la boucle pour garantir : FR VFF → FR VFQ → FR AD → reste.
+      let isFirstExtracted = true;
+      for (const ex of extractions) {
+        // Construction directe du label LiHDL depuis variant + codec + channels +
+        // détection Atmos (mediainfo). On ne passe PAS par inferAudioLabel car
+        // sa logique de hints (track_name) n'est pas fiable sur une piste
+        // extraite (elle perd son contexte mkv).
+        const ch = formatChannels(ex.channels);
+        const atmosFields = [
+          String(ex.track_name || ''),
+          String(ex.mi_title || ''),
+          String(ex.mi_format_profile || ''),
+          String(ex.mi_format_commercial || ''),
+          String(ex.mi_format_commercial_if_any || ''),
+          String(ex.mi_format_features || ''),
+        ].join(' ').toUpperCase();
+        const isAtmos = (atmosFields.includes('ATMOS') || atmosFields.includes('JOC')) && ex.codec === 'EAC3' && ch === '5.1';
+        const atmosSuffix = isAtmos ? ' ATMOS' : '';
+        // Norme LiHDL : "FR <variant>" pour FR (VFF/VFQ/VFi/VOF), "ENG VO" pour anglais.
+        const labelPrefix = ex.variant === 'ENG' ? 'ENG VO' : `FR ${ex.variant}`;
+        const label = `${labelPrefix} : ${ex.codec} ${ch}${atmosSuffix}`;
+        // Nom lisible (ex: "FR.VFF.AC3.5.1.ac3", "ENG.VO.AC3.5.1.ac3")
+        const namePrefix = ex.variant === 'ENG' ? 'ENG.VO' : `FR.${ex.variant}`;
+        const friendlyName = `${namePrefix}${atmosSuffix ? '.ATMOS' : ''}.${ex.codec}.${ch}.${ex.codec.toLowerCase()}`.replace(/\s+/g, '');
+        externalAudios = [...externalAudios, {
+          path: ex.path,
+          name: friendlyName,
+          label,
+          keep: true,
+          default: false, // sera recalculé en bloc
+          forced: false,
+          delayMs: ex.delay_ms || 0,
+          tempoFactor: ex.tempo_factor || 1.0,
+          order: 0, // sera recalculé
+        }];
+        isFirstExtracted = false;
+        const tempoStr = ex.tempo_factor && ex.tempo_factor !== 1.0 ? `, tempo ${ex.tempo_factor.toFixed(6)}` : '';
+        const syncMsg = (ex.delay_ms !== 0 || (ex.tempo_factor && ex.tempo_factor !== 1.0))
+          ? ` (offset ${ex.delay_ms} ms${tempoStr}, conf ${(ex.confidence || 0).toFixed(2)}, ${ex.method})`
+          : ' (parfaitement synchro)';
+        appendLog(`✓ FR ${ex.variant} ajoutée → ${label}${syncMsg}`);
+      }
+      // applyLihdlTrackOrder gère maintenant internes + externes ensemble
+      // selon la priorité LiHDL (FR VFF → FR VFQ → FR AD → reste).
+      applyLihdlTrackOrder();
+
+      // Résumé des conversions effectuées (uniquement les pistes réellement
+      // converties par ffmpeg ; les pistes AC3 source extraites lossless
+      // n'apparaissent pas dans le résumé).
+      const convertedBitrates = new Set();
+      for (const ex of extractions) {
+        if (!ex.was_converted) continue;
+        const ch = formatChannels(ex.channels);
+        const kbps = ex.bitrate_kbps;
+        if (kbps && ch) convertedBitrates.add(`${kbps} kb/s ${ch}`);
+      }
+      frAudioConvertedSummary = [...convertedBitrates].join(' / ');
+
+      frAudioExtractionResult = 'success';
+    } catch (e) {
+      appendLog('❌ Extraction FR audio : ' + String(e));
+      frAudioExtractionResult = 'error';
+    } finally {
+      frAudioExtracting = false;
+      frAudioPhase = '';
+      frAudioConvertPercent = 0;
+    }
+  }
+
+  // Fallback de formatage canaux si inferAudioLabel ne sait pas (ex: extracted file).
+  function formatChannels(ch) {
+    if (ch === 1) return '1.0';
+    if (ch === 2) return '2.0';
+    if (ch === 6) return '5.1';
+    if (ch === 8) return '7.1';
+    return ch ? `${ch}ch` : '';
   }
 
   // Compare 2 MkvBasicInfo et retourne {durationOK, fpsOK} (tolérance 1s + 0.05fps)
@@ -349,6 +588,18 @@
     sourceMkvInfo = null;
     referenceMkvInfo = null;
     showReferenceBar = false;
+    extractFRVFF = false;
+    extractFRVFQ = false;
+    extractENG = false;
+    frAudioExtracting = false;
+    frAudioExtractionResult = '';
+    frAudioConvertedSummary = '';
+    srtExtracting = false;
+    srtExtractionResult = '';
+    srtAssConverted = false;
+    lastSyncedSrtPathsHash = '';
+    subSyncResults = [];
+    subSyncAppliedMsg = '';
     hydrackerURL = '';
     autoMuxStatus = '';
     if (autoMuxStatusTimer) { clearTimeout(autoMuxStatusTimer); autoMuxStatusTimer = null; }
@@ -357,20 +608,24 @@
 
   // Auto-reset après mux réussi : envoie source + sous-titres + secondaire à
   // la corbeille (réversible), puis reset l'état.
-  async function autoResetAfterMux() {
-    const toTrash = [];
-    if (sourcePath) toTrash.push(sourcePath);
-    if (secondaryPath) toTrash.push(secondaryPath);
-    for (const s of externalSubs) if (s.path) toTrash.push(s.path);
-    if (toTrash.length > 0) {
-      try {
-        await MoveToTrash(toTrash);
-        appendLog(`🗑 ${toTrash.length} fichier(s) envoyé(s) à la corbeille`);
-      } catch (e) {
-        appendLog('⚠ corbeille : ' + String(e));
+  async function autoResetAfterMux(preserveAutoMuxStatus = false) {
+    // Vide tout le contenu du dossier "LiHDL en cours" (norme : tous les fichiers
+    // source/référence/SUPPLY/subs externes y vivent, et après un mux réussi on
+    // peut tout dégager). Inclut sous-dossiers, exclut .DS_Store.
+    const lihdlEnCoursDir = '/Users/gandalf/Downloads/LiHDL en cours';
+    try {
+      const n = await MoveDirContentsToTrash(lihdlEnCoursDir);
+      if (n > 0) {
+        appendLog(`🗑 ${n} élément(s) du dossier "LiHDL en cours" envoyé(s) à la corbeille`);
       }
+    } catch (e) {
+      appendLog('⚠ vidage "LiHDL en cours" : ' + String(e));
     }
+    const savedStatus = autoMuxStatus;
     resetAll();
+    if (preserveAutoMuxStatus) {
+      autoMuxStatus = savedStatus;
+    }
   }
   let filenameCopied = false;
   let filenameCopiedTimer = null;
@@ -554,25 +809,33 @@
       String(track.mi_title || ''),
       String(track.mi_service_kind_name || ''),
     ].join(' ').toLowerCase();
-    // Codec : on combine track_name + mediainfo Format + mkvmerge codec_id.
-    // Si le track_name dit explicitement "E-AC3" ou "EAC3", on lui fait confiance
-    // (cas où mediainfo voit AC-3 mais le release est tagué E-AC3).
+    // Codec : SEUL mkvmerge codec_id + mediainfo Format sont fiables. JAMAIS le
+    // track_name (= titre LiHDL/release) qui peut contenir "E-AC3" alors que la
+    // vraie piste est AC3 (rebadging suite à rémux).
     const miFormat = String(track.mi_format || '').toUpperCase();
     const codecId = String(track.codec_id || track.codec || '').toUpperCase();
-    const trackNameUpper = String(track.track_name || track.mi_title || '').toUpperCase();
-    const codecSource = trackNameUpper + ' ' + miFormat + ' ' + codecId;
     const miFormatProfile = String(track.mi_format_profile || '').toUpperCase();
     // Channels : priorité mediainfo, fallback mkvmerge.
     const miCh = parseInt(track.mi_channels, 10);
     const mkvCh = Number(track.audio_channels || 0);
     const ch = (isFinite(miCh) && miCh > 0) ? miCh : mkvCh;
     let codec = 'AC3';
-    if (codecSource.includes('E-AC') || codecSource.includes('EAC3')) codec = 'EAC3';
-    else if (codecSource.includes('AC-3') || codecSource.includes('AC3')) codec = 'AC3';
-    else if (codecSource.includes('DTS')) codec = 'DTS';
-    else if (codecSource.includes('TRUEHD') || codecSource.includes('MLP FBA')) codec = 'TrueHD';
-    else if (codecSource.includes('FLAC')) codec = 'FLAC';
-    else if (codecSource.includes('OPUS')) codec = 'Opus';
+    // 1) codec_id mkvmerge est toujours définitif (A_AC3, A_EAC3, etc.).
+    if (codecId.includes('A_EAC3')) codec = 'EAC3';
+    else if (codecId.includes('A_AC3')) codec = 'AC3';
+    else if (codecId.includes('A_DTS')) codec = 'DTS';
+    else if (codecId.includes('A_TRUEHD') || codecId.includes('MLP FBA')) codec = 'TrueHD';
+    else if (codecId.includes('A_FLAC')) codec = 'FLAC';
+    else if (codecId.includes('A_OPUS')) codec = 'Opus';
+    else if (codecId.includes('A_AAC')) codec = 'AAC';
+    // 2) Sinon fallback mediainfo Format.
+    else if (miFormat.includes('E-AC') || miFormat.includes('EAC3')) codec = 'EAC3';
+    else if (miFormat.includes('AC-3') || miFormat.includes('AC3')) codec = 'AC3';
+    else if (miFormat.includes('DTS')) codec = 'DTS';
+    else if (miFormat.includes('TRUEHD') || miFormat.includes('MLP FBA')) codec = 'TrueHD';
+    else if (miFormat.includes('FLAC')) codec = 'FLAC';
+    else if (miFormat.includes('OPUS')) codec = 'Opus';
+    else if (miFormat.includes('AAC')) codec = 'AAC';
     // Channels
     let chans = '5.1';
     if (ch === 1) chans = '1.0';
@@ -1083,6 +1346,10 @@
     sourcePath = path;
     sourceInfo = null;
     tracks = [];
+    // Reset le hash sync : nouvelle source = nouveau check à faire.
+    lastSyncedSrtPathsHash = '';
+    // Si des SRT externes sont déjà chargés, déclenche la vérif après init.
+    setTimeout(maybeAutoSubSyncCheck, 1500);
     const filename = path.split('/').pop() || '';
     // Auto-fill la team de la source depuis le nom de fichier.
     const st = extractSourceTeam(path);
@@ -1110,22 +1377,42 @@
       const detected = detectSourceType(filename);
       if (detected) {
         videoChoice.sourceType = detected;
-        // Map sourceType → target.source pour le nom de fichier final :
-        //   BluRay/REMUX/REMUX CUSTOM/COMPLETE BluRay → HDLight
-        //   WEB/WEB-DL/WEBRip/WEB CUSTOM/WEB-DL CUSTOM → WEBRip
-        const u = detected.toUpperCase();
-        if (u.includes('WEB')) {
-          target.source = 'WEBRip';
-        } else if (u.includes('REMUX') || u.includes('BLURAY')) {
-          target.source = 'HDLight';
+        // Map sourceType → target.source + videoChoice.quality (norme LiHDL) :
+        //   WEB / WEB-DL / WEBRip / WEB CUSTOM → WEBRip
+        //   BluRay / REMUX / REMUX CUSTOM / COMPLETE BluRay → HDLight
+        const q = qualityFromSourceType(detected);
+        if (q) {
+          target.source = q;
+          videoChoice.quality = q;
         }
-        appendLog(`✓ Source détectée : ${detected} → target.source = ${target.source}`);
+        appendLog(`✓ Source détectée : ${detected} → Qualité = ${videoChoice.quality}`);
       }
     }
     AnalyzeMkv(path); // fire-and-forget, résultat via event 'analyze:result'
     // Récupère duration + FPS pour la card de comparaison (mode LiHDL)
     sourceMkvInfo = null;
     GetMkvBasicInfo(path).then(info => { sourceMkvInfo = info; }).catch(() => {});
+  }
+
+  // Mapping norme LiHDL : sourceType → quality (qui sert aussi pour target.source).
+  //   WEB / WEB-DL / WEBRip / WEB CUSTOM / WEB-DL CUSTOM → WEBRip
+  //   BluRay / REMUX / REMUX CUSTOM / COMPLETE BluRay   → HDLight
+  function qualityFromSourceType(sourceType) {
+    const u = (sourceType || '').toUpperCase();
+    if (u.includes('WEB')) return 'WEBRip';
+    if (u.includes('REMUX') || u.includes('BLURAY')) return 'HDLight';
+    return '';
+  }
+
+  // Handler : à chaque changement manuel du dropdown "Type source", aligne
+  // automatiquement la Qualité + target.source selon la norme LiHDL.
+  function onSourceTypeChange() {
+    if (muxMode !== 'lihdl') return;
+    const q = qualityFromSourceType(videoChoice.sourceType);
+    if (q) {
+      videoChoice.quality = q;
+      target.source = q;
+    }
   }
 
   // Priorité LiHDL pour l'ordre des pistes audio. Plus bas = plus haut dans le mux.
@@ -1145,35 +1432,75 @@
     return 10;
   }
 
-  // Réassigne tous les `order` selon : vidéo → audio (par priorité LiHDL) → subs.
-  // Conserve l'ordre source à l'intérieur des subs (et entre audios de même priorité).
+  // Priorité LiHDL pour l'ordre des sous-titres. Plus bas = plus haut dans le mux.
+  // Ordre : Langue (FR < ENG < autre) → Variante (sans < VFF/VFi < VFQ) → Type (Forced < Full < SDH).
+  // Format SRT prioritaire sur PGS au sein d'un même bucket.
+  function subLabelPriority(label) {
+    const l = (label || '').toUpperCase();
+    let langScore = 10000;
+    if (l.startsWith('FR ')) langScore = 0;
+    else if (l.startsWith('ENG ')) langScore = 1000;
+    let variantScore = 0;
+    if (l.startsWith('FR VFF ') || l.startsWith('FR VFI ')) variantScore = 100;
+    else if (l.startsWith('FR VFQ ')) variantScore = 200;
+    let kindScore = 50;
+    if (/\bFORCED\b/.test(l)) kindScore = 0;
+    else if (/\bFULL\b/.test(l)) kindScore = 10;
+    else if (/\bSDH\b/.test(l)) kindScore = 20;
+    let formatScore = 0;
+    if (/PGS/.test(l)) formatScore = 1;
+    return langScore + variantScore + kindScore + formatScore;
+  }
+
+  // Réassigne tous les `order` (internes + externes) selon la norme LiHDL :
+  //   1. Vidéo (toujours en tête)
+  //   2. Audios mélangés par priorité LiHDL (FR VFF/VFi/VOF → FR VFQ → FR AD →
+  //      FR autre → ENG → autres). Les externes (extractions VFF/VFQ) sont
+  //      interleavés avec les internes kept selon leur label.
+  //   3. Subs internes kept (ordre source) — les externes gardent leurs propres orders.
+  // Pose aussi default=true sur la 1ère piste audio (toutes sources confondues),
+  // false sur les autres (internes kept ET externes).
   function applyLihdlTrackOrder() {
-    const typeRank = { video: 0, audio: 1, subtitles: 2 };
-    const indexed = tracks.map((t, i) => ({ t, i }));
-    indexed.sort((a, b) => {
-      const ra = typeRank[a.t.type] ?? 9;
-      const rb = typeRank[b.t.type] ?? 9;
-      if (ra !== rb) return ra - rb;
-      if (a.t.type === 'audio') {
-        const pa = audioLabelPriority(a.t.label);
-        const pb = audioLabelPriority(b.t.label);
-        if (pa !== pb) return pa - pb;
-      }
-      return a.i - b.i; // stable : ordre source en dernier recours
-    });
-    indexed.forEach((entry, k) => { entry.t.order = k * 10; });
-    // Norme LiHDL : la 1ère piste audio (FR VFi/VFF en priorité) est marquée default.
-    let firstAudioFound = false;
-    for (const entry of indexed) {
-      if (entry.t.type !== 'audio') continue;
-      if (!firstAudioFound) {
-        entry.t.default = true;
-        firstAudioFound = true;
-      } else {
-        entry.t.default = false;
+    let order = 0;
+    // 1. Vidéo (interne)
+    for (const t of tracks) {
+      if (t.type === 'video') {
+        t.order = order;
+        order += 10;
       }
     }
-    tracks = [...tracks]; // déclenche la réactivité Svelte
+    // 2. Audios : interne kept + externes, triés par priorité LiHDL.
+    const allAudios = [
+      ...tracks.filter(t => t.type === 'audio' && t.keep),
+      ...externalAudios,
+    ];
+    allAudios.sort((a, b) => audioLabelPriority(a.label) - audioLabelPriority(b.label));
+    let firstAudioFound = false;
+    for (const a of allAudios) {
+      a.order = order;
+      a.default = !firstAudioFound;
+      firstAudioFound = true;
+      order += 10;
+    }
+    // 2bis. Audios internes non-kept : reset default flag (ne sera pas dans le mux).
+    for (const t of tracks) {
+      if (t.type === 'audio' && !t.keep) t.default = false;
+    }
+    // 3. Subs : interne kept + externes, triés par priorité LiHDL
+    //    (FR sans variant → FR VFF/VFi → FR VFQ → ENG → autres ; Forced → Full → SDH).
+    const allSubs = [
+      ...tracks.filter(t => t.type === 'subtitles' && t.keep),
+      ...externalSubs,
+    ];
+    allSubs.sort((a, b) => subLabelPriority(a.label) - subLabelPriority(b.label));
+    for (const s of allSubs) {
+      s.order = order;
+      order += 10;
+    }
+    // Trigger Svelte reactivity sur toutes les listes.
+    tracks = [...tracks];
+    externalAudios = [...externalAudios];
+    externalSubs = [...externalSubs];
   }
 
   function finalizeAnalyze(rawTracks) {
@@ -1316,6 +1643,8 @@
       appendLog('✓ ' + paths.length + ' sous-titre(s) ajouté(s)');
     }
     applySubForcedRule();
+    // Trigger auto-sync alass si la source LiHDL est chargée.
+    setTimeout(maybeAutoSubSyncCheck, 100);
   }
 
   async function pickSubsDialog() {
@@ -1789,6 +2118,8 @@
       Language: mapLangCode(s.label || ''),
       Default: !!s.default,
       Forced: !!s.forced,
+      DelayMs: s.delayMs || 0,
+      TempoFactor: s.tempoFactor || 1.0,
       Order: s.order ?? 0,
     }));
     const extAudios = externalAudios.map(a => ({
@@ -1798,6 +2129,8 @@
       Default: !!a.default,
       Forced: !!a.forced,
       VisualImpaired: isAD(a.label),
+      DelayMs: a.delayMs || 0,
+      TempoFactor: a.tempoFactor || 1.0,
       Order: a.order ?? 0,
     }));
 
@@ -1856,6 +2189,9 @@
     if (tracks.length === 0) { appendLog('⚠ Pistes pas encore analysées — patiente'); return; }
     let firstFRdone = false;
     let nbAudio = 0, nbSubs = 0;
+    // Si des audios FR externes (extraits) sont présents, le default ira dessus —
+    // pas sur un audio interne, même s'il est FR.
+    const hasExternalFRAudio = externalAudios.some(a => /^FR (VFF|VFQ|VFi|VOF) /.test(a.label || ''));
     tracks = tracks.map(t => {
       if (t.type === 'video') return t;
       const raw = {
@@ -1878,10 +2214,13 @@
       if (t.type === 'audio') {
         const newLabel = inferAudioLabel(raw);
         const isFR = /^FR /.test(newLabel);
-        const isDefault = isFR && !firstFRdone;
+        // Préserve keep: false (piste FR remplacée par extraction) ; sinon true.
+        const newKeep = t.keep === false ? false : true;
+        // Default : si externes FR présentes, jamais de default sur interne.
+        const isDefault = !hasExternalFRAudio && newKeep && isFR && !firstFRdone;
         if (isDefault) firstFRdone = true;
-        nbAudio++;
-        return { ...t, label: newLabel, keep: true, default: isDefault, forced: false };
+        if (newKeep) nbAudio++;
+        return { ...t, label: newLabel, keep: newKeep, default: isDefault, forced: false };
       } else { // subtitles
         const newLabel = inferSubLabel(raw, 0);
         const isForcedFR = /^FR( VFF)? Forced\b/.test(newLabel);
@@ -1980,8 +2319,8 @@
     await new Promise(r => setTimeout(r, 200));
     const ok = await doMux();
     autoMuxStatus = ok ? 'success' : 'error';
-    autoMuxStatusTimer = setTimeout(() => { autoMuxStatus = ''; }, 12000);
-    if (ok) await autoResetAfterMux();
+    // Pas d'auto-clear timer : la barre verte/rouge reste visible jusqu'au prochain mux ou reset manuel.
+    if (ok) await autoResetAfterMux(true);
   }
 
   // MUX AUTO : automate puis lance le mux directement, sans passer par Cible.
@@ -2000,8 +2339,8 @@
     await new Promise(r => setTimeout(r, 200));
     const ok = await doMux();
     autoMuxStatus = ok ? 'success' : 'error';
-    autoMuxStatusTimer = setTimeout(() => { autoMuxStatus = ''; }, 12000);
-    if (ok) await autoResetAfterMux();
+    // Pas d'auto-clear timer : la barre verte/rouge reste visible jusqu'au prochain mux ou reset manuel.
+    if (ok) await autoResetAfterMux(true);
   }
 
   onMount(async () => {
@@ -2010,7 +2349,34 @@
     try { options = await GetLihdlOptions(); } catch {}
     try { mkvmergePath = await LocateMkvmerge(); } catch {}
 
-    EventsOn('log', (msg) => appendLog(msg));
+    EventsOn('log', (msg) => {
+      appendLog(msg);
+      // Détection des phases d'extraction audio pour la barre de progression :
+      // 🔎 Détection sync → phase "sync"
+      // 🔄 Conversion XXX → AC3 → phase "convert" avec codec + variant
+      // ✓ ... → reset phase si fin de conversion
+      if (typeof msg === 'string') {
+        if (msg.startsWith('🔎 Détection sync')) {
+          frAudioPhase = 'sync';
+          frAudioConvertPercent = 0;
+        } else if (msg.startsWith('🔄 Conversion ASS → SRT')) {
+          // Phase conversion sub ASS→SRT (rapide, pas de pourcentage)
+          srtPhase = 'convert_ass';
+          srtAssConverted = true; // mémorise pour le message de succès
+        } else if (msg.startsWith('✓ ASS converti en SRT')) {
+          srtPhase = '';
+        } else if (msg.startsWith('🔄 Conversion')) {
+          // Format : "🔄 Conversion EAC3 → AC3 (piste #1, VFF, 6 ch)…"
+          const m = msg.match(/🔄 Conversion (\S+) → AC3.*?, (\S+),/);
+          if (m) frAudioPhase = `convert:${m[1]},${m[2]}`;
+          else frAudioPhase = 'convert';
+          frAudioConvertPercent = 0;
+        } else if (msg.startsWith('✓ ') && msg.includes('converti en AC3')) {
+          frAudioPhase = ''; // conversion finie pour cette piste
+          frAudioConvertPercent = 0;
+        }
+      }
+    });
     EventsOn('mux:progress', (p) => { muxPercent = p.Percent || p.percent || 0; });
     EventsOn('mux:done', () => {
       muxing = false;
@@ -2020,6 +2386,12 @@
       }
     });
     EventsOn('audiosync:progress', (p) => { syncPercent = p.Percent || p.percent || 0; });
+    EventsOn('ac3convert:progress', (p) => { frAudioConvertPercent = p.percent ?? p.Percent ?? 0; });
+    EventsOn('srtprogress', (p) => { srtPercent = p.percent ?? p.Percent ?? 0; });
+    EventsOn('subsync:progress', (p) => {
+      subSyncPercent = p.percent ?? p.Percent ?? 0;
+      subSyncCurrentName = p.current ?? p.Current ?? '';
+    });
     EventsOn('audiosync:done', () => { syncRunning = false; syncPercent = 0; });
     EventsOn('file:dropped', (path) => { openMkv(path); });
     EventsOn('subs:dropped', (paths) => { addExternalSubs(paths || []); });
@@ -2119,6 +2491,18 @@
 
   <section class="content">
     {#if screen === 'source'}
+      <!-- Bandeau persistant : statut du dernier MUX AUTO (succès / erreur).
+           Reste visible après l'auto-reset jusqu'au prochain mux ou clic ↻ RESET. -->
+      {#if autoMuxStatus === 'success' && !muxing}
+        <div class="card mux-status-banner success">
+          <div class="auto-status done">✅ Mux terminé avec succès — fichier prêt dans ton dossier de sortie</div>
+        </div>
+      {:else if autoMuxStatus === 'error' && !muxing}
+        <div class="card mux-status-banner error">
+          <div class="auto-status error">❌ Mux échoué — vérifie les logs en bas</div>
+        </div>
+      {/if}
+
       <!-- Card unifiée : PSA + SUPPLY/FW (en mode PSA) ou seul (en mode LiHDL) -->
       <div class="card sources-card drop-target" style:--wails-drop-target="drop">
         <div class="section-title">Sources</div>
@@ -2128,7 +2512,7 @@
           <div class="source-info">
             <div class="source-label">
               <span class="source-num">①</span>
-              {muxMode === 'psa' ? 'Source PSA' : 'Source LiHDL'}
+              {muxMode === 'psa' ? 'Source PSA' : 'Source encodée'}
               <span class="source-hint">(vidéo gardée)</span>
             </div>
             {#if sourcePath}
@@ -2180,18 +2564,96 @@
               {:else}
                 <div class="source-empty">— Aucun sous-titre chargé —</div>
               {/if}
+              {#if srtExtracting || srtExtractionResult}
+                <div class="extract-progress" class:done={srtExtractionResult === 'success' && !srtExtracting} class:err={srtExtractionResult === 'error' && !srtExtracting}>
+                  <span class="extract-progress-label">
+                    {#if srtExtracting}
+                      {#if srtPhase === 'convert_ass'}
+                        🔄 Conversion ASS → SRT (via ffmpeg) — {srtPercent}%
+                      {:else}
+                        ⏳ Extraction SRT + détection sync — {srtPercent}%
+                      {/if}
+                    {:else if srtExtractionResult === 'success'}
+                      {#if srtAssConverted}
+                        ✓ SRT extraits (ASS converti en SRT via ffmpeg) + sync appliquée
+                      {:else}
+                        ✓ SRT extraits + sync appliquée
+                      {/if}
+                    {:else if srtExtractionResult === 'error'}
+                      ✕ Erreur lors de l'extraction SRT
+                    {/if}
+                  </span>
+                  {#if srtExtracting}
+                    <progress max="100" value={srtPercent}></progress>
+                  {:else}
+                    <progress max="100" value="100"></progress>
+                  {/if}
+                </div>
+              {/if}
+              <!-- Module : vérif sync SRT externes vs audio source LiHDL -->
+              {#if externalSubs.some(s => s.path && /\.srt$/i.test(s.path)) && sourcePath}
+                <div class="sub-sync-module">
+                  {#if subSyncChecking}
+                    <!-- Phase analyse : barre de progression % -->
+                    <div class="extract-progress">
+                      <span class="extract-progress-label">
+                        🔎 Analyse sync SRT — {subSyncPercent}% {subSyncCurrentName ? `(${subSyncCurrentName})` : ''}
+                      </span>
+                      <progress max="100" value={subSyncPercent}></progress>
+                    </div>
+                  {:else if subSyncResults.length === 0 && subSyncAppliedMsg}
+                    <!-- Message succès persistant après apply -->
+                    <div class="extract-progress done">
+                      <span class="extract-progress-label">{subSyncAppliedMsg}</span>
+                      <progress max="100" value="100"></progress>
+                    </div>
+                    <div class="sync-actions" style="margin-top:6px;">
+                      <button class="btn btn-tiny" on:click={runSubSyncCheck}>🔎 Re-vérifier</button>
+                      <button class="btn btn-ghost btn-tiny" on:click={dismissSubSyncResults}>Masquer</button>
+                    </div>
+                  {:else if subSyncResults.length === 0}
+                    <!-- État initial : bouton de lancement -->
+                    <button class="btn btn-tiny" on:click={runSubSyncCheck}>
+                      🔎 Vérifier sync SRT vs audio source
+                    </button>
+                  {:else}
+                    <!-- Résultats alass : SRT corrigé prêt à remplacer l'original -->
+                    <div class="sync-results-header">Synchronisation alass (SRT corrigé prêt) :</div>
+                    <ul class="sync-results-list">
+                      {#each subSyncResults as r}
+                        <li class:has-offset={!r.error && r.synced_path} class:err={!!r.error}>
+                          <span class="sync-result-name mono">{basename(r.path)}</span>
+                          {#if r.error}
+                            <span class="sync-result-status">✕ {r.error}</span>
+                          {:else}
+                            <span class="sync-result-status">
+                              ✓ décalage {r.offset_ms > 0 ? '+' : ''}{r.offset_ms} ms{r.fps_ratio ? ` · FPS ${r.fps_ratio}` : ''} appliqué
+                            </span>
+                          {/if}
+                        </li>
+                      {/each}
+                    </ul>
+                    <div class="sync-actions">
+                      {#if subSyncResults.some(r => !r.error && r.synced_path)}
+                        <button class="btn btn-primary btn-tiny" on:click={applySubSyncResults}>✓ Utiliser les SRT corrigés</button>
+                      {/if}
+                      <button class="btn btn-ghost btn-tiny" on:click={dismissSubSyncResults}>Annuler</button>
+                    </div>
+                  {/if}
+                </div>
+              {/if}
             </div>
             <div class="source-row-actions">
-              <button class="btn-primary" on:click={pickSubsDialog}>
+              <button class="btn-primary" on:click={pickSubsDialog} disabled={srtExtracting}>
                 {externalSubs.length > 0 ? '+ Ajouter' : 'Choisir des fichiers'}
               </button>
               {#if externalSubs.length > 0}
-                <button class="btn-icon" on:click={() => externalSubs = []} title="Vider la liste">✕</button>
+                <button class="btn-icon" on:click={() => externalSubs = []} title="Vider la liste" disabled={srtExtracting}>✕</button>
               {/if}
             </div>
           </div>
 
-          <!-- Ligne ③ Source de référence (vérif durée+FPS, optionnelle) -->
+          <!-- Ligne ③ Source de référence : compat durée/FPS + extraction SRT (auto) + extraction FR audio (toggles) avec sync auto -->
           {#if showReferenceBar}
             {@const compat = checkCompat(sourceMkvInfo, referenceMkvInfo)}
             <div class="source-row secondary">
@@ -2199,7 +2661,7 @@
                 <div class="source-label">
                   <span class="source-num">③</span>
                   Source de référence
-                  <span class="source-hint">(vérif compatibilité durée + FPS)</span>
+                  <span class="source-hint">(extraction SRT auto + FR audio sur demande, sync auto)</span>
                 </div>
                 {#if referencePath}
                   <div class="source-filename mono">{basename(referencePath)}</div>
@@ -2210,20 +2672,73 @@
                       <span>VFQ : <span class:compat-ok={referenceMkvInfo.has_vfq_audio} class:compat-bad={!referenceMkvInfo.has_vfq_audio}>{referenceMkvInfo.has_vfq_audio ? '✓ ' + (referenceMkvInfo.vfq_track_info || 'piste détectée') : '✗ aucune piste FR Canada'}</span></span>
                     </div>
                   {/if}
+                  <div class="fr-audio-options">
+                    <label class="vfq-toggle">
+                      <input type="checkbox" bind:checked={extractFRVFF} disabled={frAudioExtracting} />
+                      <span>Extraire FR VFF</span>
+                    </label>
+                    <label class="vfq-toggle">
+                      <input type="checkbox" bind:checked={extractFRVFQ} disabled={frAudioExtracting} />
+                      <span>Extraire FR VFQ</span>
+                    </label>
+                    <label class="vfq-toggle">
+                      <input type="checkbox" bind:checked={extractENG} disabled={frAudioExtracting} />
+                      <span>Extraire ENG VO</span>
+                    </label>
+                    {#if extractFRVFF || extractFRVFQ || extractENG}
+                      <button class="btn-primary btn-auto btn-tiny" on:click={runFRAudioExtraction} disabled={frAudioExtracting || !sourcePath}>
+                        {frAudioExtracting ? '⏳ Extraction…' : '⚡ Extraire + sync'}
+                      </button>
+                    {/if}
+                  </div>
+                  {#if frAudioExtracting || frAudioExtractionResult}
+                    <div class="extract-progress" class:done={frAudioExtractionResult === 'success' && !frAudioExtracting} class:err={frAudioExtractionResult === 'error' && !frAudioExtracting}>
+                      <span class="extract-progress-label">
+                        {#if frAudioExtracting}
+                          {#if frAudioPhase === 'sync'}
+                            🔎 Détection sync audio…
+                          {:else if frAudioPhase.startsWith('convert:')}
+                            {@const parts = frAudioPhase.slice(8).split(',')}
+                            🔄 Conversion {parts[0]} → AC3 ({parts[1] || ''}) — {frAudioConvertPercent}%
+                          {:else if frAudioPhase === 'convert'}
+                            🔄 Conversion vers AC3 — {frAudioConvertPercent}%
+                          {:else}
+                            ⏳ Extraction FR audio + détection sync…
+                          {/if}
+                        {:else if frAudioExtractionResult === 'success'}
+                          {#if frAudioConvertedSummary}
+                            ✓ Pistes audio extraites + converties AC3 ({frAudioConvertedSummary} via ffmpeg) + sync appliquée
+                          {:else}
+                            ✓ Pistes audio extraites (AC3 source, lossless) + sync appliquée
+                          {/if}
+                        {:else if frAudioExtractionResult === 'error'}
+                          ✕ Erreur lors de l'extraction FR audio
+                        {/if}
+                      </span>
+                      {#if frAudioExtracting && frAudioPhase.startsWith('convert')}
+                        <progress max="100" value={frAudioConvertPercent}></progress>
+                      {:else if frAudioExtracting}
+                        <progress></progress>
+                      {:else}
+                        <progress max="100" value="100"></progress>
+                      {/if}
+                    </div>
+                  {/if}
                 {:else}
                   <div class="source-empty">— Aucun fichier de référence —</div>
                 {/if}
               </div>
               <div class="source-row-actions">
-                <button class="btn-primary" on:click={pickReferenceDialog}>
+                <button class="btn-primary" on:click={pickReferenceDialog} disabled={frAudioExtracting}>
                   {referencePath ? 'Changer' : 'Choisir un fichier'}
                 </button>
-                <button class="btn-icon" on:click={() => { clearReference(); showReferenceBar = false; }} title="Retirer la source de référence">✕</button>
+                <button class="btn-icon" on:click={() => { clearReference(); showReferenceBar = false; }} title="Retirer la source de référence" disabled={frAudioExtracting}>✕</button>
               </div>
             </div>
           {:else}
-            <button class="source-row-placeholder" on:click={() => { showReferenceBar = true; }}>+ Ajouter source de référence (vérif durée / FPS)</button>
+            <button class="source-row-placeholder" on:click={() => { showReferenceBar = true; }}>+ Ajouter source de référence (SRT auto + FR audio sur demande)</button>
           {/if}
+
         {/if}
       </div>
 
@@ -2231,6 +2746,43 @@
       <!-- Barre d'actions mode LiHDL : MUX MANUEL / MUX AUTO / Suivant -->
       {#if muxMode === 'lihdl' && sourcePath && tracks.length > 0}
         <div class="card automate-bar">
+          <!-- Poster TMDB + identité du film, pour vérification visuelle avant MUX AUTO -->
+          {#if lastTmdbResult && lastTmdbResult.poster_url}
+            <div class="tmdb-preview">
+              <img src={lastTmdbResult.poster_url} alt="Poster {lastTmdbResult.titre_fr || lastTmdbResult.titre_vo}" class="tmdb-preview-poster" loading="lazy" />
+              <div class="tmdb-preview-info">
+                <div class="tmdb-preview-title">{lastTmdbResult.titre_fr || lastTmdbResult.titre_vo}</div>
+                {#if lastTmdbResult.titre_vo && lastTmdbResult.titre_fr && lastTmdbResult.titre_vo !== lastTmdbResult.titre_fr}
+                  <div class="tmdb-preview-vo">VO : {lastTmdbResult.titre_vo}</div>
+                {/if}
+                <div class="tmdb-preview-meta">
+                  {#if lastTmdbResult.annee_fr}<span>📅 {lastTmdbResult.annee_fr}</span>{/if}
+                  {#if lastTmdbResult.duree}<span>⏱️ {lastTmdbResult.duree}</span>{/if}
+                  {#if lastTmdbResult.note > 0}<span>★ {lastTmdbResult.note}</span>{/if}
+                  {#if lastTmdbResult.original_language}<span>🌐 {lastTmdbResult.original_language.toUpperCase()}</span>{/if}
+                </div>
+                {#if lastTmdbResult.tmdb_id}
+                  <button class="vfq-link tmdb-preview-link" type="button" on:click={() => OpenURL(`https://www.themoviedb.org/movie/${lastTmdbResult.tmdb_id}`)}>↗ Vérifier sur TMDB (ID {lastTmdbResult.tmdb_id})</button>
+                {/if}
+                <!-- Override : si ce n'est pas le bon film, taper un ID TMDB manuellement -->
+                <div class="tmdb-preview-override">
+                  <span class="tmdb-preview-override-label">Pas le bon film ? Forcer l'ID :</span>
+                  <input
+                    type="text"
+                    class="tmdb-preview-override-input"
+                    bind:value={tmdbIdQuery}
+                    placeholder="ex: 12345"
+                    inputmode="numeric"
+                    pattern="[0-9]*"
+                    on:keydown={(e) => e.key === 'Enter' && searchTmdbById()}
+                  />
+                  <button class="btn-tiny tmdb-preview-override-btn" on:click={searchTmdbById} disabled={tmdbSearching || !tmdbIdQuery}>
+                    {tmdbSearching ? '⏳' : '↻ Forcer'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          {/if}
           <div class="actions-row" style:gap="8px">
             <button class="btn-primary" on:click={() => automateLihdl()} disabled={muxing}>⚡ MUX MANUEL</button>
             <button class="btn-primary btn-auto" on:click={muxAutoLihdl} disabled={muxing}>🚀 MUX AUTO</button>
@@ -2359,7 +2911,7 @@
                   </select>
                 </label>
                 <label>Type source
-                  <select bind:value={videoChoice.sourceType}>
+                  <select bind:value={videoChoice.sourceType} on:change={onSourceTypeChange}>
                     {#each VIDEO_SOURCE_TYPE_OPTIONS as s}<option>{s}</option>{/each}
                   </select>
                 </label>
@@ -3156,7 +3708,7 @@
 
   .source-row {
     display: grid;
-    grid-template-columns: 1fr 200px;
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
     gap: 16px;
     padding: 14px 18px;
@@ -3164,7 +3716,7 @@
     border: 1px solid var(--border);
     border-radius: 10px;
     margin-bottom: 10px;
-    height: 90px;
+    min-height: 90px;
     box-sizing: border-box;
     transition: all 150ms;
   }
@@ -3200,6 +3752,178 @@
     font-size: 11px; color: var(--text3); margin-top: 4px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
+
+  .fr-audio-options {
+    display: flex; flex-direction: row; gap: 14px; margin-top: 6px;
+    flex-wrap: wrap; align-items: center;
+  }
+  .fr-audio-options .vfq-toggle {
+    margin: 0;
+  }
+
+  .compat-grid {
+    display: flex; flex-direction: row; flex-wrap: wrap;
+    gap: 6px 18px; margin-top: 6px;
+    font-size: 12px; color: var(--text2);
+  }
+  .compat-grid .compat-ok { color: #51cf66; font-weight: 600; }
+  .compat-grid .compat-bad { color: #ff6b6b; font-weight: 600; }
+
+  .extract-progress {
+    display: flex; flex-direction: column; gap: 4px;
+    margin-top: 8px;
+  }
+  .extract-progress-label {
+    font-size: 11px; color: var(--text2); font-weight: 500;
+  }
+  .extract-progress progress {
+    width: 100%; height: 6px; border: none; border-radius: 3px;
+    background: rgba(0,0,0,0.4); overflow: hidden;
+  }
+  .extract-progress progress::-webkit-progress-bar {
+    background: rgba(0,0,0,0.4); border-radius: 3px;
+  }
+  .extract-progress progress::-webkit-progress-value {
+    background: linear-gradient(90deg, var(--red), var(--red-hot));
+    border-radius: 3px;
+  }
+  /* Indeterminate progress (no value) — animated stripes */
+  .extract-progress progress:not([value]) {
+    background:
+      linear-gradient(90deg, transparent 0%, var(--red-hot) 50%, transparent 100%) 0/40% 100% no-repeat,
+      rgba(0,0,0,0.4);
+    animation: indeterminate-slide 1.4s linear infinite;
+  }
+  @keyframes indeterminate-slide {
+    0%   { background-position: -40% 0; }
+    100% { background-position: 140% 0; }
+  }
+
+  /* État succès : barre pleine verte + label vert */
+  .extract-progress.done .extract-progress-label { color: #51cf66; font-weight: 600; }
+  .extract-progress.done progress[value]::-webkit-progress-value {
+    background: linear-gradient(90deg, #2f9e44, #51cf66);
+  }
+  .extract-progress.done progress[value] {
+    background: rgba(81, 207, 102, 0.15);
+  }
+
+  /* État erreur : barre pleine rouge + label rouge */
+  .extract-progress.err .extract-progress-label { color: #ff6b6b; font-weight: 600; }
+  .extract-progress.err progress[value]::-webkit-progress-value {
+    background: linear-gradient(90deg, #c92a2a, #ff6b6b);
+  }
+  .extract-progress.err progress[value] {
+    background: rgba(255, 107, 107, 0.15);
+  }
+
+  /* Preview TMDB (poster + infos) avant MUX AUTO */
+  .tmdb-preview {
+    display: flex; flex-direction: row; gap: 16px; align-items: flex-start;
+    padding: 12px;
+    background: linear-gradient(135deg, rgba(108, 99, 255, 0.08), rgba(0,0,0,0.2));
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 14px;
+  }
+  .tmdb-preview-poster {
+    width: 100px; height: 150px; flex-shrink: 0;
+    object-fit: cover;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    box-shadow: 0 4px 12px -4px rgba(0,0,0,0.5);
+  }
+  .tmdb-preview-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+  .tmdb-preview-title {
+    font-size: 16px; font-weight: 700; color: var(--text); line-height: 1.2;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .tmdb-preview-vo {
+    font-size: 12px; color: var(--text2); font-style: italic;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .tmdb-preview-meta {
+    display: flex; gap: 12px; flex-wrap: wrap; margin-top: 4px;
+    font-size: 12px; color: var(--text2);
+  }
+  .tmdb-preview-link {
+    align-self: flex-start; margin-top: 6px;
+    font-size: 11px;
+  }
+  .tmdb-preview-override {
+    display: flex; flex-direction: row; gap: 6px; align-items: center;
+    margin-top: 8px; padding-top: 8px;
+    border-top: 1px dashed var(--border);
+    font-size: 11px;
+  }
+  .tmdb-preview-override-label { color: var(--text3); white-space: nowrap; }
+  .tmdb-preview-override-input {
+    flex: 1; max-width: 130px;
+    padding: 4px 8px; font-size: 12px;
+    background: rgba(0,0,0,0.3);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    color: var(--text);
+    font-family: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+  }
+  .tmdb-preview-override-input:focus {
+    outline: none; border-color: var(--red-hot);
+    background: rgba(0,0,0,0.4);
+  }
+  .tmdb-preview-override-btn {
+    padding: 4px 10px; font-size: 11px;
+    background: rgba(108, 99, 255, 0.15);
+    border: 1px solid rgba(108, 99, 255, 0.4);
+    color: var(--text);
+    border-radius: 5px;
+    cursor: pointer;
+    transition: all 150ms;
+  }
+  .tmdb-preview-override-btn:hover:not(:disabled) {
+    background: rgba(108, 99, 255, 0.25);
+    border-color: rgba(108, 99, 255, 0.6);
+  }
+  .tmdb-preview-override-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* Bandeau persistant statut MUX AUTO */
+  .mux-status-banner.success {
+    border: 1px solid rgba(81, 207, 102, 0.4);
+    background: linear-gradient(180deg, rgba(81, 207, 102, 0.08), rgba(47, 158, 68, 0.05));
+  }
+  .mux-status-banner.error {
+    border: 1px solid rgba(255, 107, 107, 0.4);
+    background: linear-gradient(180deg, rgba(255, 107, 107, 0.08), rgba(201, 42, 42, 0.05));
+  }
+
+  /* Module sync subs externes */
+  .sub-sync-module {
+    margin-top: 8px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border);
+  }
+  .sub-sync-module .btn-tiny { font-size: 11px; padding: 4px 10px; }
+  .sync-results-header {
+    font-size: 11px; font-weight: 600; color: var(--text2);
+    text-transform: uppercase; letter-spacing: 0.5px;
+    margin-bottom: 4px;
+  }
+  .sync-results-list {
+    list-style: none; padding: 0; margin: 0;
+    display: flex; flex-direction: column; gap: 3px;
+    font-size: 12px;
+  }
+  .sync-results-list li {
+    display: flex; gap: 12px; justify-content: space-between; align-items: center;
+    padding: 3px 6px; border-radius: 4px;
+  }
+  .sync-results-list li.has-offset { background: rgba(252, 196, 25, 0.10); }
+  .sync-results-list li.has-offset .sync-result-status { color: #fcc419; font-weight: 600; }
+  .sync-results-list li.no-offset .sync-result-status { color: #51cf66; }
+  .sync-results-list li.err .sync-result-status { color: #ff6b6b; }
+  .sync-result-name { color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sync-actions { display: flex; gap: 6px; margin-top: 6px; }
 
   .source-row-actions {
     display: flex; flex-direction: row; gap: 6px; flex-shrink: 0;

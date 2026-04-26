@@ -19,6 +19,7 @@ import (
 
 	wr "github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"go-mux-lihdl-team/internal/alass"
 	"go-mux-lihdl-team/internal/audiosync"
 	"go-mux-lihdl-team/internal/config"
 	"go-mux-lihdl-team/internal/hydracker"
@@ -44,6 +45,38 @@ func NewApp() *App {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+
+	// Adapte la taille de fenêtre à la résolution de l'écran principal :
+	// ~85 % de la taille de l'écran (max 1600×1000), centrée. Empêche aussi
+	// la fenêtre de dépasser sur les petits laptops.
+	if screens, err := wr.ScreenGetAll(ctx); err == nil && len(screens) > 0 {
+		var primary wr.Screen
+		for _, s := range screens {
+			if s.IsPrimary {
+				primary = s
+				break
+			}
+		}
+		if primary.Size.Width == 0 {
+			primary = screens[0]
+		}
+		w := int(float64(primary.Size.Width) * 0.85)
+		h := int(float64(primary.Size.Height) * 0.85)
+		if w > 1600 {
+			w = 1600
+		}
+		if h > 1000 {
+			h = 1000
+		}
+		if w < 900 {
+			w = 900
+		}
+		if h < 650 {
+			h = 650
+		}
+		wr.WindowSetSize(ctx, w, h)
+		wr.WindowCenter(ctx)
+	}
 
 	// Drop-zone : .mkv → "file:dropped" (1er) ou "files:dropped" (batch N≥2) ;
 	// subs externes → "subs:dropped" ; audios externes → "audios:dropped".
@@ -91,7 +124,7 @@ func (a *App) startup(ctx context.Context) {
 
 // AppVersion est lue par le frontend (pill dans le header) et utilisée pour
 // comparer avec la dernière release GitHub lors du check de mise à jour.
-const AppVersion = "v4.1.1"
+const AppVersion = "v4.1.2"
 
 func (a *App) GetVersion() string { return AppVersion }
 
@@ -235,6 +268,33 @@ func (a *App) MoveToTrash(paths []string) error {
 
 // OpenFolder ouvre un dossier dans l'explorateur de fichiers natif.
 // macOS → open, Linux → xdg-open, Windows → explorer.
+// MoveDirContentsToTrash envoie à la corbeille tout le contenu d'un dossier
+// (fichiers + sous-dossiers, sauf .DS_Store). Utilisé pour vider le dossier
+// "LiHDL en cours" après un mux auto réussi.
+func (a *App) MoveDirContentsToTrash(dirPath string) (int, error) {
+	if dirPath == "" {
+		return 0, errors.New("chemin vide")
+	}
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return 0, err
+	}
+	paths := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.Name() == ".DS_Store" {
+			continue
+		}
+		paths = append(paths, filepath.Join(dirPath, e.Name()))
+	}
+	if len(paths) == 0 {
+		return 0, nil
+	}
+	if err := a.MoveToTrash(paths); err != nil {
+		return 0, err
+	}
+	return len(paths), nil
+}
+
 func (a *App) OpenFolder(path string) error {
 	if path == "" {
 		return errors.New("chemin vide")
@@ -597,19 +657,29 @@ func (a *App) GetMkvBasicInfo(path string) (*MkvBasicInfo, error) {
 // RefSubResult décrit un sous-titre FR/ENG SRT extrait d'une source de référence,
 // prêt à être ajouté à externalSubs côté frontend.
 type RefSubResult struct {
-	Path     string `json:"path"`     // chemin du .srt extrait dans un fichier temporaire
-	Language string `json:"language"` // "FR" ou "ENG" (préfixe LiHDL)
-	Forced   bool   `json:"forced"`   // flag forced du mkv source
-	SDH      bool   `json:"sdh"`      // SDH détecté (FR uniquement)
-	Label    string `json:"label"`    // label LiHDL prêt (ex: "FR Full : SRT")
+	Path        string  `json:"path"`        // chemin du .srt extrait dans un fichier temporaire
+	Language    string  `json:"language"`    // "FR" ou "ENG" (préfixe LiHDL)
+	Forced      bool    `json:"forced"`      // flag forced du mkv source
+	SDH         bool    `json:"sdh"`         // SDH détecté (FR uniquement)
+	Label       string  `json:"label"`       // label LiHDL prêt (ex: "FR Full : SRT")
+	DelayMs     int     `json:"delay_ms"`    // décalage à appliquer (mkvmerge --sync) si réf désynchro vs source LiHDL
+	TempoFactor float64 `json:"tempo_factor"` // ratio atempo si drift linéaire (1.0 = pas de drift)
+	Confidence  float64 `json:"confidence"`  // confiance de la détection sync [-1,1]
+	Method      string  `json:"method"`      // "constant" | "drift_linear" | "low_confidence" | "no_sync_check"
 }
 
 // ExtractRefSubs scanne la source de référence, extrait ses pistes sous-titres
 // FR et ENG en format texte (SRT/ASS/SSA — exclut PGS/VobSub), et retourne la
-// liste prête à ajouter à externalSubs. Pour chaque piste FR, détecte SDH via
-// le contenu extrait. Construit le label LiHDL automatiquement selon les
-// flags + détection SDH (Forced > SDH > Full).
-func (a *App) ExtractRefSubs(refPath string) ([]RefSubResult, error) {
+// liste prête à ajouter à externalSubs. Si lihdlSourcePath est fourni, détecte
+// auto le décalage entre le 1er audio FR de la référence et celui de la source
+// LiHDL (cross-correlation ffmpeg) et l'applique uniformément à tous les SRT.
+// Pour chaque piste FR, détecte SDH via le contenu extrait. Construit le label
+// LiHDL automatiquement selon les flags + détection SDH (Forced > SDH > Full).
+func (a *App) ExtractRefSubs(refPath, lihdlSourcePath string) ([]RefSubResult, error) {
+	emitPct := func(pct int) {
+		wr.EventsEmit(a.ctx, "srtprogress", map[string]any{"percent": pct})
+	}
+	emitPct(0)
 	if refPath == "" {
 		return nil, errors.New("chemin vide")
 	}
@@ -621,6 +691,80 @@ func (a *App) ExtractRefSubs(refPath string) ([]RefSubResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	emitPct(10)
+
+	// Détection sync globale : 1ère piste audio FR de la référence vs 1ère piste
+	// audio FR de la source LiHDL. Le décalage trouvé s'applique à tous les SRT
+	// extraits (même réf, mêmes timecodes).
+	var globalDelayMs int
+	var globalConfidence float64
+	var globalTempoFactor float64 = 1.0
+	globalMethod := "no_sync_check"
+	if lihdlSourcePath != "" {
+		refFRID := pickFirstFRAudioID(info)
+		if refFRID >= 0 {
+			lihdlInfo, lerr := mkvtool.Identify(a.ctx, binary, lihdlSourcePath)
+			if lerr == nil {
+				lihdlFRID := pickFirstFRAudioID(lihdlInfo)
+				if lihdlFRID >= 0 {
+					var durationSec float64
+					if mibin, err := mediainfo.Locate(""); err == nil {
+						if mi, err := mediainfo.Identify(a.ctx, mibin, lihdlSourcePath); err == nil {
+							for _, t := range mi.Media.Track {
+								if t.Type == "General" && t.Duration != "" {
+									if d, perr := strconv.ParseFloat(t.Duration, 64); perr == nil {
+										durationSec = d
+									}
+									break
+								}
+							}
+						}
+					}
+					binDir, _ := config.BinDir()
+					if ffmpeg, err := audiosync.Locate(binDir); err == nil {
+						wr.EventsEmit(a.ctx, "log", "🔎 Détection sync SRT (audio FR réf vs audio FR LiHDL)…")
+						emitPct(15)
+						if res, err := audiosync.DetectOffsetCross(a.ctx, ffmpeg, lihdlSourcePath, lihdlFRID, refPath, refFRID, durationSec); err == nil && res != nil {
+							globalConfidence = res.Confidence
+							globalMethod = res.Method
+							// On n'applique l'offset que si la confidence est suffisante
+							// (>= 0.4). Sinon, le décalage détecté risque d'être faux.
+							if res.Confidence >= 0.4 {
+								globalDelayMs = res.OffsetMs
+								if res.Method == "drift_linear" && res.TempoFactor > 0 {
+									globalTempoFactor = res.TempoFactor
+								}
+								wr.EventsEmit(a.ctx, "log", fmt.Sprintf("✓ sync SRT : offset %d ms + tempo %.6f appliqués (conf %.2f, %s)", res.OffsetMs, globalTempoFactor, res.Confidence, res.Method))
+							} else {
+								wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ sync SRT : décalage %d ms détecté mais confidence trop faible (%.2f) — pas d'application auto. Ajuste manuellement si besoin.", res.OffsetMs, res.Confidence))
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Pré-compte des subs FR/ENG texte pour calculer un % linéaire pendant la
+	// boucle d'extraction (de 80% à 99%).
+	totalToExtract := 0
+	for _, t := range info.Tracks {
+		if t.Type != "subtitles" {
+			continue
+		}
+		lng := strings.ToLower(t.Properties.Language)
+		fr := lng == "fre" || lng == "fra" || lng == "fr" || strings.HasPrefix(lng, "fr-")
+		en := lng == "eng" || lng == "en" || strings.HasPrefix(lng, "en-")
+		if !fr && !en {
+			continue
+		}
+		cid := strings.ToUpper(t.Properties.CodecID)
+		if strings.Contains(cid, "TEXT") || strings.Contains(cid, "UTF") || strings.Contains(cid, "ASS") || strings.Contains(cid, "SSA") {
+			totalToExtract++
+		}
+	}
+	emitPct(80)
+	extractedCount := 0
 	results := make([]RefSubResult, 0)
 	for _, t := range info.Tracks {
 		if t.Type != "subtitles" {
@@ -633,18 +777,41 @@ func (a *App) ExtractRefSubs(refPath string) ([]RefSubResult, error) {
 			continue
 		}
 		codecID := strings.ToUpper(t.Properties.CodecID)
-		isText := strings.Contains(codecID, "TEXT") ||
-			strings.Contains(codecID, "UTF") ||
-			strings.Contains(codecID, "ASS") ||
-			strings.Contains(codecID, "SSA")
+		isASS := strings.Contains(codecID, "ASS") || strings.Contains(codecID, "SSA")
+		isPlainSRT := strings.Contains(codecID, "TEXT") || strings.Contains(codecID, "UTF")
+		isText := isASS || isPlainSRT
 		if !isText {
 			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("ℹ sub #%d ignoré (%s, format image non extractible en SRT)", t.ID, t.Properties.CodecID))
 			continue
 		}
-		tmpPath, exErr := mkvtool.ExtractTrackToTemp(a.ctx, binary, refPath, t.ID, "srt")
+		// Étape 1 : extract dans le format natif (ass/srt selon codec).
+		extOut := "srt"
+		if isASS {
+			extOut = "ass"
+		}
+		tmpPath, exErr := mkvtool.ExtractTrackToTemp(a.ctx, binary, refPath, t.ID, extOut)
 		if exErr != nil {
 			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ extract sub #%d : %s", t.ID, exErr.Error()))
 			continue
+		}
+		// Étape 2 : si ASS/SSA, conversion ffmpeg → SRT (norme LiHDL = SRT).
+		if isASS {
+			binDir, _ := config.BinDir()
+			ffmpegBin, ferr := audiosync.Locate(binDir)
+			if ferr != nil {
+				wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ ffmpeg introuvable, ASS sub #%d gardé tel quel : %s", t.ID, ferr.Error()))
+			} else {
+				wr.EventsEmit(a.ctx, "log", fmt.Sprintf("🔄 Conversion ASS → SRT (sub #%d)…", t.ID))
+				srtPath := strings.TrimSuffix(tmpPath, ".ass") + ".srt"
+				cmd := exec.CommandContext(a.ctx, ffmpegBin, "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-i", tmpPath, srtPath)
+				if cout, cerr := cmd.CombinedOutput(); cerr != nil {
+					wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ conversion ASS→SRT sub #%d : %s — %s", t.ID, cerr.Error(), string(cout)))
+				} else {
+					_ = os.Remove(tmpPath) // supprime le .ass intermédiaire
+					tmpPath = srtPath
+					wr.EventsEmit(a.ctx, "log", fmt.Sprintf("✓ ASS converti en SRT (sub #%d)", t.ID))
+				}
+			}
 		}
 		isSDH := false
 		if isFR {
@@ -653,7 +820,22 @@ func (a *App) ExtractRefSubs(refPath string) ([]RefSubResult, error) {
 		}
 		var langPrefix string
 		if isFR {
-			langPrefix = "FR"
+			// Détection VFF/VFQ via les hints du track_name + langue fr-ca explicite.
+			hints := strings.ToLower(t.Properties.TrackName)
+			isVFQ := strings.Contains(hints, "vfq") ||
+				strings.Contains(hints, "canad") ||
+				strings.Contains(hints, "québ") ||
+				strings.Contains(hints, "quebec") ||
+				lang == "fr-ca"
+			isVFF := !isVFQ && (strings.Contains(hints, "vff") || strings.Contains(hints, "france"))
+			switch {
+			case isVFQ:
+				langPrefix = "FR VFQ"
+			case isVFF:
+				langPrefix = "FR VFF"
+			default:
+				langPrefix = "FR"
+			}
 		} else {
 			langPrefix = "ENG"
 		}
@@ -668,13 +850,498 @@ func (a *App) ExtractRefSubs(refPath string) ([]RefSubResult, error) {
 		}
 		label := fmt.Sprintf("%s %s : SRT", langPrefix, variant)
 		results = append(results, RefSubResult{
-			Path:     tmpPath,
-			Language: langPrefix,
-			Forced:   t.Properties.ForcedTrack,
-			SDH:      isSDH,
-			Label:    label,
+			Path:        tmpPath,
+			Language:    langPrefix,
+			Forced:      t.Properties.ForcedTrack,
+			SDH:         isSDH,
+			Label:       label,
+			DelayMs:     globalDelayMs,
+			TempoFactor: globalTempoFactor,
+			Confidence:  globalConfidence,
+			Method:      globalMethod,
 		})
+		extractedCount++
+		if totalToExtract > 0 {
+			// Progresse de 80 à 99 au fil des extractions.
+			emitPct(80 + (extractedCount * 19 / totalToExtract))
+		}
 	}
+	emitPct(100)
+	return results, nil
+}
+
+// FRAudioExtraction décrit une piste audio FR (VFF ou VFQ) extraite d'un fichier
+// tiers, prête à être ajoutée à externalAudios côté frontend. Inclut le délai
+// de synchronisation auto-détecté vs la source LiHDL.
+type FRAudioExtraction struct {
+	Path         string  `json:"path"`          // chemin du fichier audio extrait (temp)
+	Variant      string  `json:"variant"`       // "VFF" ou "VFQ"
+	Codec        string  `json:"codec"`         // "AC3", "EAC3", "DTS", "TRUEHD", etc.
+	CodecID      string  `json:"codec_id"`      // codec_id mkvmerge brut (ex: A_EAC3)
+	Channels     int     `json:"channels"`      // 2, 6, 8…
+	TrackName    string  `json:"track_name"`    // nom de piste source (pour hints atmos)
+	Language     string  `json:"language"`      // "fre" ou "fr-ca"
+	DelayMs      int     `json:"delay_ms"`      // décalage détecté (mkvmerge --sync)
+	TempoFactor  float64 `json:"tempo_factor"`  // ratio atempo si drift linéaire (1.0 = pas de drift)
+	Confidence   float64 `json:"confidence"`
+	Method       string  `json:"method"` // "constant" | "drift_linear" | "low_confidence"…
+	Notes        string  `json:"notes"`
+	WasConverted bool    `json:"was_converted"` // true si ffmpeg→AC3, false si extraction lossless (déjà AC3)
+	BitrateKbps  int     `json:"bitrate_kbps"`  // bitrate AC3 utilisé (96, 192, 256, 448)
+	// Champs mediainfo pour atmos detection côté frontend (inferAudioLabel).
+	MITitle           string `json:"mi_title"`
+	MIFormat          string `json:"mi_format"`
+	MIFormatProfile   string `json:"mi_format_profile"`
+	MIFormatCommercial string `json:"mi_format_commercial"`
+	MIFormatCommercialIfAny string `json:"mi_format_commercial_if_any"`
+	MIFormatFeatures  string `json:"mi_format_features"`
+	MIChannels        string `json:"mi_channels"`
+	MIServiceKind     string `json:"mi_service_kind"`
+	MIServiceKindName string `json:"mi_service_kind_name"`
+}
+
+// codecIDToExt mappe un codec_id mkvmerge à l'extension de fichier appropriée
+// pour mkvextract (pour que mkvmerge re-mux ensuite reconnaisse le format).
+func codecIDToExt(codecID string) string {
+	switch strings.ToUpper(codecID) {
+	case "A_AC3":
+		return "ac3"
+	case "A_EAC3":
+		return "eac3"
+	case "A_DTS":
+		return "dts"
+	case "A_TRUEHD":
+		return "thd"
+	case "A_AAC":
+		return "aac"
+	case "A_FLAC":
+		return "flac"
+	case "A_OPUS":
+		return "opus"
+	case "A_VORBIS":
+		return "ogg"
+	case "A_PCM/INT/LIT", "A_PCM/INT/BIG":
+		return "wav"
+	default:
+		return "audio"
+	}
+}
+
+// codecIDToLabel mappe un codec_id mkvmerge au libellé court LiHDL.
+func codecIDToLabel(codecID string) string {
+	switch strings.ToUpper(codecID) {
+	case "A_AC3":
+		return "AC3"
+	case "A_EAC3":
+		return "EAC3"
+	case "A_DTS":
+		return "DTS"
+	case "A_TRUEHD":
+		return "TRUEHD"
+	case "A_AAC":
+		return "AAC"
+	case "A_FLAC":
+		return "FLAC"
+	case "A_OPUS":
+		return "OPUS"
+	default:
+		return codecID
+	}
+}
+
+// pickFirstFRAudioID retourne l'ID de la 1ère piste audio FR dans info, ou -1.
+// Utilisé pour la détection de sync (référence sur la source LiHDL).
+func pickFirstFRAudioID(info *mkvtool.Info) int {
+	for _, t := range info.Tracks {
+		if t.Type != "audio" {
+			continue
+		}
+		lang := strings.ToLower(t.Properties.Language)
+		if lang == "fre" || lang == "fra" || lang == "fr" || strings.HasPrefix(lang, "fr-") {
+			return t.ID
+		}
+	}
+	// Pas de FR trouvé : fallback sur la 1ère audio (mieux que rien).
+	for _, t := range info.Tracks {
+		if t.Type == "audio" {
+			return t.ID
+		}
+	}
+	return -1
+}
+
+// pickSyncRefAudioID choisit une piste audio de la source LiHDL pour servir de
+// référence à la sync, en excluant les pistes qui vont être remplacées par
+// l'extraction. Si l'utilisateur extrait FR VFF ET FR VFQ, on prend la 1ère
+// piste non-FR (typiquement ENG VO). Si seul VFF est extrait, FR VFQ peut
+// servir de réf. Si seul VFQ est extrait, FR VFF peut servir de réf.
+// Fallback : 1ère audio quelconque, puis -1.
+func pickSyncRefAudioID(info *mkvtool.Info, wantVFF, wantVFQ bool) int {
+	classify := func(t mkvtool.Track) string {
+		lang := strings.ToLower(t.Properties.Language)
+		isFR := lang == "fre" || lang == "fra" || lang == "fr" || strings.HasPrefix(lang, "fr-")
+		if !isFR {
+			return "OTHER"
+		}
+		hints := strings.ToLower(t.Properties.TrackName)
+		if lang == "fr-ca" || strings.Contains(hints, "vfq") || strings.Contains(hints, "canad") || strings.Contains(hints, "québ") || strings.Contains(hints, "quebec") {
+			return "VFQ"
+		}
+		return "VFF"
+	}
+	// Priorité 1 : piste non-FR (ENG VO, JPN VO, etc.) — ne sera jamais remplacée.
+	for _, t := range info.Tracks {
+		if t.Type != "audio" {
+			continue
+		}
+		if classify(t) == "OTHER" {
+			return t.ID
+		}
+	}
+	// Priorité 2 : piste FR qui n'est pas remplacée (l'autre variante).
+	for _, t := range info.Tracks {
+		if t.Type != "audio" {
+			continue
+		}
+		c := classify(t)
+		if c == "VFF" && !wantVFF {
+			return t.ID
+		}
+		if c == "VFQ" && !wantVFQ {
+			return t.ID
+		}
+	}
+	// Fallback : 1ère piste audio (peut être celle qu'on remplace, mais mieux que rien).
+	for _, t := range info.Tracks {
+		if t.Type == "audio" {
+			return t.ID
+		}
+	}
+	return -1
+}
+
+// classifyFRAudio détermine si une piste audio est FR VFF, FR VFQ ou ENG d'après
+// la langue et les hints (track_name, mediainfo). Retourne "VFF", "VFQ", "ENG" ou "".
+func classifyFRAudio(t mkvtool.Track) string {
+	lang := strings.ToLower(t.Properties.Language)
+	isFR := lang == "fre" || lang == "fra" || lang == "fr" || strings.HasPrefix(lang, "fr-")
+	isENG := lang == "eng" || lang == "en" || strings.HasPrefix(lang, "en-")
+	if isENG {
+		return "ENG"
+	}
+	if !isFR {
+		return ""
+	}
+	hints := strings.ToLower(t.Properties.TrackName)
+	isCanada := lang == "fr-ca" ||
+		strings.Contains(hints, "canad") ||
+		strings.Contains(hints, "québ") ||
+		strings.Contains(hints, "quebec") ||
+		strings.Contains(hints, "vfq")
+	if isCanada {
+		return "VFQ"
+	}
+	return "VFF"
+}
+
+// ExtractFRAudios extrait les pistes FR VFF, FR VFQ et/ou ENG VO d'un fichier
+// source tiers, détecte le décalage par rapport à la source LiHDL, et retourne
+// les fichiers audio prêts à être ajoutés au mux comme externalAudios. Le
+// frontend gère ensuite le replace (drop des FR/ENG existants) et l'ajout.
+//
+// Convention : toutes les pistes non-AC3 (EAC3, DTS, TrueHD, FLAC, etc.) sont
+// converties en AC3 via ffmpeg pour respecter la norme LiHDL :
+//   - 1.0 → AC3 1.0 (96k)
+//   - 2.0 → AC3 2.0 (192k)
+//   - 5.1 → AC3 5.1 (384k)
+//   - 7.1 → AC3 5.1 (384k, downmix)
+func (a *App) ExtractFRAudios(srcPath string, wantVFF, wantVFQ, wantENG bool, lihdlSourcePath string) ([]FRAudioExtraction, error) {
+	if srcPath == "" {
+		return nil, errors.New("chemin source FR vide")
+	}
+	if !wantVFF && !wantVFQ && !wantENG {
+		return nil, errors.New("aucune variante demandée (cocher VFF, VFQ ou ENG)")
+	}
+	binary := a.LocateMkvmerge()
+	if binary == "" {
+		return nil, errors.New("mkvmerge introuvable")
+	}
+
+	srcInfo, err := mkvtool.Identify(a.ctx, binary, srcPath)
+	if err != nil {
+		return nil, fmt.Errorf("analyse source FR : %w", err)
+	}
+
+	// Mediainfo enrichi pour atmos/channels (best-effort) + durée source ref pour
+	// la barre de progression de la conversion AC3.
+	mediainfoByID := map[int]mediainfo.Track{}
+	var srcDuration float64
+	if mibin, err := mediainfo.Locate(""); err == nil {
+		if mi, err := mediainfo.Identify(a.ctx, mibin, srcPath); err == nil {
+			audIdx := 0
+			audTracks := []mkvtool.Track{}
+			for _, t := range srcInfo.Tracks {
+				if t.Type == "audio" {
+					audTracks = append(audTracks, t)
+				}
+			}
+			for _, mt := range mi.Media.Track {
+				if mt.Type == "Audio" && audIdx < len(audTracks) {
+					mediainfoByID[audTracks[audIdx].ID] = mt
+					audIdx++
+				}
+				if mt.Type == "General" && mt.Duration != "" && srcDuration == 0 {
+					if d, derr := strconv.ParseFloat(mt.Duration, 64); derr == nil {
+						srcDuration = d
+					}
+				}
+			}
+		}
+	}
+
+	// Pour la sync : 1ère piste FR de la source LiHDL en priorité (cross-correlation
+	// FR vs FR donne de meilleurs résultats qu'avec ENG/autre langue), fallback
+	// sur 1ère audio quelconque sinon.
+	var lihdlFRID int = -1
+	var lihdlDuration float64
+	if lihdlSourcePath != "" {
+		if lihdlInfo, err := mkvtool.Identify(a.ctx, binary, lihdlSourcePath); err == nil {
+			lihdlFRID = pickFirstFRAudioID(lihdlInfo)
+		}
+		// Durée pour détection de drift.
+		if mibin, err := mediainfo.Locate(""); err == nil {
+			if mi, err := mediainfo.Identify(a.ctx, mibin, lihdlSourcePath); err == nil {
+				for _, t := range mi.Media.Track {
+					if t.Type == "General" && t.Duration != "" {
+						if d, perr := strconv.ParseFloat(t.Duration, 64); perr == nil {
+							lihdlDuration = d
+						}
+						break
+					}
+				}
+			}
+		}
+	}
+
+	binDir, _ := config.BinDir()
+	ffmpeg, _ := audiosync.Locate(binDir)
+	canSync := ffmpeg != "" && lihdlFRID >= 0 && lihdlSourcePath != ""
+
+	results := make([]FRAudioExtraction, 0, 3)
+	doneVFF, doneVFQ, doneENG := false, false, false
+	for _, t := range srcInfo.Tracks {
+		if t.Type != "audio" {
+			continue
+		}
+		variant := classifyFRAudio(t)
+		if variant == "" {
+			continue
+		}
+		if variant == "VFF" && (!wantVFF || doneVFF) {
+			continue
+		}
+		if variant == "VFQ" && (!wantVFQ || doneVFQ) {
+			continue
+		}
+		if variant == "ENG" && (!wantENG || doneENG) {
+			continue
+		}
+
+		// Choix : extraction lossless si déjà AC3, sinon conversion ffmpeg → AC3.
+		srcCodec := codecIDToLabel(t.Properties.CodecID)
+		isAlreadyAC3 := strings.ToUpper(srcCodec) == "AC3"
+		var tmpPath string
+		var exErr error
+		if isAlreadyAC3 {
+			tmpPath, exErr = mkvtool.ExtractTrackToTemp(a.ctx, binary, srcPath, t.ID, "ac3")
+			if exErr != nil {
+				wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ extract audio #%d (%s) : %s", t.ID, variant, exErr.Error()))
+				continue
+			}
+		} else {
+			if ffmpeg == "" {
+				wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ piste #%d (%s) en %s : ffmpeg requis pour conversion AC3, skip", t.ID, variant, srcCodec))
+				continue
+			}
+			tmp, terr := os.CreateTemp("", "submux-extract-*.ac3")
+			if terr != nil {
+				wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ création temp file : %s", terr.Error()))
+				continue
+			}
+			tmpPath = tmp.Name()
+			tmp.Close()
+			os.Remove(tmpPath)
+			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("🔄 Conversion %s → AC3 (piste #%d, %s, %d ch)…", srcCodec, t.ID, variant, t.Properties.AudioChannels))
+			progressCb := func(pct int) {
+				wr.EventsEmit(a.ctx, "ac3convert:progress", map[string]any{"variant": variant, "percent": pct})
+			}
+			if cerr := audiosync.ConvertAudioToAC3(a.ctx, ffmpeg, srcPath, t.ID, t.Properties.AudioChannels, tmpPath, srcDuration, progressCb); cerr != nil {
+				wr.EventsEmit(a.ctx, "log", fmt.Sprintf("❌ conversion audio #%d (%s) : %s", t.ID, variant, cerr.Error()))
+				continue
+			}
+			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("✓ %s converti en AC3 (piste #%d, %s)", srcCodec, t.ID, variant))
+		}
+
+		// Le codec final est toujours AC3 (extrait tel quel ou converti).
+		finalCodec := "AC3"
+		// Channels finaux : downmix 7.1→5.1 si conversion
+		finalChannels := t.Properties.AudioChannels
+		if !isAlreadyAC3 && finalChannels > 6 {
+			finalChannels = 6
+		}
+		// Bitrate cible (uniquement si converti — lossless conserve le bitrate source).
+		finalBitrate := 0
+		if !isAlreadyAC3 {
+			switch {
+			case finalChannels == 1:
+				finalBitrate = 96
+			case finalChannels == 2:
+				finalBitrate = 192
+			case finalChannels >= 5:
+				finalBitrate = 448
+			default:
+				finalBitrate = 256
+			}
+		}
+
+		extraction := FRAudioExtraction{
+			Path:         tmpPath,
+			Variant:      variant,
+			CodecID:      "A_AC3",
+			Codec:        finalCodec,
+			Channels:     finalChannels,
+			TrackName:    t.Properties.TrackName,
+			Language:     t.Properties.Language,
+			WasConverted: !isAlreadyAC3,
+			BitrateKbps:  finalBitrate,
+		}
+		if mt, ok := mediainfoByID[t.ID]; ok {
+			extraction.MITitle = mt.Title
+			extraction.MIFormat = mt.Format
+			extraction.MIFormatProfile = mt.FormatProfile
+			extraction.MIFormatCommercial = mt.FormatCommercial
+			extraction.MIFormatCommercialIfAny = mt.FormatCommercialIfAny
+			extraction.MIFormatFeatures = mt.FormatAdditionalFeatures
+			extraction.MIChannels = mt.Channels
+			extraction.MIServiceKind = mt.ServiceKind
+			extraction.MIServiceKindName = mt.ServiceKindNames
+		}
+
+		// Détection sync (best-effort — si ffmpeg manquant ou pas de réf FR, skip).
+		extraction.TempoFactor = 1.0
+		if canSync {
+			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("🔎 Détection sync %s…", variant))
+			res, syncErr := audiosync.DetectOffsetCross(a.ctx, ffmpeg, lihdlSourcePath, lihdlFRID, srcPath, t.ID, lihdlDuration)
+			if syncErr != nil {
+				wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ sync %s : %s", variant, syncErr.Error()))
+			} else if res != nil {
+				extraction.Confidence = res.Confidence
+				extraction.Method = res.Method
+				extraction.Notes = res.Notes
+				if res.Confidence >= 0.4 {
+					extraction.DelayMs = res.OffsetMs
+					if res.Method == "drift_linear" && res.TempoFactor > 0 {
+						extraction.TempoFactor = res.TempoFactor
+					}
+					wr.EventsEmit(a.ctx, "log", fmt.Sprintf("✓ %s : offset %d ms + tempo %.6f (conf %.2f, %s)", variant, res.OffsetMs, extraction.TempoFactor, res.Confidence, res.Method))
+				} else {
+					wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ %s : décalage %d ms détecté mais confidence trop faible (%.2f) — pas d'application auto.", variant, res.OffsetMs, res.Confidence))
+				}
+			}
+		}
+
+		results = append(results, extraction)
+		switch variant {
+		case "VFF":
+			doneVFF = true
+		case "VFQ":
+			doneVFQ = true
+		case "ENG":
+			doneENG = true
+		}
+	}
+
+	if len(results) == 0 {
+		wr.EventsEmit(a.ctx, "log", "ℹ Aucune piste FR VFF/VFQ correspondant aux choix trouvée.")
+	}
+	return results, nil
+}
+
+// SubSyncRequest : un SRT à synchroniser via alass-cli.
+type SubSyncRequest struct {
+	Path string `json:"path"`
+}
+
+// SubSyncCheck décrit le résultat d'une synchronisation alass entre un SRT et
+// la vidéo source LiHDL. Si OK, le SRT a été corrigé dans SyncedPath.
+type SubSyncCheck struct {
+	Path       string `json:"path"`        // chemin du SRT original
+	SyncedPath string `json:"synced_path"` // chemin du SRT corrigé (à utiliser dans le mux)
+	OffsetMs   int    `json:"offset_ms"`   // décalage moyen détecté/appliqué (informatif)
+	FpsRatio   string `json:"fps_ratio"`   // ex "25/23.976" si drift FPS détecté, sinon ""
+	Error      string `json:"error"`       // message d'erreur si l'opération a planté
+}
+
+// CheckSubsSync utilise alass-cli pour resynchroniser chaque SRT vers la vidéo
+// source LiHDL (VAD + alignment local). Produit un SRT corrigé par entrée. Le
+// frontend remplace ensuite le path du SRT par le chemin SyncedPath pour le mux.
+// Émet des events `subsync:progress {percent, current}` pendant le traitement.
+func (a *App) CheckSubsSync(reqs []SubSyncRequest, sourceMkvPath string) ([]SubSyncCheck, error) {
+	emitProg := func(pct int, current string) {
+		wr.EventsEmit(a.ctx, "subsync:progress", map[string]any{"percent": pct, "current": current})
+	}
+	emitProg(0, "")
+	if sourceMkvPath == "" {
+		return nil, errors.New("source LiHDL non chargée — impossible de vérifier la sync")
+	}
+	if len(reqs) == 0 {
+		return []SubSyncCheck{}, nil
+	}
+	binDir, _ := config.BinDir()
+	alassPath, aerr := alass.Locate(binDir)
+	if aerr != nil {
+		return nil, fmt.Errorf("alass-cli : %w", aerr)
+	}
+	// Extrait aussi ffmpeg + ffprobe vers binDir (alass shellout vers ffprobe).
+	if _, ferr := audiosync.Locate(binDir); ferr != nil {
+		return nil, fmt.Errorf("ffmpeg : %w", ferr)
+	}
+	if _, ferr := audiosync.LocateFfprobe(binDir); ferr != nil {
+		return nil, fmt.Errorf("ffprobe : %w", ferr)
+	}
+
+	results := make([]SubSyncCheck, 0, len(reqs))
+	total := len(reqs)
+	for i, req := range reqs {
+		emitProg((i*100)/total, filepath.Base(req.Path))
+		lower := strings.ToLower(req.Path)
+		if !strings.HasSuffix(lower, ".srt") && !strings.HasSuffix(lower, ".ass") && !strings.HasSuffix(lower, ".ssa") {
+			results = append(results, SubSyncCheck{Path: req.Path, Error: "format non supporté par alass (SRT/ASS/SSA uniquement)"})
+			continue
+		}
+		wr.EventsEmit(a.ctx, "log", fmt.Sprintf("🔎 alass sync (%d/%d) : %s", i+1, total, filepath.Base(req.Path)))
+		// Output dans un fichier temp à côté de l'original avec suffix ".alass.srt"
+		outputPath := strings.TrimSuffix(req.Path, filepath.Ext(req.Path)) + ".alass" + filepath.Ext(req.Path)
+		// noSplit=true → un seul offset constant + correction FPS, plus stable.
+		res, err := alass.Sync(a.ctx, alassPath, sourceMkvPath, req.Path, outputPath, true, binDir)
+		if err != nil {
+			results = append(results, SubSyncCheck{Path: req.Path, Error: err.Error()})
+			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ alass %s : %s", filepath.Base(req.Path), err.Error()))
+			continue
+		}
+		results = append(results, SubSyncCheck{
+			Path:       req.Path,
+			SyncedPath: res.OutputPath,
+			OffsetMs:   res.OffsetMs,
+			FpsRatio:   res.FpsRatio,
+		})
+		extra := ""
+		if res.FpsRatio != "" {
+			extra = ", FPS ratio " + res.FpsRatio
+		}
+		wr.EventsEmit(a.ctx, "log", fmt.Sprintf("  → %s : décalage %d ms appliqué%s", filepath.Base(req.Path), res.OffsetMs, extra))
+	}
+	emitProg(100, "")
 	return results, nil
 }
 

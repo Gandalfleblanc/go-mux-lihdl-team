@@ -8,3 +8,8 @@ import _ "embed"
 var embeddedBinary []byte
 
 const embeddedName = "ffmpeg"
+
+//go:embed binaries/linux-amd64/ffprobe
+var embeddedFfprobeBinary []byte
+
+const embeddedFfprobeName = "ffprobe"

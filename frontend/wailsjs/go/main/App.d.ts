@@ -14,13 +14,17 @@ export function BuildFilename(arg1:naming.FilenameParams):Promise<string>;
 
 export function CancelMux():Promise<void>;
 
+export function CheckSubsSync(arg1:Array<main.SubSyncRequest>,arg2:string):Promise<Array<main.SubSyncCheck>>;
+
 export function CheckUpdate():Promise<main.UpdateInfo>;
 
 export function CheckVFQ(arg1:string):Promise<boolean>;
 
 export function DetectAudioOffset(arg1:string,arg2:number,arg3:number):Promise<audiosync.DetectionResult>;
 
-export function ExtractRefSubs(arg1:string):Promise<Array<main.RefSubResult>>;
+export function ExtractFRAudios(arg1:string,arg2:boolean,arg3:boolean,arg4:boolean,arg5:string):Promise<Array<main.FRAudioExtraction>>;
+
+export function ExtractRefSubs(arg1:string,arg2:string):Promise<Array<main.RefSubResult>>;
 
 export function FileSize(arg1:string):Promise<number>;
 
@@ -39,6 +43,8 @@ export function ListAudioTracksForSync(arg1:string):Promise<Array<main.SyncAudio
 export function LocateMkvmerge():Promise<string>;
 
 export function LookupHydrackerURL(arg1:number):Promise<string>;
+
+export function MoveDirContentsToTrash(arg1:string):Promise<number>;
 
 export function MoveToTrash(arg1:Array<string>):Promise<void>;
 

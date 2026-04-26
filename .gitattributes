@@ -1,0 +1,8 @@
+internal/alass/binaries/**/alass-cli.exe filter=lfs diff=lfs merge=lfs -text
+internal/mkvtool/binaries/**/mkvmerge filter=lfs diff=lfs merge=lfs -text
+internal/mkvtool/binaries/**/mkvmerge.exe filter=lfs diff=lfs merge=lfs -text
+internal/audiosync/binaries/**/ffprobe filter=lfs diff=lfs merge=lfs -text
+internal/audiosync/binaries/**/ffprobe.exe filter=lfs diff=lfs merge=lfs -text
+internal/audiosync/binaries/**/ffmpeg filter=lfs diff=lfs merge=lfs -text
+internal/audiosync/binaries/**/ffmpeg.exe filter=lfs diff=lfs merge=lfs -text
+internal/alass/binaries/**/alass-cli filter=lfs diff=lfs merge=lfs -text

@@ -18,6 +18,10 @@ export function CancelMux() {
   return window['go']['main']['App']['CancelMux']();
 }
 
+export function CheckSubsSync(arg1, arg2) {
+  return window['go']['main']['App']['CheckSubsSync'](arg1, arg2);
+}
+
 export function CheckUpdate() {
   return window['go']['main']['App']['CheckUpdate']();
 }
@@ -30,8 +34,12 @@ export function DetectAudioOffset(arg1, arg2, arg3) {
   return window['go']['main']['App']['DetectAudioOffset'](arg1, arg2, arg3);
 }
 
-export function ExtractRefSubs(arg1) {
-  return window['go']['main']['App']['ExtractRefSubs'](arg1);
+export function ExtractFRAudios(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['ExtractFRAudios'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function ExtractRefSubs(arg1, arg2) {
+  return window['go']['main']['App']['ExtractRefSubs'](arg1, arg2);
 }
 
 export function FileSize(arg1) {
@@ -68,6 +76,10 @@ export function LocateMkvmerge() {
 
 export function LookupHydrackerURL(arg1) {
   return window['go']['main']['App']['LookupHydrackerURL'](arg1);
+}
+
+export function MoveDirContentsToTrash(arg1) {
+  return window['go']['main']['App']['MoveDirContentsToTrash'](arg1);
 }
 
 export function MoveToTrash(arg1) {

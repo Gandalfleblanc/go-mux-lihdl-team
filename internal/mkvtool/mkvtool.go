@@ -197,12 +197,14 @@ type TrackSpec struct {
 
 // ExternalSub décrit un fichier de sous-titres externe ajouté au mux.
 type ExternalSub struct {
-	Path     string // chemin du fichier .srt/.sup/.ass/.sub/.idx
-	Name     string // nom de piste LiHDL (--track-name)
-	Language string // code iso 639-2 (fre, eng, …)
-	Default  bool
-	Forced   bool
-	Order    int // position dans l'ordre final (plus petit = plus haut)
+	Path        string  // chemin du fichier .srt/.sup/.ass/.sub/.idx
+	Name        string  // nom de piste LiHDL (--track-name)
+	Language    string  // code iso 639-2 (fre, eng, …)
+	Default     bool
+	Forced      bool
+	DelayMs     int     // décalage en ms (--sync 0:DELAY)
+	TempoFactor float64 // ratio atempo détecté (1.0 = pas de drift). Si != 1, mkvmerge --sync ajoute un facteur o/p pour étirer les timecodes (drift linéaire FPS).
+	Order       int     // position dans l'ordre final (plus petit = plus haut)
 }
 
 // ExternalAudio décrit un fichier audio externe ajouté au mux.
@@ -212,8 +214,9 @@ type ExternalAudio struct {
 	Language       string
 	Default        bool
 	Forced         bool
-	VisualImpaired bool // flag malvoyant pour les pistes AD
-	DelayMs        int  // décalage audio en ms (--sync 0:OFFSET sur le fichier ext)
+	VisualImpaired bool    // flag malvoyant pour les pistes AD
+	DelayMs        int     // décalage audio en ms (--sync 0:DELAY)
+	TempoFactor    float64 // ratio atempo détecté (1.0 = pas de drift). Si != 1, mkvmerge --sync ajoute un facteur o/p pour étirer les timecodes.
 	Order          int
 }
 
@@ -518,8 +521,8 @@ func buildArgs(p MuxParams) []string {
 		if a.VisualImpaired {
 			args = append(args, "--visual-impaired-flag", "0:1")
 		}
-		if a.DelayMs != 0 {
-			args = append(args, "--sync", "0:"+strconv.Itoa(a.DelayMs))
+		if syncVal := buildSyncValue(a.DelayMs, a.TempoFactor); syncVal != "" {
+			args = append(args, "--sync", "0:"+syncVal)
 		}
 		args = append(args, a.Path)
 	}
@@ -534,10 +537,37 @@ func buildArgs(p MuxParams) []string {
 		}
 		args = append(args, "--default-track-flag", "0:"+boolFlag(s.Default))
 		args = append(args, "--forced-display-flag", "0:"+boolFlag(s.Forced))
+		if syncVal := buildSyncValue(s.DelayMs, s.TempoFactor); syncVal != "" {
+			args = append(args, "--sync", "0:"+syncVal)
+		}
 		args = append(args, s.Path)
 	}
 
 	return args
+}
+
+// buildSyncValue construit la valeur du flag --sync mkvmerge :
+//   - "" si pas de décalage et pas de drift (rien à passer)
+//   - "DELAY" si juste un offset constant (ex: "20")
+//   - "DELAY,o/p" si en plus un drift linéaire (ex: "20,1001/1000")
+//
+// Le ratio o/p compense un drift FPS : new_ts = (old_ts + d) * o/p.
+// On veut new_ts = old_ts * (1/tempoFactor), donc o/p = 1/tempoFactor.
+func buildSyncValue(delayMs int, tempoFactor float64) string {
+	hasDelay := delayMs != 0
+	hasTempo := tempoFactor > 0 && tempoFactor != 1.0
+	if !hasDelay && !hasTempo {
+		return ""
+	}
+	val := strconv.Itoa(delayMs)
+	if hasTempo {
+		// Convertit 1/tempoFactor en fraction o/p avec 6 chiffres de précision.
+		// Ex : tempoFactor = 0.999 → 1/0.999 ≈ 1.001001 → 1001001/1000000.
+		ratio := 1.0 / tempoFactor
+		num := int(ratio*1000000 + 0.5) // arrondi
+		val += "," + strconv.Itoa(num) + "/1000000"
+	}
+	return val
 }
 
 func boolFlag(b bool) string {

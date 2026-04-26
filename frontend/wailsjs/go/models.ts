@@ -132,6 +132,62 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class FRAudioExtraction {
+	    path: string;
+	    variant: string;
+	    codec: string;
+	    codec_id: string;
+	    channels: number;
+	    track_name: string;
+	    language: string;
+	    delay_ms: number;
+	    tempo_factor: number;
+	    confidence: number;
+	    method: string;
+	    notes: string;
+	    was_converted: boolean;
+	    bitrate_kbps: number;
+	    mi_title: string;
+	    mi_format: string;
+	    mi_format_profile: string;
+	    mi_format_commercial: string;
+	    mi_format_commercial_if_any: string;
+	    mi_format_features: string;
+	    mi_channels: string;
+	    mi_service_kind: string;
+	    mi_service_kind_name: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new FRAudioExtraction(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.variant = source["variant"];
+	        this.codec = source["codec"];
+	        this.codec_id = source["codec_id"];
+	        this.channels = source["channels"];
+	        this.track_name = source["track_name"];
+	        this.language = source["language"];
+	        this.delay_ms = source["delay_ms"];
+	        this.tempo_factor = source["tempo_factor"];
+	        this.confidence = source["confidence"];
+	        this.method = source["method"];
+	        this.notes = source["notes"];
+	        this.was_converted = source["was_converted"];
+	        this.bitrate_kbps = source["bitrate_kbps"];
+	        this.mi_title = source["mi_title"];
+	        this.mi_format = source["mi_format"];
+	        this.mi_format_profile = source["mi_format_profile"];
+	        this.mi_format_commercial = source["mi_format_commercial"];
+	        this.mi_format_commercial_if_any = source["mi_format_commercial_if_any"];
+	        this.mi_format_features = source["mi_format_features"];
+	        this.mi_channels = source["mi_channels"];
+	        this.mi_service_kind = source["mi_service_kind"];
+	        this.mi_service_kind_name = source["mi_service_kind_name"];
+	    }
+	}
 	export class LihdlOptions {
 	    audio_labels: string[];
 	    subtitle_labels: string[];
@@ -230,6 +286,10 @@ export namespace main {
 	    forced: boolean;
 	    sdh: boolean;
 	    label: string;
+	    delay_ms: number;
+	    tempo_factor: number;
+	    confidence: number;
+	    method: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new RefSubResult(source);
@@ -242,6 +302,42 @@ export namespace main {
 	        this.forced = source["forced"];
 	        this.sdh = source["sdh"];
 	        this.label = source["label"];
+	        this.delay_ms = source["delay_ms"];
+	        this.tempo_factor = source["tempo_factor"];
+	        this.confidence = source["confidence"];
+	        this.method = source["method"];
+	    }
+	}
+	export class SubSyncCheck {
+	    path: string;
+	    synced_path: string;
+	    offset_ms: number;
+	    fps_ratio: string;
+	    error: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SubSyncCheck(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.synced_path = source["synced_path"];
+	        this.offset_ms = source["offset_ms"];
+	        this.fps_ratio = source["fps_ratio"];
+	        this.error = source["error"];
+	    }
+	}
+	export class SubSyncRequest {
+	    path: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SubSyncRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
 	    }
 	}
 	export class SyncAudioTrack {
@@ -309,6 +405,7 @@ export namespace mkvtool {
 	    Forced: boolean;
 	    VisualImpaired: boolean;
 	    DelayMs: number;
+	    TempoFactor: number;
 	    Order: number;
 	
 	    static createFrom(source: any = {}) {
@@ -324,6 +421,7 @@ export namespace mkvtool {
 	        this.Forced = source["Forced"];
 	        this.VisualImpaired = source["VisualImpaired"];
 	        this.DelayMs = source["DelayMs"];
+	        this.TempoFactor = source["TempoFactor"];
 	        this.Order = source["Order"];
 	    }
 	}
@@ -333,6 +431,8 @@ export namespace mkvtool {
 	    Language: string;
 	    Default: boolean;
 	    Forced: boolean;
+	    DelayMs: number;
+	    TempoFactor: number;
 	    Order: number;
 	
 	    static createFrom(source: any = {}) {
@@ -346,6 +446,8 @@ export namespace mkvtool {
 	        this.Language = source["Language"];
 	        this.Default = source["Default"];
 	        this.Forced = source["Forced"];
+	        this.DelayMs = source["DelayMs"];
+	        this.TempoFactor = source["TempoFactor"];
 	        this.Order = source["Order"];
 	    }
 	}
