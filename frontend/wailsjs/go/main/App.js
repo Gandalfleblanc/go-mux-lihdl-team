@@ -30,6 +30,10 @@ export function DetectAudioOffset(arg1, arg2, arg3) {
   return window['go']['main']['App']['DetectAudioOffset'](arg1, arg2, arg3);
 }
 
+export function ExtractRefSubs(arg1) {
+  return window['go']['main']['App']['ExtractRefSubs'](arg1);
+}
+
 export function FileSize(arg1) {
   return window['go']['main']['App']['FileSize'](arg1);
 }

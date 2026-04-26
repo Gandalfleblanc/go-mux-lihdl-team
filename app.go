@@ -594,6 +594,90 @@ func (a *App) GetMkvBasicInfo(path string) (*MkvBasicInfo, error) {
 	return out, nil
 }
 
+// RefSubResult décrit un sous-titre FR/ENG SRT extrait d'une source de référence,
+// prêt à être ajouté à externalSubs côté frontend.
+type RefSubResult struct {
+	Path     string `json:"path"`     // chemin du .srt extrait dans un fichier temporaire
+	Language string `json:"language"` // "FR" ou "ENG" (préfixe LiHDL)
+	Forced   bool   `json:"forced"`   // flag forced du mkv source
+	SDH      bool   `json:"sdh"`      // SDH détecté (FR uniquement)
+	Label    string `json:"label"`    // label LiHDL prêt (ex: "FR Full : SRT")
+}
+
+// ExtractRefSubs scanne la source de référence, extrait ses pistes sous-titres
+// FR et ENG en format texte (SRT/ASS/SSA — exclut PGS/VobSub), et retourne la
+// liste prête à ajouter à externalSubs. Pour chaque piste FR, détecte SDH via
+// le contenu extrait. Construit le label LiHDL automatiquement selon les
+// flags + détection SDH (Forced > SDH > Full).
+func (a *App) ExtractRefSubs(refPath string) ([]RefSubResult, error) {
+	if refPath == "" {
+		return nil, errors.New("chemin vide")
+	}
+	binary := a.LocateMkvmerge()
+	if binary == "" {
+		return nil, errors.New("mkvmerge introuvable")
+	}
+	info, err := mkvtool.Identify(a.ctx, binary, refPath)
+	if err != nil {
+		return nil, err
+	}
+	results := make([]RefSubResult, 0)
+	for _, t := range info.Tracks {
+		if t.Type != "subtitles" {
+			continue
+		}
+		lang := strings.ToLower(t.Properties.Language)
+		isFR := lang == "fre" || lang == "fra" || lang == "fr" || strings.HasPrefix(lang, "fr-")
+		isENG := lang == "eng" || lang == "en" || strings.HasPrefix(lang, "en-")
+		if !isFR && !isENG {
+			continue
+		}
+		codecID := strings.ToUpper(t.Properties.CodecID)
+		isText := strings.Contains(codecID, "TEXT") ||
+			strings.Contains(codecID, "UTF") ||
+			strings.Contains(codecID, "ASS") ||
+			strings.Contains(codecID, "SSA")
+		if !isText {
+			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("ℹ sub #%d ignoré (%s, format image non extractible en SRT)", t.ID, t.Properties.CodecID))
+			continue
+		}
+		tmpPath, exErr := mkvtool.ExtractTrackToTemp(a.ctx, binary, refPath, t.ID, "srt")
+		if exErr != nil {
+			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ extract sub #%d : %s", t.ID, exErr.Error()))
+			continue
+		}
+		isSDH := false
+		if isFR {
+			content, _ := os.ReadFile(tmpPath)
+			isSDH, _ = mkvtool.DetectSubSDHFromContent(string(content))
+		}
+		var langPrefix string
+		if isFR {
+			langPrefix = "FR"
+		} else {
+			langPrefix = "ENG"
+		}
+		var variant string
+		switch {
+		case t.Properties.ForcedTrack:
+			variant = "Forced"
+		case isSDH:
+			variant = "SDH"
+		default:
+			variant = "Full"
+		}
+		label := fmt.Sprintf("%s %s : SRT", langPrefix, variant)
+		results = append(results, RefSubResult{
+			Path:     tmpPath,
+			Language: langPrefix,
+			Forced:   t.Properties.ForcedTrack,
+			SDH:      isSDH,
+			Label:    label,
+		})
+	}
+	return results, nil
+}
+
 // LookupHydrackerURL résout l'URL fiche Hydracker pour un ID TMDB donné.
 // Retourne chaîne vide si pas de clé API, pas trouvé, ou erreur.
 func (a *App) LookupHydrackerURL(tmdbID int) string {

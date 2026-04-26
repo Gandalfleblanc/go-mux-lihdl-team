@@ -224,6 +224,26 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class RefSubResult {
+	    path: string;
+	    language: string;
+	    forced: boolean;
+	    sdh: boolean;
+	    label: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new RefSubResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.language = source["language"];
+	        this.forced = source["forced"];
+	        this.sdh = source["sdh"];
+	        this.label = source["label"];
+	    }
+	}
 	export class SyncAudioTrack {
 	    id: number;
 	    codec: string;

@@ -20,6 +20,8 @@ export function CheckVFQ(arg1:string):Promise<boolean>;
 
 export function DetectAudioOffset(arg1:string,arg2:number,arg3:number):Promise<audiosync.DetectionResult>;
 
+export function ExtractRefSubs(arg1:string):Promise<Array<main.RefSubResult>>;
+
 export function FileSize(arg1:string):Promise<number>;
 
 export function GetConfig():Promise<config.Config>;

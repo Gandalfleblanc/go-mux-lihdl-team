@@ -4,7 +4,7 @@
   import logo from './assets/images/logo.png';
   import {
     GetVersion, GetConfig, SaveConfig, GetLihdlOptions,
-    SelectMkvFile, SelectSubFiles, SelectAudioFiles, SelectOutputDir, LocateMkvmerge, OpenFolder, SearchTmdbTV, SearchTmdbMovie, AnalyzeMkvSecondary, MoveToTrash, LookupHydrackerURL, TestHydrackerKey, TestUnfrKey, OpenURL, GetMkvBasicInfo,
+    SelectMkvFile, SelectSubFiles, SelectAudioFiles, SelectOutputDir, LocateMkvmerge, OpenFolder, SearchTmdbTV, SearchTmdbMovie, AnalyzeMkvSecondary, MoveToTrash, LookupHydrackerURL, TestHydrackerKey, TestUnfrKey, OpenURL, GetMkvBasicInfo, ExtractRefSubs,
     AnalyzeMkv, SearchTmdb, TestTmdbKey, FileSize,
     Mux, CancelMux,
     CheckUpdate, InstallUpdate,
@@ -280,6 +280,37 @@
     referencePath = p;
     referenceMkvInfo = await GetMkvBasicInfo(p).catch(() => null);
     appendLog('🔍 Référence : ' + p.split('/').pop() + (referenceMkvInfo ? ` (${formatDuration(referenceMkvInfo.duration_seconds)}, ${referenceMkvInfo.framerate} fps)` : ''));
+    // Auto-extraction des sous-titres FR/ENG en SRT (texte uniquement, exclut PGS/VobSub).
+    try {
+      appendLog('⏳ Extraction des sous-titres FR/ENG compatibles…');
+      const subs = await ExtractRefSubs(p);
+      if (subs && subs.length > 0) {
+        let maxOrder = 0;
+        for (const t of tracks) maxOrder = Math.max(maxOrder, t.order ?? 0);
+        for (const s of externalSubs) maxOrder = Math.max(maxOrder, s.order ?? 0);
+        for (const s of subs) {
+          maxOrder += 10;
+          let size = -1;
+          try { size = await FileSize(s.path); } catch {}
+          externalSubs = [...externalSubs, {
+            path: s.path,
+            name: basename(s.path),
+            size,
+            keep: true,
+            default: false,
+            forced: !!s.forced,
+            label: s.label,
+            order: maxOrder,
+          }];
+        }
+        appendLog(`✓ ${subs.length} sous-titre(s) FR/ENG extrait(s) et ajouté(s)`);
+        applySubForcedRule();
+      } else {
+        appendLog('ℹ Aucun sous-titre FR/ENG texte trouvé dans la référence.');
+      }
+    } catch (e) {
+      appendLog('❌ Extraction subs : ' + String(e));
+    }
   }
 
   function clearReference() {
@@ -1097,6 +1128,54 @@
     GetMkvBasicInfo(path).then(info => { sourceMkvInfo = info; }).catch(() => {});
   }
 
+  // Priorité LiHDL pour l'ordre des pistes audio. Plus bas = plus haut dans le mux.
+  //   FR VFi/VFF/VOF : 0 (en tête)
+  //   FR VFQ          : 1
+  //   FR AD           : 2
+  //   FR (autre)      : 3
+  //   ENG VO          : 4
+  //   autres langues  : 10
+  function audioLabelPriority(label) {
+    const l = (label || '').toUpperCase();
+    if (l.startsWith('FR VFI') || l.startsWith('FR VFF') || l.startsWith('FR VOF')) return 0;
+    if (l.startsWith('FR VFQ')) return 1;
+    if (l.startsWith('FR AD')) return 2;
+    if (l.startsWith('FR ')) return 3;
+    if (l.startsWith('ENG ')) return 4;
+    return 10;
+  }
+
+  // Réassigne tous les `order` selon : vidéo → audio (par priorité LiHDL) → subs.
+  // Conserve l'ordre source à l'intérieur des subs (et entre audios de même priorité).
+  function applyLihdlTrackOrder() {
+    const typeRank = { video: 0, audio: 1, subtitles: 2 };
+    const indexed = tracks.map((t, i) => ({ t, i }));
+    indexed.sort((a, b) => {
+      const ra = typeRank[a.t.type] ?? 9;
+      const rb = typeRank[b.t.type] ?? 9;
+      if (ra !== rb) return ra - rb;
+      if (a.t.type === 'audio') {
+        const pa = audioLabelPriority(a.t.label);
+        const pb = audioLabelPriority(b.t.label);
+        if (pa !== pb) return pa - pb;
+      }
+      return a.i - b.i; // stable : ordre source en dernier recours
+    });
+    indexed.forEach((entry, k) => { entry.t.order = k * 10; });
+    // Norme LiHDL : la 1ère piste audio (FR VFi/VFF en priorité) est marquée default.
+    let firstAudioFound = false;
+    for (const entry of indexed) {
+      if (entry.t.type !== 'audio') continue;
+      if (!firstAudioFound) {
+        entry.t.default = true;
+        firstAudioFound = true;
+      } else {
+        entry.t.default = false;
+      }
+    }
+    tracks = [...tracks]; // déclenche la réactivité Svelte
+  }
+
   function finalizeAnalyze(rawTracks) {
     appendLog('🎯 finalizeAnalyze appelé avec ' + rawTracks.length + ' pistes');
     sourceInfo = { tracks: rawTracks };
@@ -1131,6 +1210,22 @@
       if (t.type === 'video')     base.label = '';
       return base;
     });
+    // Norme LiHDL : si une piste FR VFQ est présente parmi les audios, la 2e piste
+    // FR doit rester FR VFF (pas FR VFi). On désactive donc le toggle VFi auto.
+    const hasVFQ = tracks.some(t => t.type === 'audio' && /^FR VFQ/.test(t.label || ''));
+    if (hasVFQ && useVFi) {
+      useVFi = false;
+      appendLog('🇫🇷 FR VFQ détecté → l\'autre piste FR reste FR VFF (norme LiHDL)');
+      // Convertit immédiatement les FR VFi déjà labellisés en FR VFF.
+      tracks = tracks.map(t => {
+        if (t.type !== 'audio') return t;
+        if (/^FR VFi\b/.test(t.label || '')) {
+          return { ...t, label: t.label.replace(/^FR VFi/, 'FR VFF') };
+        }
+        return t;
+      });
+    }
+    applyLihdlTrackOrder();
     applySubForcedRule();
     if (sourcePath) maybeAutoFillTitle(sourcePath);
   }
@@ -1865,6 +1960,13 @@
 
     videoChoice.team = 'LiHDL';
     target.episode = '';
+
+    // Norme LiHDL : ré-applique l'ordre des pistes (FR VFi/VFF avant FR VFQ)
+    // ET réassigne le flag default sur la 1ère piste audio en ordre LiHDL.
+    // Sinon, la boucle map ci-dessus a mis default=true sur la 1ère FR rencontrée
+    // dans l'ordre SOURCE (souvent FR VFQ si le mkv a VFQ avant VFF).
+    applyLihdlTrackOrder();
+
     appendLog(`⚡ LiHDL automatisé : ${nbAudio} audio(s) + ${nbSubs} sub(s) labellisés → Cible`);
     if (navigateToCible) screen = 'cible';
   }
