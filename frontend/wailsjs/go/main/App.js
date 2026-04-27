@@ -10,6 +10,10 @@ export function AnalyzeMkvSecondary(arg1) {
   return window['go']['main']['App']['AnalyzeMkvSecondary'](arg1);
 }
 
+export function ApplyOCRFix(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['ApplyOCRFix'](arg1, arg2, arg3, arg4);
+}
+
 export function BuildFilename(arg1) {
   return window['go']['main']['App']['BuildFilename'](arg1);
 }
@@ -32,6 +36,30 @@ export function CheckVFQ(arg1) {
 
 export function DetectAudioOffset(arg1, arg2, arg3) {
   return window['go']['main']['App']['DetectAudioOffset'](arg1, arg2, arg3);
+}
+
+export function DiscordIndexLookup(arg1) {
+  return window['go']['main']['App']['DiscordIndexLookup'](arg1);
+}
+
+export function DiscordIndexPushGitHub() {
+  return window['go']['main']['App']['DiscordIndexPushGitHub']();
+}
+
+export function DiscordIndexRead() {
+  return window['go']['main']['App']['DiscordIndexRead']();
+}
+
+export function DiscordIndexRefreshRemote() {
+  return window['go']['main']['App']['DiscordIndexRefreshRemote']();
+}
+
+export function DiscordIndexScan() {
+  return window['go']['main']['App']['DiscordIndexScan']();
+}
+
+export function DownloadOpenSubtitle(arg1, arg2) {
+  return window['go']['main']['App']['DownloadOpenSubtitle'](arg1, arg2);
 }
 
 export function ExtractFRAudios(arg1, arg2, arg3, arg4, arg5) {
@@ -94,6 +122,26 @@ export function MuxAudioSync(arg1) {
   return window['go']['main']['App']['MuxAudioSync'](arg1);
 }
 
+export function OCRCustomDictAdd(arg1, arg2, arg3) {
+  return window['go']['main']['App']['OCRCustomDictAdd'](arg1, arg2, arg3);
+}
+
+export function OCRCustomDictList() {
+  return window['go']['main']['App']['OCRCustomDictList']();
+}
+
+export function OCRCustomDictRemove(arg1) {
+  return window['go']['main']['App']['OCRCustomDictRemove'](arg1);
+}
+
+export function OCRPGSTrack(arg1, arg2, arg3) {
+  return window['go']['main']['App']['OCRPGSTrack'](arg1, arg2, arg3);
+}
+
+export function OCRSupFile(arg1, arg2) {
+  return window['go']['main']['App']['OCRSupFile'](arg1, arg2);
+}
+
 export function OpenFolder(arg1) {
   return window['go']['main']['App']['OpenFolder'](arg1);
 }
@@ -104,6 +152,10 @@ export function OpenURL(arg1) {
 
 export function SaveConfig(arg1) {
   return window['go']['main']['App']['SaveConfig'](arg1);
+}
+
+export function SearchOpenSubtitles(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SearchOpenSubtitles'](arg1, arg2, arg3);
 }
 
 export function SearchTmdb(arg1) {
@@ -138,8 +190,16 @@ export function SelectSubFiles() {
   return window['go']['main']['App']['SelectSubFiles']();
 }
 
+export function SelectSupFiles() {
+  return window['go']['main']['App']['SelectSupFiles']();
+}
+
 export function TestHydrackerKey(arg1) {
   return window['go']['main']['App']['TestHydrackerKey'](arg1);
+}
+
+export function TestLanguageToolKey(arg1, arg2, arg3) {
+  return window['go']['main']['App']['TestLanguageToolKey'](arg1, arg2, arg3);
 }
 
 export function TestTmdbKey(arg1) {

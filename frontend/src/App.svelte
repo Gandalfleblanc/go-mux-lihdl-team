@@ -4,11 +4,17 @@
   import logo from './assets/images/logo.png';
   import {
     GetVersion, GetConfig, SaveConfig, GetLihdlOptions,
-    SelectMkvFile, SelectMkvFiles, SelectSubFiles, SelectAudioFiles, SelectOutputDir, LocateMkvmerge, OpenFolder, SearchTmdbTV, SearchTmdbMovie, AnalyzeMkvSecondary, MoveToTrash, MoveDirContentsToTrash, LookupHydrackerURL, TestHydrackerKey, TestUnfrKey, OpenURL, GetMkvBasicInfo, ExtractRefSubs, ExtractFRAudios, CheckSubsSync,
+    SelectMkvFile, SelectMkvFiles, SelectSubFiles, SelectSupFiles, SelectAudioFiles, SelectOutputDir, LocateMkvmerge, OpenFolder, SearchTmdbTV, SearchTmdbMovie, AnalyzeMkvSecondary, MoveToTrash, MoveDirContentsToTrash, LookupHydrackerURL, TestHydrackerKey, TestUnfrKey, OpenURL, GetMkvBasicInfo, ExtractRefSubs, ExtractFRAudios, CheckSubsSync,
     AnalyzeMkv, SearchTmdb, TestTmdbKey, FileSize,
     Mux, CancelMux,
     CheckUpdate, InstallUpdate,
     ListAudioTracksForSync, MuxAudioSync, DetectAudioOffset,
+    OCRPGSTrack, OCRSupFile,
+    TestLanguageToolKey,
+    ApplyOCRFix,
+    SearchOpenSubtitles, DownloadOpenSubtitle,
+    OCRCustomDictList, OCRCustomDictAdd, OCRCustomDictRemove,
+    DiscordIndexScan, DiscordIndexRead, DiscordIndexLookup, DiscordIndexRefreshRemote, DiscordIndexPushGitHub,
   } from '../wailsjs/go/main/App.js';
   import { EventsOn } from '../wailsjs/runtime/runtime.js';
 
@@ -46,7 +52,29 @@
     default_team: 'LiHDL',
     default_quality: 'HDLight',
     default_source: 'REMUX LiHDL',
+    languagetool_key: '',
+    languagetool_user: '',
+    languagetool_url: '',
+    opensubtitles_api_key: '',
+    discord_bot_token: '',
+    discord_forum_id: '',
+    discord_index_url: '',
+    github_token: '',
+    github_repo: '',
+    github_branch: 'main',
+    github_index_file_path: 'discord_index.json',
   };
+
+  // Index Discord — état UI :
+  // discordIndexEntry  = URL Discord du film actuel ("" si pas trouvé)
+  // discordScanRunning = scan admin en cours
+  // discordScanProgress = { scanned, total, message }
+  let discordIndexEntry = '';
+  let discordScanRunning = false;
+  let discordScanProgress = { scanned: 0, total: 0, message: '' };
+  let discordCopyOk = false;
+  let githubPushing = false;
+  let githubPushOk = false;
 
   let options = {
     audio_labels: [], subtitle_labels: [],
@@ -151,6 +179,21 @@
   // Flag de validation TMDB : tant qu'il est false ET qu'on a une fiche TMDB,
   // on bloque l'affichage des pistes/réglages pour forcer une confirmation visuelle.
   let tmdbValidated = false;
+
+  // Lookup Discord à chaque changement de TMDB ID : on demande au backend
+  // (qui regarde l'index local d'abord, puis le remote si configuré). Best-
+  // effort silencieux ; aucune erreur ne remonte côté UI.
+  $: if (lastTmdbResult && lastTmdbResult.tmdb_id) {
+    const id = String(lastTmdbResult.tmdb_id);
+    DiscordIndexLookup(id).then((u) => {
+      // Vérifie que le TMDB ID n'a pas changé entre temps (anti-race).
+      if (lastTmdbResult && String(lastTmdbResult.tmdb_id) === id) {
+        discordIndexEntry = u || '';
+      }
+    }).catch(() => { /* silencieux */ });
+  } else {
+    discordIndexEntry = '';
+  }
 
   // Dropdowns pour le filename (ordre : résolution.source).
   const RESOLUTION_OPTIONS = ['720p', '1080p', '2160p'];
@@ -607,6 +650,12 @@
     hydrackerURL = '';
     autoMuxStatus = '';
     if (autoMuxStatusTimer) { clearTimeout(autoMuxStatusTimer); autoMuxStatusTimer = null; }
+    // Reset état OCR (barre + résultat + à vérifier).
+    ocrRunning = false;
+    ocrTrackId = -1;
+    ocrProgress = { status: '', percent: 0, message: '',
+      total_lines: 0, corrected_lines: 0, suspicious_lines: 0, quality_score: 0, subtitles: 0,
+      lt_total_issues: 0, lt_auto_fixed: 0, lt_needs_review: 0, lt_review_list: [] };
     appendLog('↻ Réinitialisé');
   }
 
@@ -800,6 +849,239 @@
   // format qu'une piste interne pour l'UI unifiée, mais avec un flag external.
   let externalSubs = [];
   let externalAudios = [];
+
+  // OCR PGS → SRT : état réactif partagé entre toutes les pistes (un seul OCR
+  // à la fois pour ne pas saturer Tesseract). ocrTrackId = id de la piste en
+  // cours (-1 si aucun). ocrProgress = { status, percent, message }.
+  let ocrRunning = false;
+  let ocrTrackId = -1;
+  let ocrProgress = {
+    status: '', percent: 0, message: '',
+    total_lines: 0, corrected_lines: 0, suspicious_lines: 0, quality_score: 0, subtitles: 0,
+    lt_total_issues: 0, lt_auto_fixed: 0, lt_needs_review: 0, lt_review_list: [],
+  };
+  // Garde la barre OCR visible quelques secondes après "done" pour afficher le score.
+  let ocrLastResultAt = 0;
+  // Modal "lignes à vérifier" (LanguageTool) — toggle simple.
+  let showLTReview = false;
+  // États par-match : pour chaque match (index dans lt_review_list) on stocke
+  // `resolved` (✓ après patch ou ignore) et `customText` (champ d'édition libre).
+  let ltReviewState = []; // [{resolved, ignored, customText, busy, error}]
+  // Path du SRT actuellement affiché dans le modal review (pour ApplyOCRFix).
+  let ocrCurrentSRT = '';
+
+  // OpenSubtitles modal de recherche.
+  let showOSModal = false;
+  let osQuery = '';
+  let osYear = '';
+  let osLang = 'fr,en';
+  let osResults = [];
+  let osSearching = false;
+  let osError = '';
+  // Quand le modal a été ouvert depuis la vue post-source : on ajoute le SRT
+  // résultant aux externalSubs. Sinon (page d'accueil), on demande un dossier
+  // de destination.
+  let osContext = 'standalone'; // 'standalone' | 'post-source'
+  let osDownloading = '';
+
+  // Dictionnaire custom OCR — modal Settings.
+  let customDictEntries = [];
+  let showAddDictModal = false;
+  let newDictWrong = '';
+  let newDictRight = '';
+  let dictBusy = false;
+
+  // Recharge la liste du dico OCR quand on entre dans l'écran Réglages.
+  $: if (screen === 'reglages' && typeof window !== 'undefined') { loadCustomDictReactive(); }
+  let _lastDictLoadAt = 0;
+  function loadCustomDictReactive() {
+    if (Date.now() - _lastDictLoadAt < 500) return;
+    _lastDictLoadAt = Date.now();
+    loadCustomDict();
+  }
+
+  // Détecte si une piste sub interne est en codec PGS (Blu-ray image-based).
+  // Utilisé pour afficher le bouton "🔠 OCR" uniquement sur ces pistes.
+  function isPGSTrack(t) {
+    if (!t || t.type !== 'subtitles') return false;
+    const c = ((t.codecId || '') + ' ' + (t.codec || '')).toUpperCase();
+    return c.includes('PGS') || c.includes('HDMV');
+  }
+
+  // Vrai si le sub externe est un PGS (.sup) — détectable par extension.
+  function isPGSExternal(s) {
+    return !!(s && s.path && /\.sup$/i.test(s.path));
+  }
+  // Devine la lang Tesseract à partir du nom de fichier d'un .sup externe.
+  function ocrLangFromExternal(s) {
+    const n = String((s && s.name) || (s && s.path) || '').toLowerCase();
+    if (/\b(fre|fra|fr|french)\b/.test(n)) return 'fra';
+    if (/\b(eng|en|english)\b/.test(n)) return 'eng';
+    if (/\b(deu|ger|de|german)\b/.test(n)) return 'deu';
+    if (/\b(spa|es|spanish)\b/.test(n)) return 'spa';
+    if (/\b(ita|it|italian)\b/.test(n)) return 'ita';
+    return 'fra';
+  }
+
+  // Mappe un code langue piste (fre/fra/fr/eng/en) vers le code Tesseract
+  // attendu par pgsrip (fra/eng/deu/spa/ita…).
+  function ocrLangFromTrack(t) {
+    const l = String(t.lang || '').toLowerCase();
+    if (l === 'fre' || l === 'fra' || l === 'fr') return 'fra';
+    if (l === 'eng' || l === 'en') return 'eng';
+    if (l === 'deu' || l === 'ger' || l === 'de') return 'deu';
+    if (l === 'spa' || l === 'es') return 'spa';
+    if (l === 'ita' || l === 'it') return 'ita';
+    if (l === 'por' || l === 'pt') return 'por';
+    if (l === 'nld' || l === 'dut' || l === 'nl') return 'nld';
+    return 'fra'; // défaut FR (cas LiHDL principal)
+  }
+
+  // Lance l'OCR PGS → SRT sur une piste interne. Le SRT final est ajouté
+  // automatiquement aux externalSubs (avec label suggéré FR/ENG Full ou Forced).
+  async function runOCR(track) {
+    if (ocrRunning) return;
+    if (!sourcePath) {
+      appendLog('❌ OCR : aucun .mkv source chargé');
+      return;
+    }
+    const lang = ocrLangFromTrack(track);
+    ocrRunning = true;
+    ocrTrackId = track.id;
+    ocrProgress = { status: 'init', percent: 0, message: '' };
+    appendLog(`🔠 OCR PGS → SRT (piste #${track.id}, lang=${lang}) — peut prendre plusieurs minutes…`);
+    try {
+      const srtPath = await OCRPGSTrack(sourcePath, track.id, lang);
+      if (srtPath) {
+        // Suggère un label cohérent : forced si la piste source était forced,
+        // sinon Full. Préfixe FR/ENG selon la lang.
+        const prefix = (lang === 'fra') ? 'FR' : (lang === 'eng' ? 'ENG' : '');
+        const kind = track.forced ? 'Forced' : 'Full';
+        const label = prefix ? `${prefix} ${kind} : SRT` : '';
+        let size = -1;
+        try { size = await FileSize(srtPath); } catch {}
+        let maxOrder = 0;
+        for (const t of tracks) maxOrder = Math.max(maxOrder, t.order ?? 0);
+        for (const s of externalSubs) maxOrder = Math.max(maxOrder, s.order ?? 0);
+        externalSubs = [...externalSubs, {
+          path: srtPath,
+          name: basename(srtPath),
+          size,
+          keep: true,
+          default: false,
+          forced: !!track.forced,
+          label,
+          order: maxOrder + 10,
+        }];
+        appendLog('✓ OCR PGS → SRT : ' + srtPath);
+        applySubForcedRule();
+      }
+    } catch (e) {
+      const msg = String(e && e.message ? e.message : e);
+      appendLog('❌ OCR : ' + msg);
+      // Hint d'install si binaire absent.
+      if (/tesseract/i.test(msg) || /pgsrip/i.test(msg)) {
+        appendLog('ℹ Installer : `brew install tesseract tesseract-lang` puis `pip3 install pgsrip`');
+      }
+    } finally {
+      ocrRunning = false;
+      // Garde le score visible 8s après done (ou erreur).
+      ocrLastResultAt = Date.now();
+      const myStamp = ocrLastResultAt;
+      setTimeout(() => {
+        if (ocrLastResultAt === myStamp && !ocrRunning) {
+          ocrTrackId = -1;
+          ocrProgress = { status: '', percent: 0, message: '',
+            total_lines: 0, corrected_lines: 0, suspicious_lines: 0, quality_score: 0, subtitles: 0,
+            lt_total_issues: 0, lt_auto_fixed: 0, lt_needs_review: 0, lt_review_list: [] };
+        }
+      }, 8000);
+    }
+  }
+
+  // Outil autonome : ouvre un picker .sup et lance l'OCR sur le ou les fichiers
+  // sélectionnés. Sortie : .srt à côté du .sup. N'ajoute rien aux subs externes
+  // (utilisé hors workflow mux normal).
+  async function pickAndOCRStandaloneSup() {
+    if (ocrRunning) return;
+    let paths;
+    try { paths = await SelectSupFiles(); } catch { paths = null; }
+    if (!paths || !paths.length) return;
+    for (const p of paths) {
+      const lang = ocrLangFromExternal({ name: p, path: p });
+      ocrRunning = true;
+      ocrTrackId = -2000; // marqueur "outil autonome"
+      ocrProgress = { status: 'init', percent: 0, message: '',
+        total_lines: 0, corrected_lines: 0, suspicious_lines: 0, quality_score: 0, subtitles: 0 };
+      appendLog(`🔠 OCR PGS .sup → SRT (autonome, ${p.split('/').pop()}, lang=${lang})…`);
+      try {
+        const srtPath = await OCRSupFile(p, lang);
+        if (srtPath) appendLog('✓ OCR PGS .sup → SRT : ' + srtPath);
+      } catch (e) {
+        const msg = String(e && e.message ? e.message : e);
+        appendLog('❌ OCR : ' + msg);
+        if (/tesseract/i.test(msg) || /pgsrip/i.test(msg)) {
+          appendLog('ℹ Installer : `brew install tesseract tesseract-lang` puis `pip3 install pgsrip`');
+        }
+      } finally {
+        ocrRunning = false;
+        // Sur la page d'accueil (outil autonome), on GARDE le résultat affiché
+        // jusqu'au prochain OCR — pas de timer auto-reset.
+      }
+    }
+  }
+
+  // Lance l'OCR sur un sub PGS externe (fichier .sup ajouté manuellement).
+  // Remplace le .sup par le .srt généré dans la liste externalSubs.
+  async function runOCRExternalSup(idx) {
+    if (ocrRunning) return;
+    const ext = externalSubs[idx];
+    if (!ext || !ext.path) { appendLog('❌ OCR : sub externe introuvable'); return; }
+    const lang = ocrLangFromExternal(ext);
+    ocrRunning = true;
+    ocrTrackId = -1000 - idx; // marqueur pour le markup (id négatif unique)
+    ocrProgress = { status: 'init', percent: 0, message: '' };
+    appendLog(`🔠 OCR PGS .sup → SRT (${ext.name}, lang=${lang}) — peut prendre plusieurs minutes…`);
+    try {
+      const srtPath = await OCRSupFile(ext.path, lang);
+      if (srtPath) {
+        const prefix = (lang === 'fra') ? 'FR' : (lang === 'eng' ? 'ENG' : '');
+        const kind = ext.forced ? 'Forced' : 'Full';
+        const label = prefix ? `${prefix} ${kind} : SRT` : ext.label;
+        let size = -1;
+        try { size = await FileSize(srtPath); } catch {}
+        // Remplace l'entrée .sup par le .srt généré.
+        externalSubs = externalSubs.map((s, i) => i === idx ? {
+          ...s,
+          path: srtPath,
+          name: basename(srtPath),
+          size,
+          label: label || s.label,
+        } : s);
+        appendLog('✓ OCR PGS .sup → SRT : ' + srtPath);
+        applySubForcedRule();
+      }
+    } catch (e) {
+      const msg = String(e && e.message ? e.message : e);
+      appendLog('❌ OCR : ' + msg);
+      if (/tesseract/i.test(msg) || /pgsrip/i.test(msg)) {
+        appendLog('ℹ Installer : `brew install tesseract tesseract-lang` puis `pip3 install pgsrip`');
+      }
+    } finally {
+      ocrRunning = false;
+      // Garde le score visible 8s après done (ou erreur).
+      ocrLastResultAt = Date.now();
+      const myStamp = ocrLastResultAt;
+      setTimeout(() => {
+        if (ocrLastResultAt === myStamp && !ocrRunning) {
+          ocrTrackId = -1;
+          ocrProgress = { status: '', percent: 0, message: '',
+            total_lines: 0, corrected_lines: 0, suspicious_lines: 0, quality_score: 0, subtitles: 0,
+            lt_total_issues: 0, lt_auto_fixed: 0, lt_needs_review: 0, lt_review_list: [] };
+        }
+      }, 8000);
+    }
+  }
 
   // Source secondaire (SUPPLY/FW) — récupère uniquement audios + subs.
   let secondaryPath = '';
@@ -2039,9 +2321,270 @@
     mkvmergePath = await LocateMkvmerge();
   }
 
+  // === Index Discord (admin) ===
+  async function doDiscordScan() {
+    if (discordScanRunning) return;
+    if (!config.discord_bot_token || !config.discord_forum_id) {
+      appendLog('⚠ Configure le token bot Discord ET l\'ID forum channel avant de scanner.');
+      return;
+    }
+    // Sauve la config avant de scanner pour que le backend lise les valeurs à jour.
+    try { await SaveConfig(config); } catch (e) { appendLog('⚠ Sauvegarde config : ' + String(e)); return; }
+    discordScanRunning = true;
+    discordScanProgress = { scanned: 0, total: 0, message: 'Démarrage du scan…' };
+    try {
+      const path = await DiscordIndexScan();
+      appendLog('✓ Index Discord généré : ' + path);
+    } catch (e) {
+      appendLog('❌ Scan Discord : ' + String(e));
+    } finally {
+      discordScanRunning = false;
+    }
+  }
+
+  async function doDiscordCopy() {
+    try {
+      const json = await DiscordIndexRead();
+      if (!json) { appendLog('⚠ Aucun index local. Lance d\'abord un scan.'); return; }
+      await navigator.clipboard.writeText(json);
+      discordCopyOk = true;
+      setTimeout(() => { discordCopyOk = false; }, 2000);
+      appendLog('✓ JSON copié dans le presse-papier (' + json.length + ' octets)');
+    } catch (e) {
+      appendLog('❌ Copier JSON : ' + String(e));
+    }
+  }
+
+  // Push direct du JSON sur GitHub via l'API Contents (admin).
+  async function doDiscordPushGitHub() {
+    if (githubPushing) return;
+    if (!config.github_token || !config.github_repo) {
+      appendLog('⚠ Configure le token GitHub et le repo avant de pusher.');
+      return;
+    }
+    // Sauvegarde d'abord la config (au cas où l'utilisateur n'a pas cliqué Enregistrer).
+    try { await SaveConfig(config); } catch {}
+    githubPushing = true;
+    githubPushOk = false;
+    appendLog('📤 Push de l\'index Discord sur GitHub…');
+    try {
+      const sha = await DiscordIndexPushGitHub();
+      githubPushOk = true;
+      setTimeout(() => { githubPushOk = false; }, 4000);
+      appendLog('✓ Index pushé sur GitHub (SHA ' + String(sha).substring(0, 8) + ')');
+    } catch (e) {
+      appendLog('❌ Push GitHub : ' + String(e?.message || e));
+    } finally {
+      githubPushing = false;
+    }
+  }
+
   let tmdbTest = { running: false, ok: null, message: '' };
   let hydrackerTest = { running: false, ok: null, message: '' };
   let unfrTest = { running: false, ok: null, message: '' };
+  let ltTest = { running: false, ok: null, message: '' };
+
+  async function doTestLanguageToolKey() {
+    ltTest = { running: true, ok: null, message: '' };
+    try {
+      const r = await TestLanguageToolKey(config.languagetool_url || '', config.languagetool_key || '', config.languagetool_user || '');
+      ltTest = { running: false, ok: !!r.ok, message: r.message || '' };
+    } catch (e) {
+      ltTest = { running: false, ok: false, message: String(e) };
+    }
+  }
+
+  // === Review modal éditable : applique un fix LT puis note resolved ===
+  async function applyReviewFix(idx, correction) {
+    if (!ocrCurrentSRT) {
+      appendLog('⚠ Pas de SRT actif pour patcher.');
+      return;
+    }
+    const m = ocrProgress.lt_review_list[idx];
+    if (!m) return;
+    if (!correction || !correction.trim()) return;
+    ltReviewState[idx].busy = true;
+    ltReviewState[idx].error = '';
+    ltReviewState = ltReviewState;
+    try {
+      await ApplyOCRFix(ocrCurrentSRT, m.line_number || 0, m.snippet || '', correction);
+      ltReviewState[idx].resolved = true;
+      ltReviewState[idx].busy = false;
+      ltReviewState = ltReviewState;
+      appendLog(`✓ SRT patché ligne ${m.line_number} : « ${correction} »`);
+      // Auto-ajout au dictionnaire custom (auto=true), sans bloquer.
+      const cleanSnippet = String(m.snippet || '').replace(/^…|…$/g, '').trim();
+      if (cleanSnippet && cleanSnippet !== correction) {
+        try {
+          await OCRCustomDictAdd(cleanSnippet, correction, true);
+        } catch (e) {
+          appendLog('⚠ Dico custom : ' + String(e));
+        }
+      }
+      // Si tous les matches sont résolus / ignorés → ferme le modal et recompute.
+      maybeCloseReviewModal();
+    } catch (e) {
+      ltReviewState[idx].busy = false;
+      ltReviewState[idx].error = String(e && e.message ? e.message : e);
+      ltReviewState = ltReviewState;
+      appendLog('❌ Patch SRT : ' + ltReviewState[idx].error);
+    }
+  }
+
+  function ignoreReviewMatch(idx) {
+    if (!ltReviewState[idx]) return;
+    ltReviewState[idx].ignored = true;
+    ltReviewState[idx].resolved = true;
+    ltReviewState = ltReviewState;
+    maybeCloseReviewModal();
+  }
+
+  function maybeCloseReviewModal() {
+    const list = ocrProgress.lt_review_list || [];
+    if (!list.length) return;
+    const allDone = ltReviewState.every(s => s && s.resolved);
+    if (allDone) {
+      // Recompute approximatif du quality_score (corrections ≈ amélioration).
+      // On ne relance pas tout le pipeline — juste un retrait des suspicious.
+      const fixed = ltReviewState.filter(s => s && !s.ignored).length;
+      ocrProgress = {
+        ...ocrProgress,
+        lt_needs_review: 0,
+        // Le quality_score reste basé sur les patterns regex regex côté Go.
+        // On ne le recalcule pas localement pour rester cohérent.
+      };
+      appendLog(`✓ Toutes les lignes traitées (${fixed} corrigées, ${ltReviewState.length - fixed} ignorées). Modal fermé.`);
+      showLTReview = false;
+    }
+  }
+
+  // === OpenSubtitles modal ===
+  function openOSModal(context) {
+    osContext = context || 'standalone';
+    osError = '';
+    osResults = [];
+    // Pré-remplit depuis TMDB si dispo.
+    if (lastTmdbResult) {
+      osQuery = (lastTmdbResult.titre_fr || lastTmdbResult.titre_vo || '').trim();
+      osYear = String(lastTmdbResult.annee_fr || '').trim();
+    } else if (target.title) {
+      osQuery = target.title;
+      osYear = target.year || '';
+    }
+    showOSModal = true;
+  }
+
+  async function searchOpenSubtitles() {
+    if (!osQuery.trim()) {
+      osError = 'Saisis un titre.';
+      return;
+    }
+    osSearching = true;
+    osError = '';
+    osResults = [];
+    try {
+      const yr = parseInt(osYear, 10) || 0;
+      const r = await SearchOpenSubtitles(osQuery.trim(), yr, osLang || 'fr,en');
+      osResults = r || [];
+      if (!osResults.length) {
+        osError = 'Aucun résultat.';
+      }
+    } catch (e) {
+      const msg = String(e && e.message ? e.message : e);
+      osError = msg;
+      if (/clé API/.test(msg)) {
+        appendLog('ℹ Configure ta clé OpenSubtitles dans Settings (clic sur "Réglages").');
+      }
+    } finally {
+      osSearching = false;
+    }
+  }
+
+  async function downloadOSResult(r) {
+    if (!r || !r.id) return;
+    osDownloading = r.id;
+    try {
+      let dst;
+      if (osContext === 'post-source' && sourcePath) {
+        // Sauve à côté du .mkv source pour cohérence avec OCRPGSTrack.
+        const dir = sourcePath.substring(0, sourcePath.lastIndexOf('/'));
+        const base = sourcePath.split('/').pop().replace(/\.mkv$/i, '');
+        dst = `${dir}/${base}.opensubtitles.${r.language || 'fr'}.srt`;
+      } else {
+        // Standalone : demande un dossier de sortie.
+        const out = await SelectOutputDir();
+        if (!out) { osDownloading = ''; return; }
+        dst = `${out}/${(r.filename || ('opensubtitles-' + r.id + '.srt'))}`;
+      }
+      const finalPath = await DownloadOpenSubtitle(r.id, dst);
+      appendLog('✓ OpenSubtitles : ' + finalPath);
+      // Si vue post-source, ajoute aux externalSubs.
+      if (osContext === 'post-source' && sourcePath && finalPath) {
+        let size = -1;
+        try { size = await FileSize(finalPath); } catch {}
+        let maxOrder = 0;
+        for (const t of tracks) maxOrder = Math.max(maxOrder, t.order ?? 0);
+        for (const s of externalSubs) maxOrder = Math.max(maxOrder, s.order ?? 0);
+        externalSubs = [...externalSubs, {
+          path: finalPath,
+          name: finalPath.split('/').pop(),
+          size,
+          keep: true,
+          default: false,
+          forced: false,
+          label: (r.language === 'fr') ? 'FR Full : SRT' : (r.language === 'en' ? 'ENG Full : SRT' : ''),
+          order: maxOrder + 10,
+        }];
+      }
+      showOSModal = false;
+    } catch (e) {
+      const msg = String(e && e.message ? e.message : e);
+      appendLog('❌ OpenSubtitles : ' + msg);
+      osError = msg;
+    } finally {
+      osDownloading = '';
+    }
+  }
+
+  // === Custom dict OCR (Settings) ===
+  async function loadCustomDict() {
+    try {
+      const r = await OCRCustomDictList();
+      customDictEntries = r || [];
+    } catch (e) {
+      appendLog('⚠ Dico custom : ' + String(e));
+      customDictEntries = [];
+    }
+  }
+
+  async function addCustomDictEntry() {
+    const w = (newDictWrong || '').trim();
+    const r = (newDictRight || '').trim();
+    if (!w || !r) return;
+    dictBusy = true;
+    try {
+      await OCRCustomDictAdd(w, r, false);
+      newDictWrong = '';
+      newDictRight = '';
+      showAddDictModal = false;
+      await loadCustomDict();
+      appendLog(`✓ Dico custom : « ${w} » → « ${r} »`);
+    } catch (e) {
+      appendLog('❌ Dico custom : ' + String(e));
+    } finally {
+      dictBusy = false;
+    }
+  }
+
+  async function removeCustomDictEntry(wrong) {
+    if (!wrong) return;
+    try {
+      await OCRCustomDictRemove(wrong);
+      await loadCustomDict();
+    } catch (e) {
+      appendLog('❌ Dico custom : ' + String(e));
+    }
+  }
 
   // Auto-update state.
   let updateInfo = null;       // {version, url, notes} si dispo
@@ -2367,6 +2910,12 @@
     try { options = await GetLihdlOptions(); } catch {}
     try { mkvmergePath = await LocateMkvmerge(); } catch {}
 
+    // Best-effort : fetch l'index Discord remote (cache 24 h, silencieux si pas configuré).
+    DiscordIndexRefreshRemote().catch((e) => {
+      // Pas bloquant — l'app fonctionne sans Discord index.
+      console.warn('Discord index remote fetch failed:', e);
+    });
+
     EventsOn('log', (msg) => {
       appendLog(msg);
       // Détection des phases d'extraction audio pour la barre de progression :
@@ -2395,6 +2944,13 @@
         }
       }
     });
+    EventsOn('discordindex:progress', (p) => {
+      discordScanProgress = {
+        scanned: p.scanned ?? 0,
+        total: p.total ?? 0,
+        message: p.message ?? '',
+      };
+    });
     EventsOn('mux:progress', (p) => { muxPercent = p.Percent || p.percent || 0; });
     EventsOn('mux:done', () => {
       muxing = false;
@@ -2406,6 +2962,29 @@
     EventsOn('audiosync:progress', (p) => { syncPercent = p.Percent || p.percent || 0; });
     EventsOn('ac3convert:progress', (p) => { frAudioConvertPercent = p.percent ?? p.Percent ?? 0; });
     EventsOn('srtprogress', (p) => { srtPercent = p.percent ?? p.Percent ?? 0; });
+    EventsOn('ocr:progress', (p) => {
+      ocrProgress = {
+        status: p.status || '',
+        percent: p.percent ?? 0,
+        message: p.message || '',
+        total_lines: p.total_lines ?? ocrProgress.total_lines ?? 0,
+        corrected_lines: p.corrected_lines ?? ocrProgress.corrected_lines ?? 0,
+        suspicious_lines: p.suspicious_lines ?? ocrProgress.suspicious_lines ?? 0,
+        quality_score: p.quality_score ?? ocrProgress.quality_score ?? 0,
+        subtitles: p.subtitles ?? ocrProgress.subtitles ?? 0,
+        lt_total_issues: p.lt_total_issues ?? ocrProgress.lt_total_issues ?? 0,
+        lt_auto_fixed: p.lt_auto_fixed ?? ocrProgress.lt_auto_fixed ?? 0,
+        lt_needs_review: p.lt_needs_review ?? ocrProgress.lt_needs_review ?? 0,
+        lt_review_list: p.lt_review_list ?? ocrProgress.lt_review_list ?? [],
+      };
+      // Quand l'OCR vient de finir (status 'done'), capture le path du SRT
+      // pour permettre le patch via ApplyOCRFix, et reset l'état du modal.
+      if (p.status === 'done' && p.message) {
+        ocrCurrentSRT = p.message;
+        const list = ocrProgress.lt_review_list || [];
+        ltReviewState = list.map(() => ({ resolved: false, ignored: false, customText: '', busy: false, error: '' }));
+      }
+    });
     EventsOn('subsync:progress', (p) => {
       subSyncPercent = p.percent ?? p.Percent ?? 0;
       subSyncCurrentName = p.current ?? p.Current ?? '';
@@ -2503,6 +3082,7 @@
           <div class="film-title">{lastTmdbResult.titre_fr || lastTmdbResult.titre_vo || '—'}{lastTmdbResult.annee_fr ? ` (${lastTmdbResult.annee_fr})` : ''}</div>
           <div class="film-meta">
             {#if lastTmdbResult.tmdb_id}<button type="button" class="film-id film-id-link" on:click={() => OpenURL(lastTmdbResult.url || `https://www.themoviedb.org/movie/${lastTmdbResult.tmdb_id}`)} title="Ouvrir la fiche TMDB">↗ TMDB</button>{/if}
+            {#if discordIndexEntry}<button type="button" class="film-id film-id-link" on:click={() => OpenURL(discordIndexEntry)} title="Ouvrir le post Discord de la Team">↗ Discord</button>{/if}
             {#if lastTmdbResult.duree}<span>⏱ {lastTmdbResult.duree}</span>{/if}
             {#if lastTmdbResult.note > 0}<span>★ {lastTmdbResult.note}</span>{/if}
           </div>
@@ -2834,13 +3414,18 @@
           </div>
 
           <!-- Vidéo -->
-          {#each tracks.filter(t => t.type === 'video') as t}
-            <div class="track">
-              <div class="track-icon video">▶</div>
-              <div class="track-label">#{t.id} · {t.codec} · {t.pixelDims || ''} → {previewVideoName}</div>
-              <div class="track-flag">{videoChoice.quality}</div>
+          {#if videoCount > 0}
+            <div class="tracks-section">
+              <div class="tracks-section-header video"><span class="tracks-section-dot"></span><span class="tracks-section-label">▶ Piste vidéo</span><span class="tracks-section-count">{videoCount}</span></div>
+              {#each tracks.filter(t => t.type === 'video') as t}
+                <div class="track">
+                  <div class="track-icon video">▶</div>
+                  <div class="track-label">#{t.id} · {t.codec} · {t.pixelDims || ''} → {previewVideoName}</div>
+                  <div class="track-flag">{videoChoice.quality}</div>
+                </div>
+              {/each}
             </div>
-          {/each}
+          {/if}
 
           <!-- Audio (merge internal/external/secondary triés par ordre) -->
           {#if tracks.some(t => t.type === 'audio') || externalAudios.length > 0 || secondarySelected.some(t => t.type === 'audio')}
@@ -2851,6 +3436,8 @@
               ...externalAudios.map((a, i) => ({ kind: 'external', idx: i, ref: a, order: a.order ?? 0 })),
               ...secondaryAudios.map((s, i) => ({ kind: 'secondary', idx: i, ref: s, order: s.order ?? 0 })),
             ].sort((a, b) => a.order - b.order)}
+            <div class="tracks-section">
+              <div class="tracks-section-header audio"><span class="tracks-section-dot"></span><span class="tracks-section-label">♪ Pistes audio</span><span class="tracks-section-count">{audioCount}</span></div>
             {#each mergedAudios as item (item.kind + '-' + item.idx)}
               <div class="track track-editable" class:dropped={!item.ref.keep}>
                 <div class="track-icon audio">♪</div>
@@ -2894,6 +3481,7 @@
                 {/if}
               </div>
             {/each}
+            </div>
           {/if}
 
           <!-- Subtitles -->
@@ -2905,6 +3493,8 @@
               ...externalSubs.map((s, i) => ({ kind: 'external', idx: i, ref: s, order: s.order ?? 0 })),
               ...secondarySubs.map((s, i) => ({ kind: 'secondary', idx: i, ref: s, order: s.order ?? 0 })),
             ].sort((a, b) => a.order - b.order)}
+            <div class="tracks-section">
+              <div class="tracks-section-header sub"><span class="tracks-section-dot"></span><span class="tracks-section-label">A Sous-titres</span><span class="tracks-section-count">{subCount}</span></div>
             {#each mergedSubs as item (item.kind + '-' + item.idx)}
               <div class="track track-editable">
                 <div class="track-icon sub">A</div>
@@ -2926,6 +3516,21 @@
                     <label class="chk"><input type="checkbox" bind:checked={item.ref.keep}/>Keep</label>
                     <label class="chk"><input type="checkbox" bind:checked={item.ref.default}/>Default</label>
                     <label class="chk"><input type="checkbox" bind:checked={item.ref.forced}/>Forced</label>
+                    {#if item.kind === 'internal' && isPGSTrack(item.ref)}
+                      <button
+                        class="btn-arrow"
+                        title={ocrRunning ? `OCR en cours…` : 'OCR PGS → SRT (Tesseract)'}
+                        disabled={ocrRunning}
+                        on:click={() => runOCR(item.ref)}
+                      >🔠</button>
+                    {:else if item.kind === 'external' && isPGSExternal(item.ref)}
+                      <button
+                        class="btn-arrow"
+                        title={ocrRunning ? `OCR en cours…` : 'OCR PGS .sup → SRT (Tesseract)'}
+                        disabled={ocrRunning}
+                        on:click={() => runOCRExternalSup(item.idx)}
+                      >🔠</button>
+                    {/if}
                     <button class="btn-arrow" title="Monter" on:click={() => moveTrack(item.kind, item.idx, -1)}>↑</button>
                     <button class="btn-arrow" title="Descendre" on:click={() => moveTrack(item.kind, item.idx, +1)}>↓</button>
                     {#if item.kind === 'internal'}
@@ -2936,6 +3541,29 @@
                       <button class="btn-arrow danger" title="Supprimer" on:click={() => removeExternalSub(item.idx)}>✕</button>
                     {/if}
                   </div>
+                  {#if (item.kind === 'internal' && ocrTrackId === item.ref.id && ocrProgress.status) || (item.kind === 'external' && ocrTrackId === -1000 - item.idx && ocrProgress.status)}
+                    <div class="ocr-progress"
+                         class:ocr-running={ocrRunning}
+                         class:ocr-done={!ocrRunning && ocrProgress.status === 'done'}
+                         class:ocr-error={!ocrRunning && ocrProgress.status === 'error'}
+                         title={ocrProgress.message}>
+                      <div class="ocr-progress-bar" style="width: {ocrProgress.percent}%"></div>
+                      <div class="ocr-progress-label">
+                        {#if ocrRunning}
+                          🔠 OCR · {ocrProgress.status || '…'} · <b>{ocrProgress.percent}%</b>
+                          {#if ocrProgress.message}— {ocrProgress.message}{/if}
+                        {:else if ocrProgress.status === 'done'}
+                          ✅ <b>OCR terminé</b> — qualité estimée <b>{ocrProgress.quality_score.toFixed(1)}%</b>
+                          ({ocrProgress.subtitles} sous-titres · {ocrProgress.corrected_lines} lignes nettoyées · {ocrProgress.lt_auto_fixed} corrections auto · {ocrProgress.lt_needs_review} à vérifier)
+                          {#if ocrProgress.lt_needs_review > 0}
+                            <button class="btn btn-ghost btn-tiny" style="margin-left:8px" on:click={() => showLTReview = true}>Voir les {ocrProgress.lt_needs_review} lignes à vérifier</button>
+                          {/if}
+                        {:else if ocrProgress.status === 'error'}
+                          ❌ OCR échoué — {ocrProgress.message}
+                        {/if}
+                      </div>
+                    </div>
+                  {/if}
                 </div>
                 {#if item.ref.forced}
                   <div class="track-flag warn">Forced</div>
@@ -2948,6 +3576,7 @@
                 {/if}
               </div>
             {/each}
+            </div>
           {/if}
 
           {#if !tracks.some(t => t.type === 'audio') && externalAudios.length === 0 && secondarySelected.length === 0}
@@ -2997,6 +3626,40 @@
                 <span class="empty-hero-hint">🎬 Fiche TMDB auto</span>
                 <span class="empty-hero-hint-dot">·</span>
                 <span class="empty-hero-hint">🔊 Sync audio AC3/EAC3</span>
+              </div>
+
+              <!-- Section "Outils additionnels" intégrée DANS la card "Prêt à muxer", pleine largeur. -->
+              <div class="empty-hero-tools">
+                <div class="empty-hero-tools-title">🔊 Outils additionnels</div>
+                <div class="empty-hero-tools-row">
+                  <button class="btn btn-ghost" on:click={pickAndOCRStandaloneSup} disabled={ocrRunning} title="OCR PGS .sup → SRT (Tesseract + regex + LanguageTool)">🔠 OCR PGS → SRT</button>
+                  <button class="btn btn-ghost" on:click={() => openOSModal('standalone')} title="Chercher un SRT existant sur OpenSubtitles (gain de minutes vs OCR)">🔍 OpenSubtitles</button>
+                  <button class="btn btn-ghost" on:click={() => screen = 'sync'} title="Synchroniser des pistes audio (.ac3/.mka/.mkv)">🔊 SYNCHRO AUDIOS</button>
+                </div>
+                {#if ocrTrackId === -2000 && ocrProgress.status}
+                  <div class="ocr-progress"
+                       class:ocr-running={ocrRunning}
+                       class:ocr-done={!ocrRunning && ocrProgress.status === 'done'}
+                       class:ocr-error={!ocrRunning && ocrProgress.status === 'error'}
+                       title={ocrProgress.message}
+                       style="margin-top:8px">
+                    <div class="ocr-progress-bar" style="width: {ocrProgress.percent}%"></div>
+                    <div class="ocr-progress-label">
+                      {#if ocrRunning}
+                        🔠 OCR · {ocrProgress.status || '…'} · <b>{ocrProgress.percent}%</b>
+                        {#if ocrProgress.message}— {ocrProgress.message}{/if}
+                      {:else if ocrProgress.status === 'done'}
+                        ✅ <b>OCR terminé</b> — qualité estimée <b>{ocrProgress.quality_score.toFixed(1)}%</b>
+                        ({ocrProgress.subtitles} sous-titres
+                        {#if ocrProgress.corrected_lines}· {ocrProgress.corrected_lines} regex{/if}
+                        {#if ocrProgress.lt_auto_fixed}· {ocrProgress.lt_auto_fixed} LT auto{/if}
+                        {#if ocrProgress.lt_needs_review}· {ocrProgress.lt_needs_review} à vérifier{/if})
+                      {:else if ocrProgress.status === 'error'}
+                        ❌ OCR échoué — {ocrProgress.message}
+                      {/if}
+                    </div>
+                  </div>
+                {/if}
               </div>
             {/if}
           </div>
@@ -3246,7 +3909,33 @@
           <div class="tools-row">
             <button class="btn btn-ghost btn-tiny" on:click={() => screen = 'sync'}>🔊 Synchro audios</button>
             <button class="btn btn-ghost btn-tiny" on:click={() => screen = 'cible'}>🎯 Vue Cible détaillée</button>
+            <button class="btn btn-ghost btn-tiny" on:click={pickAndOCRStandaloneSup} disabled={ocrRunning} title="OCR PGS .sup → SRT (Tesseract + cleanup regex FR)">🔠 OCR PGS → SRT</button>
+            <button class="btn btn-ghost btn-tiny" on:click={() => openOSModal('post-source')} title="Chercher un SRT existant sur OpenSubtitles">🔍 OpenSubtitles</button>
           </div>
+          {#if ocrTrackId === -2000 && ocrProgress.status}
+            <div class="ocr-progress"
+                 class:ocr-running={ocrRunning}
+                 class:ocr-done={!ocrRunning && ocrProgress.status === 'done'}
+                 class:ocr-error={!ocrRunning && ocrProgress.status === 'error'}
+                 title={ocrProgress.message}
+                 style="margin-top:8px">
+              <div class="ocr-progress-bar" style="width: {ocrProgress.percent}%"></div>
+              <div class="ocr-progress-label">
+                {#if ocrRunning}
+                  🔠 OCR · {ocrProgress.status || '…'} · <b>{ocrProgress.percent}%</b>
+                  {#if ocrProgress.message}— {ocrProgress.message}{/if}
+                {:else if ocrProgress.status === 'done'}
+                  ✅ <b>OCR terminé</b> — qualité estimée <b>{ocrProgress.quality_score.toFixed(1)}%</b>
+                  ({ocrProgress.subtitles} sous-titres · {ocrProgress.corrected_lines} lignes nettoyées · {ocrProgress.lt_auto_fixed} corrections auto · {ocrProgress.lt_needs_review} à vérifier)
+                  {#if ocrProgress.lt_needs_review > 0}
+                    <button class="btn btn-ghost btn-tiny" style="margin-left:8px" on:click={() => showLTReview = true}>Voir les {ocrProgress.lt_needs_review} lignes à vérifier</button>
+                  {/if}
+                {:else if ocrProgress.status === 'error'}
+                  ❌ OCR échoué — {ocrProgress.message}
+                {/if}
+              </div>
+            </div>
+          {/if}
         </div>
       {/if}
 
@@ -3716,6 +4405,144 @@
       </div>
 
       <div class="card">
+        <div class="card-title">LanguageTool (post-OCR)</div>
+        <div class="field"><label>Username LanguageTool (optionnel — Premium)</label>
+          <input type="text" bind:value={config.languagetool_user} placeholder="ex: davidfernandez06@gmail.com" />
+        </div>
+        <div class="field"><label>Clé API LanguageTool (optionnel — Premium)</label>
+          <div class="field-row">
+            <input type="password" bind:value={config.languagetool_key} placeholder="ex: lt-xxxxxx (laisse vide pour API publique gratuite)" />
+            <button class="btn-test" on:click={doTestLanguageToolKey} disabled={ltTest.running}>
+              {ltTest.running ? '…' : 'Test'}
+            </button>
+          </div>
+          {#if ltTest.ok !== null}
+            <div class="result-badge {ltTest.ok ? 'ok' : 'err'}">{ltTest.message}</div>
+          {/if}
+          <div class="field-hint">
+            Sans clé : API publique gratuite (20 req/min, 20 KB/req). Avec clé Premium : pas de rate-limit pratique. Endpoint Premium auto-détecté.
+          </div>
+        </div>
+        <div class="field"><label>URL endpoint (optionnel — override)</label>
+          <input type="text" bind:value={config.languagetool_url} placeholder="https://api.languagetool.org/v2/check" />
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">OpenSubtitles (recherche SRT existant avant OCR)</div>
+        <div class="field"><label>Clé API OpenSubtitles</label>
+          <input type="password" bind:value={config.opensubtitles_api_key} placeholder="ex: abc123… (opensubtitles.com → Profile → Consumers)" />
+          <div class="field-hint">
+            Crée une clé gratuite sur <b>opensubtitles.com</b> → Profile → Consumers (compte requis).
+            Le User-Agent par défaut <b class="mono">GoMuxLiHDL v5.x</b> doit être enregistré sur ce compte.
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Dictionnaire OCR custom</div>
+        <div class="field-hint">
+          Mappings « texte fautif → correction » appliqués automatiquement à la fin du cleanup OCR.
+          Les entrées <b>auto</b> sont ajoutées quand tu valides une correction dans le modal "Lignes à vérifier".
+        </div>
+        <div class="custom-dict-list">
+          {#if !customDictEntries || customDictEntries.length === 0}
+            <div class="empty-hint">Aucune entrée — clique « + Ajouter » ou valide une correction dans le modal LT.</div>
+          {:else}
+            {#each customDictEntries as e}
+              <div class="custom-dict-row">
+                <span class="custom-dict-wrong mono">{e.wrong}</span>
+                <span class="custom-dict-arrow">→</span>
+                <span class="custom-dict-right mono">{e.right}</span>
+                {#if e.auto}<span class="custom-dict-auto">auto</span>{/if}
+                <button class="btn btn-ghost btn-tiny" on:click={() => removeCustomDictEntry(e.wrong)} title="Supprimer">✕</button>
+              </div>
+            {/each}
+          {/if}
+        </div>
+        <div style="margin-top:8px;display:flex;gap:8px;">
+          <button class="btn btn-ghost btn-tiny" on:click={() => { newDictWrong=''; newDictRight=''; showAddDictModal = true; }}>+ Ajouter</button>
+          <button class="btn btn-ghost btn-tiny" on:click={loadCustomDict}>↻ Recharger</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Index Discord (admin)</div>
+        <div class="field-hint" style="margin-bottom:8px;">
+          Permet aux users de l'app d'ouvrir le post Discord d'un film de la Team via un bouton <b>↗ Discord</b> dans le header film-bar.
+          Seul l'admin renseigne le bot et lance le scan ; les users récupèrent l'index public via l'URL JSON.
+        </div>
+        <div class="field"><label>Token bot Discord</label>
+          <input type="password" bind:value={config.discord_bot_token} placeholder="ex: MTA…" autocomplete="off" />
+          <div class="field-hint">
+            Crée un bot sur <b>discord.com/developers/applications</b> → New App → Bot → Reset Token.
+            Permissions requises : <b>View Channels</b>, <b>Read Message History</b>, <b>Manage Threads</b>.
+            Ajoute le bot au serveur via <b>OAuth2 → URL Generator</b>.
+          </div>
+        </div>
+        <div class="field"><label>ID(s) forum channel(s) Discord</label>
+          <textarea bind:value={config.discord_forum_id} placeholder="ex: 1234567890123456789, 9876543210987654321&#10;ou un par ligne" autocomplete="off" rows="3" style="font-family: 'SF Mono', monospace; resize: vertical;"></textarea>
+          <div class="field-hint">
+            Active le <b>Mode Développeur</b> dans Discord (Réglages utilisateur → Avancés), puis clic droit sur chaque forum channel → <b>Copier l'identifiant</b>.
+            <br>Plusieurs IDs supportés : sépare par virgule, espace ou retour à la ligne. L'index merge tous les forums.
+          </div>
+        </div>
+        <div class="field"><label>URL JSON remote (pour les users)</label>
+          <input type="text" bind:value={config.discord_index_url} placeholder="https://raw.githubusercontent.com/&lt;owner&gt;/&lt;repo&gt;/&lt;branch&gt;/discord_index.json" />
+          <div class="field-hint">
+            URL publique d'où les users télécharge l'index (cache 24 h). Laisse vide pour ne pas activer le fetch remote.
+          </div>
+        </div>
+
+        <!-- Push GitHub direct (admin) — évite d'aller sur le site GitHub -->
+        <div style="margin-top:14px;padding:12px;border:1px solid rgba(255,255,255,0.06);border-radius:10px;background:rgba(255,255,255,0.02);">
+          <div style="font-size:11.5px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">📤 Push GitHub direct (admin)</div>
+          <div class="field"><label>Token GitHub (PAT scope <code>repo</code>)</label>
+            <input type="password" bind:value={config.github_token} placeholder="ghp_..." autocomplete="off" />
+            <div class="field-hint">Crée un Fine-grained PAT sur github.com/settings/tokens → permission <b>Contents (Read+Write)</b> sur ton repo cible.</div>
+          </div>
+          <div class="field"><label>Repo (owner/name)</label>
+            <input type="text" bind:value={config.github_repo} placeholder="ex: Gandalfleblanc/go-mux-lihdl-team" autocomplete="off" />
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 2fr;gap:8px;">
+            <div class="field"><label>Branche</label>
+              <input type="text" bind:value={config.github_branch} placeholder="main" autocomplete="off" />
+            </div>
+            <div class="field"><label>Path du fichier dans le repo</label>
+              <input type="text" bind:value={config.github_index_file_path} placeholder="discord_index.json" autocomplete="off" />
+            </div>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px;">
+          <button class="btn btn-accent" on:click={doDiscordScan} disabled={discordScanRunning || !config.discord_bot_token || !config.discord_forum_id}>
+            {discordScanRunning ? '⟳ Scan en cours…' : '🔄 Mettre à jour l\'index'}
+          </button>
+          <button class="btn btn-ghost" on:click={doDiscordCopy} disabled={discordScanRunning}>
+            {discordCopyOk ? '✓ Copié' : '📋 Copier le JSON'}
+          </button>
+          <button class="btn btn-accent" on:click={doDiscordPushGitHub} disabled={discordScanRunning || githubPushing || !config.github_token || !config.github_repo}>
+            {githubPushing ? '⟳ Push en cours…' : (githubPushOk ? '✓ Pushé sur GitHub' : '📤 Pusher sur GitHub')}
+          </button>
+        </div>
+        {#if discordScanRunning || discordScanProgress.message}
+          <div class="field-hint" style="margin-top:8px;">
+            {#if discordScanProgress.total > 0}
+              <div style="height:6px;background:#222;border-radius:3px;overflow:hidden;margin-bottom:6px;">
+                <div style="height:100%;background:#7ad17a;width:{Math.min(100, Math.round((discordScanProgress.scanned / Math.max(1, discordScanProgress.total)) * 100))}%;transition:width .2s;"></div>
+              </div>
+              <div>{discordScanProgress.scanned} / {discordScanProgress.total} — {discordScanProgress.message}</div>
+            {:else}
+              <div>{discordScanProgress.message}</div>
+            {/if}
+          </div>
+        {/if}
+        <div class="field-hint" style="margin-top:10px;">
+          Une fois l'index généré, push manuellement le fichier <b class="mono">~/Library/Application Support/go-mux-lihdl-team/discord_index.json</b> sur GitHub (raw) à l'URL ci-dessus. Les users de l'app le téléchargeront automatiquement au démarrage.
+        </div>
+      </div>
+
+      <div class="card">
         <div class="card-title">MKVToolNix</div>
         <div class="field"><label>Chemin mkvmerge (optionnel — auto-détecté sinon)</label>
           <input type="text" bind:value={config.mkvmerge_path} placeholder="/opt/homebrew/bin/mkvmerge" />
@@ -3730,6 +4557,169 @@
     {/if}
 
   </main>
+
+  {#if showLTReview}
+    <div class="lt-review-overlay" on:click={() => showLTReview = false} on:keydown={(e) => e.key === 'Escape' && (showLTReview = false)} role="presentation">
+      <div class="lt-review-modal" on:click|stopPropagation role="dialog" aria-modal="true" aria-label="Lignes à vérifier (LanguageTool)">
+        <div class="lt-review-header">
+          <h3>🔍 Lignes à vérifier — LanguageTool ({ocrProgress.lt_needs_review})</h3>
+          <button class="btn btn-ghost btn-tiny" on:click={() => showLTReview = false}>✕</button>
+        </div>
+        <div class="lt-review-body">
+          {#if !ocrProgress.lt_review_list || ocrProgress.lt_review_list.length === 0}
+            <div class="empty-hint">Aucune ligne à vérifier (top 5 max retournées par le backend).</div>
+          {:else}
+            {#each ocrProgress.lt_review_list as m, idx}
+              <div class="lt-review-item" class:resolved={ltReviewState[idx] && ltReviewState[idx].resolved}>
+                <div class="lt-review-line">
+                  <b>Ligne {m.line_number}</b>
+                  {#if ltReviewState[idx] && ltReviewState[idx].resolved}
+                    <span class="lt-resolved-pill">{ltReviewState[idx].ignored ? '⊘ Ignoré' : '✓ Corrigé'}</span>
+                  {/if}
+                </div>
+                <div class="lt-review-snippet mono">{m.snippet}</div>
+                <div class="lt-review-msg">💬 {m.message}</div>
+                {#if !(ltReviewState[idx] && ltReviewState[idx].resolved)}
+                  {#if m.suggestions && m.suggestions.length > 0}
+                    <div class="lt-review-sugg">
+                      Suggestions cliquables :
+                      {#each m.suggestions as s}
+                        <button class="lt-sugg-pill clickable"
+                                disabled={ltReviewState[idx] && ltReviewState[idx].busy}
+                                on:click={() => applyReviewFix(idx, s)}>
+                          {s}
+                        </button>
+                      {/each}
+                    </div>
+                  {/if}
+                  <div class="lt-review-custom">
+                    <input type="text" class="lt-custom-input" placeholder="Correction libre…"
+                           bind:value={ltReviewState[idx].customText}
+                           on:keydown={(e) => e.key === 'Enter' && applyReviewFix(idx, ltReviewState[idx].customText)}
+                           disabled={ltReviewState[idx] && ltReviewState[idx].busy} />
+                    <button class="btn btn-accent btn-tiny"
+                            disabled={!ltReviewState[idx] || !ltReviewState[idx].customText || !ltReviewState[idx].customText.trim() || ltReviewState[idx].busy}
+                            on:click={() => applyReviewFix(idx, ltReviewState[idx].customText)}>
+                      {ltReviewState[idx] && ltReviewState[idx].busy ? '…' : 'Appliquer'}
+                    </button>
+                    <button class="btn btn-ghost btn-tiny"
+                            on:click={() => ignoreReviewMatch(idx)}
+                            title="Ignorer ce match (pas une vraie erreur)">
+                      Ignorer
+                    </button>
+                  </div>
+                  {#if ltReviewState[idx] && ltReviewState[idx].error}
+                    <div class="lt-review-err">⚠ {ltReviewState[idx].error}</div>
+                  {/if}
+                {/if}
+              </div>
+            {/each}
+            <div class="field-hint" style="margin-top:8px">
+              ℹ Click sur une suggestion ou tape une correction libre → patche le SRT en live et alimente le dictionnaire custom.
+            </div>
+          {/if}
+        </div>
+        <div class="lt-review-footer">
+          <button class="btn btn-accent" on:click={() => showLTReview = false}>Fermer</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if showOSModal}
+    <div class="lt-review-overlay" on:click={() => showOSModal = false} on:keydown={(e) => e.key === 'Escape' && (showOSModal = false)} role="presentation">
+      <div class="lt-review-modal" on:click|stopPropagation role="dialog" aria-modal="true" aria-label="OpenSubtitles">
+        <div class="lt-review-header">
+          <h3>🔍 OpenSubtitles — recherche SRT</h3>
+          <button class="btn btn-ghost btn-tiny" on:click={() => showOSModal = false}>✕</button>
+        </div>
+        <div class="lt-review-body">
+          {#if !config.opensubtitles_api_key}
+            <div class="empty-hint" style="padding:12px;border:1px solid var(--orange);border-radius:8px;background:rgba(255,181,71,0.08);">
+              ⚠ Clé API OpenSubtitles manquante.
+              <button class="btn btn-ghost btn-tiny" style="margin-left:8px" on:click={() => { showOSModal = false; screen = 'reglages'; }}>
+                Configurer dans Settings
+              </button>
+            </div>
+          {/if}
+          <div class="os-search-row">
+            <div class="field" style="flex:2">
+              <label>Titre</label>
+              <input type="text" bind:value={osQuery} placeholder="ex: Inception" on:keydown={(e) => e.key === 'Enter' && searchOpenSubtitles()} />
+            </div>
+            <div class="field" style="flex:1">
+              <label>Année</label>
+              <input type="text" bind:value={osYear} placeholder="ex: 2010" inputmode="numeric" />
+            </div>
+            <div class="field" style="flex:1">
+              <label>Langues</label>
+              <input type="text" bind:value={osLang} placeholder="fr,en" />
+            </div>
+            <button class="btn btn-accent" on:click={searchOpenSubtitles} disabled={osSearching || !config.opensubtitles_api_key}>
+              {osSearching ? '⏳' : 'Chercher'}
+            </button>
+          </div>
+          {#if osError}
+            <div class="lt-review-err">⚠ {osError}</div>
+          {/if}
+          {#if osResults && osResults.length > 0}
+            <div class="os-results-list">
+              {#each osResults as r}
+                <div class="os-result-row">
+                  <div class="os-result-title">
+                    <b>{r.title || '—'}</b>
+                    {#if r.year}<span class="os-pill">{r.year}</span>{/if}
+                    <span class="os-pill">{(r.language || '').toUpperCase()}</span>
+                    <span class="os-pill">↓ {r.download_count || 0}</span>
+                    {#if r.rating}<span class="os-pill">★ {r.rating.toFixed(1)}</span>{/if}
+                  </div>
+                  <div class="os-result-filename mono">{r.filename || ''}</div>
+                  <div class="os-result-actions">
+                    {#if r.url}
+                      <button class="btn btn-ghost btn-tiny" on:click={() => OpenURL(r.url)}>↗ Voir</button>
+                    {/if}
+                    <button class="btn btn-accent btn-tiny" on:click={() => downloadOSResult(r)} disabled={osDownloading === r.id}>
+                      {osDownloading === r.id ? '⏳ Téléchargement…' : '⬇ Utiliser'}
+                    </button>
+                  </div>
+                </div>
+              {/each}
+            </div>
+          {/if}
+        </div>
+        <div class="lt-review-footer">
+          <button class="btn btn-ghost" on:click={() => showOSModal = false}>Fermer</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if showAddDictModal}
+    <div class="lt-review-overlay" on:click={() => showAddDictModal = false} on:keydown={(e) => e.key === 'Escape' && (showAddDictModal = false)} role="presentation">
+      <div class="lt-review-modal" on:click|stopPropagation role="dialog" aria-modal="true" aria-label="Ajouter une entrée au dictionnaire OCR">
+        <div class="lt-review-header">
+          <h3>+ Ajouter une entrée au dictionnaire OCR</h3>
+          <button class="btn btn-ghost btn-tiny" on:click={() => showAddDictModal = false}>✕</button>
+        </div>
+        <div class="lt-review-body">
+          <div class="field">
+            <label>Texte OCR fautif (wrong)</label>
+            <input type="text" bind:value={newDictWrong} placeholder="ex: Charli xex" />
+          </div>
+          <div class="field">
+            <label>Correction (right)</label>
+            <input type="text" bind:value={newDictRight} placeholder="ex: Charli XCX" on:keydown={(e) => e.key === 'Enter' && addCustomDictEntry()} />
+          </div>
+        </div>
+        <div class="lt-review-footer">
+          <button class="btn btn-ghost" on:click={() => showAddDictModal = false}>Annuler</button>
+          <button class="btn btn-accent" on:click={addCustomDictEntry} disabled={dictBusy || !newDictWrong.trim() || !newDictRight.trim()}>
+            {dictBusy ? '…' : 'Ajouter'}
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
 
   <!-- Le journal est rendu dans la col droite quand sourcePath && tmdbValidated && screen === 'source'.
        Sinon on garde un placeholder vide pour ne pas casser appendLog (logEl est lié dans la card). -->
@@ -4305,6 +5295,47 @@
   .app.tmdb-pending .tmdb-validate-card { flex: 1 1 auto; min-height: 0; }
   .app.tmdb-pending .empty-hero { flex: 0 0 auto; }
 
+  /* Section "Outils additionnels" intégrée dans la card "Prêt à muxer" — pleine largeur. */
+  .empty-hero-tools {
+    margin-top: 22px;
+    width: 100%;
+    padding: 14px 18px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 12px;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    text-align: left;
+  }
+  .empty-hero-tools-title {
+    font-size: 10.5px; font-weight: 700; letter-spacing: 0.6px;
+    color: var(--text2);
+    text-transform: uppercase;
+    margin-bottom: 10px;
+    text-align: center;
+  }
+  .empty-hero-tools-row {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    gap: 8px;
+  }
+  .empty-hero-tools-row .btn {
+    width: 100%;
+    padding: 10px 14px;
+    font-size: 12.5px;
+    font-weight: 600;
+    justify-content: center;
+    text-align: center;
+  }
+  @media (max-width: 600px) {
+    .empty-hero-tools-row {
+      grid-auto-flow: row;
+      grid-auto-columns: unset;
+      grid-template-columns: 1fr;
+    }
+  }
+
   /* Empty-hero "compact" : un mini-bandeau horizontal au lieu d'un hero plein écran */
   .empty-hero.compact {
     padding: 10px 18px;
@@ -4759,7 +5790,8 @@
     display: flex; flex-direction: column; align-items: center;
     gap: 14px;
     padding: 48px 32px;
-    max-width: 540px;
+    max-width: 820px;
+    width: 100%;
   }
   .empty-hero-badge {
     font-size: 10px; font-weight: 700;
@@ -5061,6 +6093,45 @@
   .field-hint { font-size: 11px; color: var(--text3); margin-top: 4px; line-height: 1.5; }
 
   /* Tracks — glass rows */
+  .tracks-section {
+    margin-bottom: 14px;
+    padding: 10px 12px 8px;
+    background: rgba(255, 255, 255, 0.015);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    border-radius: 12px;
+  }
+  .tracks-section:last-child { margin-bottom: 0; }
+  .tracks-section-header {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 8px; padding: 0 2px 8px;
+    font-size: 10.5px; font-weight: 700; letter-spacing: 0.6px;
+    text-transform: uppercase;
+    border-bottom: 1px dashed rgba(255, 255, 255, 0.06);
+  }
+  .tracks-section-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    flex-shrink: 0;
+    box-shadow: 0 0 8px currentColor;
+  }
+  .tracks-section-label { flex: 1; }
+  .tracks-section-count {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--text);
+    padding: 2px 7px; border-radius: 999px;
+    font-size: 10px; font-weight: 700;
+    min-width: 22px; text-align: center;
+  }
+  .tracks-section-header.video { color: var(--accent-hot); }
+  .tracks-section-header.video .tracks-section-dot { background: var(--accent-hot); }
+  .tracks-section-header.video { border-bottom-color: rgba(124, 92, 255, 0.20); }
+  .tracks-section-header.audio { color: var(--orange); }
+  .tracks-section-header.audio .tracks-section-dot { background: var(--orange); }
+  .tracks-section-header.audio { border-bottom-color: rgba(255, 181, 71, 0.20); }
+  .tracks-section-header.sub { color: var(--pink); }
+  .tracks-section-header.sub .tracks-section-dot { background: var(--pink); }
+  .tracks-section-header.sub { border-bottom-color: rgba(255, 92, 179, 0.20); }
+
   .track {
     display: grid;
     grid-template-columns: auto 1fr auto;
@@ -5115,6 +6186,52 @@
   }
   .track-controls .chk { justify-content: center; width: 100%; }
   .track-controls .btn-arrow { width: 100%; padding-left: 0; padding-right: 0; }
+  .track-controls .btn-arrow:disabled { opacity: 0.4; cursor: not-allowed; }
+  .ocr-progress {
+    margin-top: 6px;
+    position: relative;
+    height: 22px;
+    border-radius: 5px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+    overflow: hidden;
+    transition: border-color 200ms;
+  }
+  .ocr-progress.ocr-running { border-color: rgba(124,92,255,0.4); }
+  .ocr-progress.ocr-done {
+    border-color: rgba(34, 197, 94, 0.85);
+    background: rgba(22, 163, 74, 0.32);
+    box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.25), 0 0 18px rgba(34, 197, 94, 0.35);
+  }
+  .ocr-progress.ocr-error {
+    border-color: rgba(255, 61, 94, 0.55);
+    background: rgba(255, 61, 94, 0.10);
+  }
+  .ocr-progress-bar {
+    position: absolute; top: 0; left: 0; bottom: 0;
+    background: linear-gradient(90deg, rgba(124,92,255,0.5), rgba(124,92,255,0.8));
+    transition: width 250ms ease-out, background 250ms ease;
+  }
+  .ocr-progress.ocr-done .ocr-progress-bar {
+    background: linear-gradient(90deg, rgba(22, 163, 74, 0.85), rgba(34, 197, 94, 1));
+    width: 100% !important;
+  }
+  .ocr-progress.ocr-error .ocr-progress-bar {
+    background: linear-gradient(90deg, rgba(255, 61, 94, 0.55), rgba(255, 61, 94, 0.85));
+  }
+  .ocr-progress-label {
+    position: relative;
+    font-size: 0.74rem;
+    line-height: 22px;
+    padding: 0 10px;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-weight: 500;
+  }
+  .ocr-progress.ocr-done .ocr-progress-label { color: #fff; font-weight: 600; }
+  .ocr-progress.ocr-done .ocr-progress-label b { color: #d1fae5; }
   @media (max-width: 1280px) {
     .track-controls { grid-template-columns: minmax(0, 1fr) 66px 78px 70px 26px 26px 26px; }
   }
@@ -6102,5 +7219,162 @@
     background: rgba(255, 61, 94, 0.12);
     border-color: rgba(255, 61, 94, 0.35);
     color: var(--red-hot);
+  }
+
+  /* Modal LanguageTool review */
+  .lt-review-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 1000;
+  }
+  .lt-review-modal {
+    background: var(--bg, #15151b);
+    border: 1px solid rgba(124, 92, 255, 0.30);
+    border-radius: 10px;
+    width: min(640px, 92vw);
+    max-height: 80vh;
+    display: flex; flex-direction: column;
+    box-shadow: 0 30px 60px rgba(0, 0, 0, 0.5);
+  }
+  .lt-review-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 18px;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+  }
+  .lt-review-header h3 { margin: 0; font-size: 15px; }
+  .lt-review-body {
+    padding: 14px 18px;
+    overflow-y: auto;
+    flex: 1;
+  }
+  .lt-review-item {
+    padding: 10px 0;
+    border-bottom: 1px dashed rgba(255,255,255,0.08);
+  }
+  .lt-review-item:last-child { border-bottom: none; }
+  .lt-review-line { font-size: 12px; opacity: 0.85; }
+  .lt-review-snippet {
+    background: rgba(255,255,255,0.04);
+    padding: 6px 10px;
+    border-radius: 6px;
+    margin: 4px 0;
+    font-size: 13px;
+  }
+  .lt-review-msg { font-size: 12px; opacity: 0.85; margin-bottom: 4px; }
+  .lt-review-sugg { font-size: 12px; }
+  .lt-sugg-pill {
+    display: inline-block;
+    background: rgba(124, 92, 255, 0.15);
+    border: 1px solid rgba(124, 92, 255, 0.30);
+    border-radius: 4px;
+    padding: 2px 8px;
+    margin: 0 4px 4px 0;
+    font-family: monospace;
+    font-size: 12px;
+  }
+  .lt-sugg-pill.clickable {
+    cursor: pointer;
+    transition: background 120ms, border-color 120ms;
+  }
+  .lt-sugg-pill.clickable:hover:not(:disabled) {
+    background: rgba(124, 92, 255, 0.30);
+    border-color: rgba(124, 92, 255, 0.60);
+  }
+  .lt-sugg-pill.clickable:disabled { opacity: 0.5; cursor: not-allowed; }
+  .lt-review-footer {
+    padding: 12px 18px;
+    border-top: 1px solid rgba(255,255,255,0.08);
+    text-align: right;
+  }
+  .lt-review-item.resolved {
+    opacity: 0.55;
+    background: rgba(92, 201, 153, 0.05);
+  }
+  .lt-resolved-pill {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 1px 8px;
+    border-radius: 4px;
+    background: rgba(92, 201, 153, 0.18);
+    border: 1px solid rgba(92, 201, 153, 0.45);
+    color: var(--green);
+    font-size: 11px;
+  }
+  .lt-review-custom {
+    display: flex; gap: 6px; align-items: center;
+    margin-top: 6px;
+  }
+  .lt-custom-input {
+    flex: 1;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 4px;
+    color: var(--text);
+    padding: 4px 8px;
+    font-size: 12px;
+    font-family: monospace;
+  }
+  .lt-review-err {
+    color: var(--red, #ff3d5e);
+    font-size: 11px;
+    margin-top: 4px;
+  }
+
+  /* OpenSubtitles modal */
+  .os-search-row {
+    display: flex; gap: 8px; align-items: flex-end;
+    margin-bottom: 10px;
+  }
+  .os-results-list {
+    margin-top: 10px; max-height: 340px; overflow-y: auto;
+  }
+  .os-result-row {
+    padding: 8px 10px;
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 6px;
+    margin-bottom: 6px;
+    background: rgba(255,255,255,0.02);
+  }
+  .os-result-title { font-size: 13px; margin-bottom: 2px; }
+  .os-result-filename { font-size: 11px; opacity: 0.7; margin-bottom: 6px; word-break: break-all; }
+  .os-result-actions { display: flex; gap: 6px; justify-content: flex-end; }
+  .os-pill {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.10);
+    font-size: 10px;
+  }
+
+  /* Custom dict OCR (Settings) */
+  .custom-dict-list {
+    margin-top: 6px;
+    max-height: 280px;
+    overflow-y: auto;
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 6px;
+    padding: 6px;
+    background: rgba(0,0,0,0.15);
+  }
+  .custom-dict-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 4px 6px;
+    border-bottom: 1px dashed rgba(255,255,255,0.05);
+    font-size: 12px;
+  }
+  .custom-dict-row:last-child { border-bottom: none; }
+  .custom-dict-wrong { color: var(--orange); }
+  .custom-dict-arrow { opacity: 0.5; }
+  .custom-dict-right { color: var(--green); flex: 1; }
+  .custom-dict-auto {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: rgba(124, 92, 255, 0.15);
+    border: 1px solid rgba(124, 92, 255, 0.30);
+    color: var(--accent-hot);
   }
 </style>

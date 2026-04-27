@@ -22,10 +22,13 @@ import (
 	"go-mux-lihdl-team/internal/alass"
 	"go-mux-lihdl-team/internal/audiosync"
 	"go-mux-lihdl-team/internal/config"
+	"go-mux-lihdl-team/internal/discordindex"
 	"go-mux-lihdl-team/internal/hydracker"
 	"go-mux-lihdl-team/internal/mediainfo"
 	"go-mux-lihdl-team/internal/mkvtool"
 	"go-mux-lihdl-team/internal/naming"
+	"go-mux-lihdl-team/internal/ocrsubs"
+	"go-mux-lihdl-team/internal/opensubtitles"
 	"go-mux-lihdl-team/internal/tmdb"
 )
 
@@ -187,6 +190,17 @@ func (a *App) SelectSubFiles() ([]string, error) {
 		Filters: []wr.FileFilter{
 			{DisplayName: "Sous-titres (*.srt *.sup *.ass *.ssa *.sub *.idx)",
 				Pattern: "*.srt;*.sup;*.ass;*.ssa;*.sub;*.idx"},
+		},
+	})
+}
+
+// SelectSupFiles ouvre un dialog multi-sélection pour les .sup PGS uniquement
+// (utilisé par l'outil OCR autonome dans Outils additionnels).
+func (a *App) SelectSupFiles() ([]string, error) {
+	return wr.OpenMultipleFilesDialog(a.ctx, wr.OpenDialogOptions{
+		Title: "Choisir un ou plusieurs fichiers PGS (.sup)",
+		Filters: []wr.FileFilter{
+			{DisplayName: "PGS (*.sup)", Pattern: "*.sup"},
 		},
 	})
 }
@@ -575,6 +589,13 @@ func (a *App) TestUnfrKey(key string) ApiKeyTestResult {
 	default:
 		return ApiKeyTestResult{OK: false, Message: "HTTP " + resp.Status}
 	}
+}
+
+// TestLanguageToolKey teste une clé API LanguageTool Premium (ou l'endpoint
+// public si key vide). Best-effort : envoie une requête minuscule.
+func (a *App) TestLanguageToolKey(apiURL, key, user string) ApiKeyTestResult {
+	ok, msg := ocrsubs.TestLanguageToolKey(strings.TrimSpace(apiURL), strings.TrimSpace(key), strings.TrimSpace(user))
+	return ApiKeyTestResult{OK: ok, Message: msg}
 }
 
 // MkvBasicInfo : durée + FPS + scan audio d'un mkv (pour vérif compat subs/sources).
@@ -1340,6 +1361,375 @@ func (a *App) CheckSubsSync(reqs []SubSyncRequest, sourceMkvPath string) ([]SubS
 	}
 	emitProg(100, "")
 	return results, nil
+}
+
+// OCRPGSTrack convertit une piste sub PGS interne au MKV en SRT texte propre :
+//   - mkvextract → .sup
+//   - pgsrip (Tesseract) → .srt brut
+//   - cleanup regex FR (apostrophes, espaces insécables, guillemets, etc.)
+//
+// Le SRT final est sauvé dans le même dossier que le .mkv source (ou ailleurs
+// si on étend l'API plus tard) et le path retourné. Émet "ocr:progress" pour
+// la progression (status ∈ extract / ocr / clean / done, percent ∈ 0..100).
+//
+// Préreq : tesseract + pgsrip installés sur la machine. L'erreur retournée
+// inclut l'instruction d'install si l'un des deux est absent.
+func (a *App) OCRPGSTrack(mkvPath string, trackID int, lang string) (string, error) {
+	if mkvPath == "" {
+		return "", errors.New("chemin .mkv vide")
+	}
+	if lang == "" {
+		lang = "fra"
+	}
+	wr.EventsEmit(a.ctx, "ocr:progress", map[string]any{"status": "init", "percent": 0, "message": ""})
+
+	// 1. Localise les binaires (mkvextract via mkvtool, tesseract+pgsrip via ocrsubs).
+	c := config.Load()
+	binDir, _ := config.BinDir()
+	mkvmergePath, mErr := mkvtool.Locate(c.MkvmergePath, binDir)
+	if mErr != nil {
+		return "", fmt.Errorf("mkvmerge introuvable : %w", mErr)
+	}
+	// mkvextract est à côté de mkvmerge — on le déduit.
+	mkvextractPath := strings.TrimSuffix(mkvmergePath, filepath.Ext(mkvmergePath))
+	if strings.HasSuffix(strings.ToLower(mkvmergePath), ".exe") {
+		mkvextractPath = strings.TrimSuffix(mkvmergePath, filepath.Base(mkvmergePath)) + "mkvextract.exe"
+	} else {
+		mkvextractPath = filepath.Join(filepath.Dir(mkvmergePath), "mkvextract")
+	}
+	if _, err := os.Stat(mkvextractPath); err != nil {
+		// Fallback PATH système.
+		if p, lpErr := exec.LookPath("mkvextract"); lpErr == nil {
+			mkvextractPath = p
+		} else {
+			return "", errors.New("mkvextract introuvable (à côté de mkvmerge ni sur PATH)")
+		}
+	}
+	if _, err := ocrsubs.LocateTesseract(); err != nil {
+		return "", err // message déjà actionnable (brew install …)
+	}
+	pgsripPath, pErr := ocrsubs.LocatePgsrip()
+	if pErr != nil {
+		return "", pErr // message déjà actionnable (pip3 install pgsrip)
+	}
+
+	progress := func(status string, percent int, message string) {
+		wr.EventsEmit(a.ctx, "ocr:progress", map[string]any{
+			"status":  status,
+			"percent": percent,
+			"message": message,
+		})
+		if message != "" {
+			wr.EventsEmit(a.ctx, "log", "🔠 OCR : "+message)
+		}
+	}
+
+	finalDir := filepath.Dir(mkvPath)
+	ltOpts := ocrsubs.LangToolOpts{
+		Enabled: true,
+		APIURL:  c.LanguageToolURL,
+		APIKey:  c.LanguageToolKey,
+		APIUser: c.LanguageToolUser,
+	}
+	srtPath, stats, ltStats, err := ocrsubs.ConvertPGSTrackToSRT(a.ctx, mkvextractPath, pgsripPath, mkvPath, trackID, lang, finalDir, ltOpts, progress)
+	if err != nil {
+		wr.EventsEmit(a.ctx, "ocr:progress", map[string]any{"status": "error", "percent": 0, "message": err.Error()})
+		return "", err
+	}
+	// Limite review_list à 5 pour l'event final (UI showcase). La liste
+	// complète reste dans LangToolStats côté Go si besoin futur.
+	reviewTop := ltStats.NeedsReviewList
+	if len(reviewTop) > 5 {
+		reviewTop = reviewTop[:5]
+	}
+	wr.EventsEmit(a.ctx, "ocr:progress", map[string]any{
+		"status":           "done",
+		"percent":          100,
+		"message":          srtPath,
+		"total_lines":      stats.TotalLines,
+		"corrected_lines":  stats.CorrectedLines,
+		"suspicious_lines": stats.SuspiciousLines,
+		"quality_score":    stats.QualityScore,
+		"subtitles":        stats.Subtitles,
+		"lt_total_issues":  ltStats.TotalIssues,
+		"lt_auto_fixed":    ltStats.AutoFixed,
+		"lt_needs_review":  ltStats.NeedsReview,
+		"lt_review_list":   reviewTop,
+	})
+	return srtPath, nil
+}
+
+// OCRSupFile : pipeline OCR pour un fichier .sup PGS externe (déjà extrait,
+// pas besoin de mkvextract). Lance pgsrip + CleanSRT, retourne le path .srt
+// final écrit à côté du .sup source.
+func (a *App) OCRSupFile(supPath, lang string) (string, error) {
+	if supPath == "" {
+		return "", errors.New("chemin .sup vide")
+	}
+	if lang == "" {
+		lang = "fra"
+	}
+	wr.EventsEmit(a.ctx, "ocr:progress", map[string]any{"status": "init", "percent": 0, "message": ""})
+
+	// Cache OCR par sha256(.sup) — gain de minutes si déjà OCRisé.
+	if cachedPath, ok := ocrsubs.LookupOCRCache(supPath); ok {
+		finalDir := filepath.Dir(supPath)
+		base := strings.TrimSuffix(filepath.Base(supPath), filepath.Ext(supPath))
+		finalSRT := filepath.Join(finalDir, base+".ocr.srt")
+		if cerr := func() error {
+			in, err := os.Open(cachedPath)
+			if err != nil {
+				return err
+			}
+			defer in.Close()
+			out, err := os.Create(finalSRT)
+			if err != nil {
+				return err
+			}
+			defer out.Close()
+			_, err = io.Copy(out, in)
+			return err
+		}(); cerr == nil {
+			subCount := 0
+			if data, rerr := os.ReadFile(finalSRT); rerr == nil {
+				subCount = strings.Count(string(data), "-->")
+			}
+			wr.EventsEmit(a.ctx, "log", "🚀 OCR : utilisé cache (skip pgsrip+clean)")
+			wr.EventsEmit(a.ctx, "ocr:progress", map[string]any{
+				"status":           "done",
+				"percent":          100,
+				"message":          finalSRT,
+				"total_lines":      0,
+				"corrected_lines":  0,
+				"suspicious_lines": 0,
+				"quality_score":    100.0,
+				"subtitles":        subCount,
+				"lt_total_issues":  0,
+				"lt_auto_fixed":    0,
+				"lt_needs_review":  0,
+				"lt_review_list":   []ocrsubs.ReviewMatch{},
+			})
+			return finalSRT, nil
+		}
+	}
+
+	if _, err := ocrsubs.LocateTesseract(); err != nil {
+		return "", err
+	}
+	pgsripPath, pErr := ocrsubs.LocatePgsrip()
+	if pErr != nil {
+		return "", pErr
+	}
+
+	wr.EventsEmit(a.ctx, "ocr:progress", map[string]any{"status": "ocr", "percent": 30, "message": "OCR Tesseract en cours…"})
+	wr.EventsEmit(a.ctx, "log", "🔠 OCR : pgsrip "+filepath.Base(supPath))
+	srtRaw, err := ocrsubs.RunPgsrip(a.ctx, pgsripPath, supPath, lang)
+	if err != nil {
+		wr.EventsEmit(a.ctx, "ocr:progress", map[string]any{"status": "error", "percent": 0, "message": err.Error()})
+		return "", err
+	}
+
+	wr.EventsEmit(a.ctx, "ocr:progress", map[string]any{"status": "clean", "percent": 80, "message": "Nettoyage regex FR…"})
+	stats, err := ocrsubs.CleanSRT(srtRaw)
+	if err != nil {
+		wr.EventsEmit(a.ctx, "ocr:progress", map[string]any{"status": "error", "percent": 0, "message": err.Error()})
+		return "", err
+	}
+
+	// Renomme en .ocr.srt à côté de la source pour cohérence avec OCRPGSTrack.
+	finalDir := filepath.Dir(supPath)
+	base := strings.TrimSuffix(filepath.Base(supPath), filepath.Ext(supPath))
+	finalSRT := filepath.Join(finalDir, base+".ocr.srt")
+	if srtRaw != finalSRT {
+		_ = os.Rename(srtRaw, finalSRT)
+	}
+
+	// LanguageTool best-effort sur le SRT final (à côté de la source).
+	c := config.Load()
+	progressLT := func(status string, percent int, message string) {
+		wr.EventsEmit(a.ctx, "ocr:progress", map[string]any{
+			"status":  status,
+			"percent": percent,
+			"message": message,
+		})
+		if message != "" {
+			wr.EventsEmit(a.ctx, "log", "🔠 OCR : "+message)
+		}
+	}
+	wr.EventsEmit(a.ctx, "ocr:progress", map[string]any{"status": "languagetool", "percent": 96, "message": "Vérification LanguageTool…"})
+	ltStats, ltErr := ocrsubs.LanguageToolFix(a.ctx, finalSRT, lang, c.LanguageToolURL, c.LanguageToolKey, c.LanguageToolUser, progressLT)
+	if ltErr != nil {
+		wr.EventsEmit(a.ctx, "log", "⚠ LanguageTool : "+ltErr.Error())
+	}
+	// Le quality_score reste basé sur les patterns suspects regex uniquement.
+	// LanguageTool fournit beaucoup de faux positifs (style, grammaire idiomatique)
+	// qui ne sont pas de vraies erreurs OCR — affichés à part dans l'UI.
+
+	reviewTop := ltStats.NeedsReviewList
+	if len(reviewTop) > 5 {
+		reviewTop = reviewTop[:5]
+	}
+	wr.EventsEmit(a.ctx, "ocr:progress", map[string]any{
+		"status":           "done",
+		"percent":          100,
+		"message":          finalSRT,
+		"total_lines":      stats.TotalLines,
+		"corrected_lines":  stats.CorrectedLines,
+		"suspicious_lines": stats.SuspiciousLines,
+		"quality_score":    stats.QualityScore,
+		"subtitles":        stats.Subtitles,
+		"lt_total_issues":  ltStats.TotalIssues,
+		"lt_auto_fixed":    ltStats.AutoFixed,
+		"lt_needs_review":  ltStats.NeedsReview,
+		"lt_review_list":   reviewTop,
+	})
+	// Best-effort : sauve le SRT final dans le cache (sha256 du .sup).
+	_ = ocrsubs.StoreOCRCache(supPath, finalSRT)
+	return finalSRT, nil
+}
+
+// ApplyOCRFix patch un SRT avec une correction validée par l'utilisateur dans
+// le modal "lignes à vérifier".
+//
+// Flow :
+//  1. Lit le SRT
+//  2. Cherche `originalSnippet` autour de la ligne `lineNumber` (±2 lignes)
+//  3. Remplace par `correction`
+//  4. Sauve le SRT
+//
+// Retourne nil si succès. Erreur si snippet introuvable (le patch est rollback).
+// Le snippet peut contenir des "…" en début/fin (ajoutés par snippetAround) — on
+// les strippe avant la recherche.
+func (a *App) ApplyOCRFix(srtPath string, lineNumber int, originalSnippet, correction string) error {
+	if srtPath == "" {
+		return errors.New("srtPath vide")
+	}
+	if originalSnippet == "" {
+		return errors.New("snippet original vide")
+	}
+	// Strippe les "…" éventuels en début/fin (ils viennent de snippetAround).
+	cleanSnippet := strings.TrimSpace(originalSnippet)
+	cleanSnippet = strings.TrimPrefix(cleanSnippet, "…")
+	cleanSnippet = strings.TrimSuffix(cleanSnippet, "…")
+	cleanSnippet = strings.TrimSpace(cleanSnippet)
+	if cleanSnippet == "" {
+		return errors.New("snippet vide après normalisation")
+	}
+
+	raw, err := os.ReadFile(srtPath)
+	if err != nil {
+		return fmt.Errorf("lecture SRT : %w", err)
+	}
+	text := strings.ReplaceAll(string(raw), "\r\n", "\n")
+	lines := strings.Split(text, "\n")
+	if lineNumber < 1 {
+		lineNumber = 1
+	}
+	target0 := lineNumber - 1 // index 0-based
+	if target0 >= len(lines) {
+		target0 = len(lines) - 1
+	}
+	// Cherche d'abord exactement à lineNumber, puis ±1, ±2.
+	candidates := []int{target0}
+	for delta := 1; delta <= 2; delta++ {
+		if target0-delta >= 0 {
+			candidates = append(candidates, target0-delta)
+		}
+		if target0+delta < len(lines) {
+			candidates = append(candidates, target0+delta)
+		}
+	}
+	for _, idx := range candidates {
+		line := lines[idx]
+		if strings.Contains(line, cleanSnippet) {
+			lines[idx] = strings.Replace(line, cleanSnippet, correction, 1)
+			out := strings.Join(lines, "\n")
+			if !strings.HasSuffix(out, "\n") {
+				out += "\n"
+			}
+			if werr := os.WriteFile(srtPath, []byte(out), 0644); werr != nil {
+				return fmt.Errorf("écriture SRT : %w", werr)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("snippet introuvable autour de la ligne %d (±2)", lineNumber)
+}
+
+// SearchOpenSubtitles interroge l'API OpenSubtitles pour trouver un SRT
+// existant. Retourne max ~50 résultats. Nécessite OpenSubtitlesAPIKey en config.
+func (a *App) SearchOpenSubtitles(query string, year int, lang string) ([]opensubtitles.OSSearchResult, error) {
+	c := config.Load()
+	if strings.TrimSpace(c.OpenSubtitlesAPIKey) == "" {
+		return nil, errors.New("OpenSubtitles : clé API manquante (Settings → OpenSubtitles)")
+	}
+	results, err := opensubtitles.Search(a.ctx, c.OpenSubtitlesAPIKey, opensubtitles.DefaultUserAgent, query, year, lang)
+	if err != nil {
+		wr.EventsEmit(a.ctx, "log", "⚠ OpenSubtitles : "+err.Error())
+		return nil, err
+	}
+	wr.EventsEmit(a.ctx, "log", fmt.Sprintf("🔍 OpenSubtitles : %d résultats pour « %s » (%d, %s)", len(results), query, year, lang))
+	return results, nil
+}
+
+// DownloadOpenSubtitle télécharge un SRT depuis OpenSubtitles ET applique
+// CleanSRT + LanguageToolFix dessus avant de retourner le path final.
+//
+// `dstPath` peut être un chemin précis (.srt) OU un dossier — auquel cas le
+// nom est généré depuis fileID + .srt.
+func (a *App) DownloadOpenSubtitle(fileID, dstPath string) (string, error) {
+	c := config.Load()
+	if strings.TrimSpace(c.OpenSubtitlesAPIKey) == "" {
+		return "", errors.New("OpenSubtitles : clé API manquante (Settings → OpenSubtitles)")
+	}
+	if fileID == "" {
+		return "", errors.New("fileID vide")
+	}
+	if dstPath == "" {
+		return "", errors.New("dstPath vide")
+	}
+	// Si dstPath est un dossier, génère un nom propre.
+	if st, err := os.Stat(dstPath); err == nil && st.IsDir() {
+		dstPath = filepath.Join(dstPath, "opensubtitles-"+fileID+".srt")
+	} else if !strings.HasSuffix(strings.ToLower(dstPath), ".srt") {
+		dstPath += ".srt"
+	}
+	wr.EventsEmit(a.ctx, "log", "🔍 OpenSubtitles : téléchargement fileID="+fileID)
+	if err := opensubtitles.Download(a.ctx, c.OpenSubtitlesAPIKey, opensubtitles.DefaultUserAgent, fileID, dstPath); err != nil {
+		wr.EventsEmit(a.ctx, "log", "❌ OpenSubtitles : "+err.Error())
+		return "", err
+	}
+	// Cleanup regex + LanguageTool best-effort (comme pour OCR).
+	if _, err := ocrsubs.CleanSRT(dstPath); err != nil {
+		wr.EventsEmit(a.ctx, "log", "⚠ Cleanup SRT (OS) : "+err.Error())
+	}
+	// LanguageTool en best-effort — on log mais on ne plante pas.
+	progressLT := func(status string, percent int, message string) {
+		wr.EventsEmit(a.ctx, "ocr:progress", map[string]any{
+			"status": status, "percent": percent, "message": message,
+		})
+	}
+	if _, err := ocrsubs.LanguageToolFix(a.ctx, dstPath, "fra", c.LanguageToolURL, c.LanguageToolKey, c.LanguageToolUser, progressLT); err != nil {
+		wr.EventsEmit(a.ctx, "log", "⚠ LanguageTool (OS) : "+err.Error())
+	}
+	wr.EventsEmit(a.ctx, "log", "✓ OpenSubtitles : SRT téléchargé + nettoyé : "+dstPath)
+	return dstPath, nil
+}
+
+// OCRCustomDictList retourne toutes les entrées du dictionnaire custom.
+func (a *App) OCRCustomDictList() ([]ocrsubs.CustomDictEntry, error) {
+	return ocrsubs.ListCustomDictEntries()
+}
+
+// OCRCustomDictAdd ajoute (ou met à jour) une entrée du dictionnaire custom.
+// `auto` = true si l'entrée vient d'une validation utilisateur (modal review).
+func (a *App) OCRCustomDictAdd(wrong, right string, auto bool) error {
+	return ocrsubs.AddCustomDictEntry(wrong, right, auto)
+}
+
+// OCRCustomDictRemove retire une entrée par sa clé `wrong`.
+func (a *App) OCRCustomDictRemove(wrong string) error {
+	return ocrsubs.RemoveCustomDictEntry(wrong)
 }
 
 // LookupHydrackerURL résout l'URL fiche Hydracker pour un ID TMDB donné.
@@ -2162,4 +2552,192 @@ func parseVersion(v string) [3]int {
 }
 
 func errMkvErr(s string) error { return &mkvErr{msg: s} }
+
+// --- Index Discord ---
+//
+// L'index Discord permet à tous les users de l'app de cliquer sur "↗ Discord"
+// dans le header film-bar pour ouvrir le post Discord d'un film de la Team
+// (lookup par TMDB ID). Le bot Discord n'est utilisé QUE par l'admin via
+// DiscordIndexScan ; tous les autres appels sont des lookups locaux ou un
+// fetch HTTP du JSON public.
+
+// DiscordIndexScan (admin) lance un scan complet du forum Discord configuré
+// et écrit le JSON localement. Émet "discordindex:progress" pendant le scan.
+// Retourne le chemin du fichier JSON local généré.
+func (a *App) DiscordIndexScan() (string, error) {
+	cfg := config.Load()
+	if strings.TrimSpace(cfg.DiscordBotToken) == "" {
+		return "", errors.New("Token bot Discord non configuré (Réglages → Index Discord)")
+	}
+	rawIDs := strings.TrimSpace(cfg.DiscordForumID)
+	if rawIDs == "" {
+		return "", errors.New("ID forum channel Discord non configuré (Réglages → Index Discord)")
+	}
+	// Parse une ou plusieurs IDs : séparées par virgule, espace ou newline.
+	splitter := func(r rune) bool { return r == ',' || r == '\n' || r == '\r' || r == ' ' || r == '\t' || r == ';' }
+	rawTokens := strings.FieldsFunc(rawIDs, splitter)
+	var forumIDs []string
+	for _, t := range rawTokens {
+		t = strings.TrimSpace(t)
+		if t != "" {
+			forumIDs = append(forumIDs, t)
+		}
+	}
+	if len(forumIDs) == 0 {
+		return "", errors.New("aucun ID forum channel Discord valide")
+	}
+	path, err := config.DiscordIndexPath()
+	if err != nil {
+		return "", err
+	}
+	// Charge l'index existant pour le scan incrémental : les threads dont le
+	// last_message_id n'a pas bougé depuis le scan précédent seront skippés
+	// (réutilisation directe de l'entry, pas de fetch HTTP). Best-effort : si
+	// l'index local n'est pas lisible / n'existe pas → scan complet.
+	existing, _ := discordindex.LoadIndex(path)
+	// Merge des entries de tous les forums.
+	merged := &discordindex.Index{
+		Version:     1,
+		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
+		Entries:     map[string]discordindex.Entry{},
+	}
+	for fi, fid := range forumIDs {
+		forumNum := fi + 1
+		totalForums := len(forumIDs)
+		progress := func(scanned, total int, message string) {
+			// IMPORTANT : ne JAMAIS inclure le token dans les logs / events.
+			wr.EventsEmit(a.ctx, "discordindex:progress", map[string]interface{}{
+				"scanned": scanned,
+				"total":   total,
+				"message": fmt.Sprintf("[forum %d/%d] %s", forumNum, totalForums, message),
+			})
+		}
+		idx, err := discordindex.ScanForumIncremental(a.ctx, cfg.DiscordBotToken, fid, existing, progress)
+		if err != nil {
+			msg := err.Error()
+			if cfg.DiscordBotToken != "" && strings.Contains(msg, cfg.DiscordBotToken) {
+				msg = strings.ReplaceAll(msg, cfg.DiscordBotToken, "[redacted]")
+			}
+			return "", fmt.Errorf("forum %s : %s", fid, msg)
+		}
+		// Merge : les entries plus récentes (UpdatedAt) écrasent les plus anciennes.
+		for k, v := range idx.Entries {
+			if existing, ok := merged.Entries[k]; ok {
+				if v.UpdatedAt > existing.UpdatedAt {
+					merged.Entries[k] = v
+				}
+			} else {
+				merged.Entries[k] = v
+			}
+		}
+	}
+	if err := discordindex.SaveIndex(merged, path); err != nil {
+		return "", err
+	}
+	wr.EventsEmit(a.ctx, "discordindex:progress", map[string]interface{}{
+		"scanned": len(merged.Entries),
+		"total":   len(merged.Entries),
+		"message": fmt.Sprintf("✓ Index sauvegardé : %d entrées (%d forum%s) → %s", len(merged.Entries), len(forumIDs), map[bool]string{true: "s", false: ""}[len(forumIDs) > 1], path),
+		"done":    true,
+	})
+	return path, nil
+}
+
+// DiscordIndexRead (admin) lit le JSON local et retourne son contenu (string)
+// pour copier-coller / vérification.
+func (a *App) DiscordIndexRead() (string, error) {
+	path, err := config.DiscordIndexPath()
+	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+// DiscordIndexPushGitHub (admin) push le JSON local sur GitHub directement via
+// l'API Contents. Met à jour le fichier s'il existe, sinon le crée.
+// Retourne le SHA du nouveau commit ou une erreur sanitizée (token jamais loggé).
+func (a *App) DiscordIndexPushGitHub() (string, error) {
+	cfg := config.Load()
+	if strings.TrimSpace(cfg.GitHubToken) == "" {
+		return "", errors.New("Token GitHub non configuré (Réglages → Index Discord → Push GitHub)")
+	}
+	if strings.TrimSpace(cfg.GitHubRepo) == "" {
+		return "", errors.New("Repo GitHub non configuré (format : owner/name)")
+	}
+	filePath := strings.TrimSpace(cfg.GitHubIndexFilePath)
+	if filePath == "" {
+		filePath = "discord_index.json"
+	}
+	branch := strings.TrimSpace(cfg.GitHubBranch)
+	if branch == "" {
+		branch = "main"
+	}
+	jsonPath, err := config.DiscordIndexPath()
+	if err != nil {
+		return "", err
+	}
+	content, err := os.ReadFile(jsonPath)
+	if err != nil {
+		return "", fmt.Errorf("lecture index local : %w (lance d'abord 'Mettre à jour l'index')", err)
+	}
+	msg := fmt.Sprintf("chore(discord-index): update %s", time.Now().UTC().Format("2006-01-02 15:04:05 UTC"))
+	sha, err := discordindex.PushToGitHub(a.ctx, cfg.GitHubToken, cfg.GitHubRepo, branch, filePath, content, msg)
+	if err != nil {
+		return "", err
+	}
+	wr.EventsEmit(a.ctx, "log", fmt.Sprintf("📤 GitHub : index pushé sur %s@%s/%s (SHA %s)", cfg.GitHubRepo, branch, filePath, sha[:min(len(sha), 8)]))
+	return sha, nil
+}
+
+// DiscordIndexLookup (user) cherche un TMDB ID dans l'index local d'abord,
+// puis dans le remote si pas trouvé. Retourne l'URL Discord ou "".
+// N'utilise JAMAIS le token Discord.
+func (a *App) DiscordIndexLookup(tmdbID string) (string, error) {
+	tmdbID = strings.TrimSpace(tmdbID)
+	if tmdbID == "" {
+		return "", nil
+	}
+	path, err := config.DiscordIndexPath()
+	if err != nil {
+		return "", err
+	}
+	// 1) cache local (qui peut être l'index admin OU le remote téléchargé).
+	if idx, _ := discordindex.LoadIndex(path); idx != nil {
+		if u := discordindex.LookupTmdb(idx, tmdbID); u != "" {
+			return u, nil
+		}
+	}
+	// 2) tenter un fetch remote (best-effort, silencieux si pas configuré).
+	cfg := config.Load()
+	if strings.TrimSpace(cfg.DiscordIndexURL) != "" {
+		if idx, err := discordindex.FetchRemoteIndex(a.ctx, cfg.DiscordIndexURL, path); err == nil && idx != nil {
+			if u := discordindex.LookupTmdb(idx, tmdbID); u != "" {
+				return u, nil
+			}
+		}
+	}
+	return "", nil
+}
+
+// DiscordIndexRefreshRemote (user) force un téléchargement du JSON remote
+// (si configuré). Best-effort : pas d'erreur si l'URL n'est pas configurée.
+func (a *App) DiscordIndexRefreshRemote() error {
+	cfg := config.Load()
+	url := strings.TrimSpace(cfg.DiscordIndexURL)
+	if url == "" {
+		return nil // silencieux : pas configuré
+	}
+	path, err := config.DiscordIndexPath()
+	if err != nil {
+		return err
+	}
+	// Force refresh : on supprime le cache pour bypasser le TTL 24h.
+	_ = os.Remove(path)
+	_, err = discordindex.FetchRemoteIndex(a.ctx, url, path)
+	return err
+}
 

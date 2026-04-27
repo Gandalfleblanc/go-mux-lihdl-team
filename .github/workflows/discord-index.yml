@@ -1,0 +1,83 @@
+name: Discord Index (auto)
+
+# Scanne automatiquement le(s) forum(s) Discord configuré(s) et commit
+# discord_index.json à la racine du repo s'il a changé. Tourne tous les soirs
+# à 19:00 UTC (= 20:00 Paris hiver / 21:00 Paris été) et sur déclenchement
+# manuel via l'onglet Actions.
+#
+# CONFIG REQUISE (Settings → Secrets and variables → Actions → New secret) :
+#   - DISCORD_BOT_TOKEN  : token du bot Discord (sans le préfixe "Bot ")
+#   - DISCORD_FORUM_IDS  : un ou plusieurs IDs de forum channels, séparés par
+#                          virgule, espace ou newline.
+#
+# Sans ces deux secrets, le job se termine proprement (exit 0) avec un log
+# explicite — on évite les emails d'échec sur un repo fraîchement cloné.
+
+on:
+  schedule:
+    # 19:00 UTC tous les jours = 20h Paris hiver / 21h Paris été
+    - cron: "0 19 * * *"
+  workflow_dispatch:
+
+permissions:
+  # Nécessaire pour `git push` du JSON régénéré via GITHUB_TOKEN.
+  contents: write
+
+concurrency:
+  group: discord-index
+  cancel-in-progress: false
+
+jobs:
+  scan-and-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Vérifie la présence des secrets
+        id: check-secrets
+        env:
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_FORUM_IDS: ${{ secrets.DISCORD_FORUM_IDS }}
+        run: |
+          if [ -z "$DISCORD_BOT_TOKEN" ] || [ -z "$DISCORD_FORUM_IDS" ]; then
+            echo "::warning::Secrets DISCORD_BOT_TOKEN et/ou DISCORD_FORUM_IDS absents — workflow skippé."
+            echo "::warning::Configure-les dans Settings → Secrets and variables → Actions pour activer le scan auto."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Go
+        if: steps.check-secrets.outputs.skip != 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build CLI discord-indexer
+        if: steps.check-secrets.outputs.skip != 'true'
+        run: go build -o discord-indexer ./cmd/discord-indexer
+
+      - name: Run discord-indexer (incrémental)
+        if: steps.check-secrets.outputs.skip != 'true'
+        env:
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_FORUM_IDS: ${{ secrets.DISCORD_FORUM_IDS }}
+        run: ./discord-indexer
+
+      - name: Commit & push si l'index a changé
+        if: steps.check-secrets.outputs.skip != 'true'
+        run: |
+          # On ne touche QUE discord_index.json — pas d'autre fichier.
+          if git diff --quiet -- discord_index.json; then
+            echo "→ Aucun changement dans discord_index.json, rien à committer."
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add discord_index.json
+          git commit -m "chore(discord-index): auto-update [skip ci]"
+          git push
+          echo "✓ discord_index.json committé et pushé."

@@ -4,11 +4,15 @@ import {naming} from '../models';
 import {main} from '../models';
 import {audiosync} from '../models';
 import {config} from '../models';
+import {ocrsubs} from '../models';
+import {opensubtitles} from '../models';
 import {tmdb} from '../models';
 
 export function AnalyzeMkv(arg1:string):Promise<void>;
 
 export function AnalyzeMkvSecondary(arg1:string):Promise<void>;
+
+export function ApplyOCRFix(arg1:string,arg2:number,arg3:string,arg4:string):Promise<void>;
 
 export function BuildFilename(arg1:naming.FilenameParams):Promise<string>;
 
@@ -21,6 +25,18 @@ export function CheckUpdate():Promise<main.UpdateInfo>;
 export function CheckVFQ(arg1:string):Promise<boolean>;
 
 export function DetectAudioOffset(arg1:string,arg2:number,arg3:number):Promise<audiosync.DetectionResult>;
+
+export function DiscordIndexLookup(arg1:string):Promise<string>;
+
+export function DiscordIndexPushGitHub():Promise<string>;
+
+export function DiscordIndexRead():Promise<string>;
+
+export function DiscordIndexRefreshRemote():Promise<void>;
+
+export function DiscordIndexScan():Promise<string>;
+
+export function DownloadOpenSubtitle(arg1:string,arg2:string):Promise<string>;
 
 export function ExtractFRAudios(arg1:string,arg2:boolean,arg3:boolean,arg4:boolean,arg5:string):Promise<Array<main.FRAudioExtraction>>;
 
@@ -52,11 +68,23 @@ export function Mux(arg1:main.MuxRequest):Promise<void>;
 
 export function MuxAudioSync(arg1:main.AudioSyncRequest):Promise<void>;
 
+export function OCRCustomDictAdd(arg1:string,arg2:string,arg3:boolean):Promise<void>;
+
+export function OCRCustomDictList():Promise<Array<ocrsubs.CustomDictEntry>>;
+
+export function OCRCustomDictRemove(arg1:string):Promise<void>;
+
+export function OCRPGSTrack(arg1:string,arg2:number,arg3:string):Promise<string>;
+
+export function OCRSupFile(arg1:string,arg2:string):Promise<string>;
+
 export function OpenFolder(arg1:string):Promise<void>;
 
 export function OpenURL(arg1:string):Promise<void>;
 
 export function SaveConfig(arg1:config.Config):Promise<void>;
+
+export function SearchOpenSubtitles(arg1:string,arg2:number,arg3:string):Promise<Array<opensubtitles.OSSearchResult>>;
 
 export function SearchTmdb(arg1:string):Promise<Array<tmdb.Result>>;
 
@@ -74,7 +102,11 @@ export function SelectOutputDir():Promise<string>;
 
 export function SelectSubFiles():Promise<Array<string>>;
 
+export function SelectSupFiles():Promise<Array<string>>;
+
 export function TestHydrackerKey(arg1:string):Promise<main.ApiKeyTestResult>;
+
+export function TestLanguageToolKey(arg1:string,arg2:string,arg3:string):Promise<main.ApiKeyTestResult>;
 
 export function TestTmdbKey(arg1:string):Promise<main.TmdbTestResult>;
 

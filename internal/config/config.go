@@ -23,6 +23,40 @@ type Config struct {
 	DefaultTeam     string `json:"default_team"`     // team pré-sélectionnée
 	DefaultQuality  string `json:"default_quality"`  // qualité pré-sélectionnée
 	DefaultSource   string `json:"default_source"`   // source pré-sélectionnée
+
+	// LanguageTool (étape post-cleanup OCR pour passer de ~99.3% à ~99.85%).
+	// Sans clé : API publique (20 req/min, 20 KB/req). Avec clé : Premium.
+	LanguageToolKey  string `json:"languagetool_key"`  // apiKey LT Premium (optionnel)
+	LanguageToolUser string `json:"languagetool_user"` // username LT Premium (optionnel)
+	LanguageToolURL  string `json:"languagetool_url"`  // override endpoint (optionnel)
+
+	// OpenSubtitles (recherche de SRT existant avant OCR — gain de minutes).
+	// Clé API gratuite via opensubtitles.com → Profile → Consumers.
+	OpenSubtitlesAPIKey string `json:"opensubtitles_api_key"`
+
+	// Index Discord (admin only — token et forum ID).
+	// DiscordIndexURL est lue par TOUS les users pour fetch le JSON public.
+	DiscordBotToken string `json:"discord_bot_token"`
+	DiscordForumID  string `json:"discord_forum_id"`
+	DiscordIndexURL string `json:"discord_index_url"`
+
+	// Push GitHub (admin) — pour pusher l'index Discord directement sur le repo
+	// sans passer par le site web GitHub.
+	GitHubToken         string `json:"github_token"`            // PAT avec scope `repo`
+	GitHubRepo          string `json:"github_repo"`             // ex: Gandalfleblanc/go-mux-lihdl-team
+	GitHubBranch        string `json:"github_branch"`           // default: main
+	GitHubIndexFilePath string `json:"github_index_file_path"`  // ex: discord_index.json
+}
+
+// DiscordIndexPath retourne le chemin du JSON local de l'index Discord
+// (utilisé en cache user et en sortie admin du scan). Le dossier parent est
+// créé à la demande.
+func DiscordIndexPath() (string, error) {
+	dir, err := configDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "discord_index.json"), nil
 }
 
 func configDir() (string, error) {
@@ -59,6 +93,21 @@ func BinDir() (string, error) {
 		return "", err
 	}
 	return bin, nil
+}
+
+// CacheDir retourne le dossier où sont stockés les artefacts cache (OCR par
+// hash du .sup, dictionnaire custom OCR, etc.). Créé à la demande.
+// Sous-dossiers conventionnels : "ocr-cache/" (SRT par sha256), "ocr-custom-dict.json".
+func CacheDir() (string, error) {
+	dir, err := configDir()
+	if err != nil {
+		return "", err
+	}
+	cache := filepath.Join(dir, "ocr-cache")
+	if err := os.MkdirAll(cache, 0755); err != nil {
+		return "", err
+	}
+	return cache, nil
 }
 
 func Load() Config {

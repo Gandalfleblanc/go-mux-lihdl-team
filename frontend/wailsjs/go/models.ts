@@ -41,6 +41,17 @@ export namespace config {
 	    default_team: string;
 	    default_quality: string;
 	    default_source: string;
+	    languagetool_key: string;
+	    languagetool_user: string;
+	    languagetool_url: string;
+	    opensubtitles_api_key: string;
+	    discord_bot_token: string;
+	    discord_forum_id: string;
+	    discord_index_url: string;
+	    github_token: string;
+	    github_repo: string;
+	    github_branch: string;
+	    github_index_file_path: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Config(source);
@@ -61,6 +72,17 @@ export namespace config {
 	        this.default_team = source["default_team"];
 	        this.default_quality = source["default_quality"];
 	        this.default_source = source["default_source"];
+	        this.languagetool_key = source["languagetool_key"];
+	        this.languagetool_user = source["languagetool_user"];
+	        this.languagetool_url = source["languagetool_url"];
+	        this.opensubtitles_api_key = source["opensubtitles_api_key"];
+	        this.discord_bot_token = source["discord_bot_token"];
+	        this.discord_forum_id = source["discord_forum_id"];
+	        this.discord_index_url = source["discord_index_url"];
+	        this.github_token = source["github_token"];
+	        this.github_repo = source["github_repo"];
+	        this.github_branch = source["github_branch"];
+	        this.github_index_file_path = source["github_index_file_path"];
 	    }
 	}
 
@@ -540,6 +562,62 @@ export namespace naming {
 	        this.VideoCodec = source["VideoCodec"];
 	        this.Team = source["Team"];
 	        this.CustomSource = source["CustomSource"];
+	    }
+	}
+
+}
+
+export namespace ocrsubs {
+	
+	export class CustomDictEntry {
+	    wrong: string;
+	    right: string;
+	    added_at: string;
+	    auto: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new CustomDictEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.wrong = source["wrong"];
+	        this.right = source["right"];
+	        this.added_at = source["added_at"];
+	        this.auto = source["auto"];
+	    }
+	}
+
+}
+
+export namespace opensubtitles {
+	
+	export class OSSearchResult {
+	    id: string;
+	    subtitle_id: string;
+	    title: string;
+	    year: number;
+	    language: string;
+	    download_count: number;
+	    rating: number;
+	    filename: string;
+	    url: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new OSSearchResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.subtitle_id = source["subtitle_id"];
+	        this.title = source["title"];
+	        this.year = source["year"];
+	        this.language = source["language"];
+	        this.download_count = source["download_count"];
+	        this.rating = source["rating"];
+	        this.filename = source["filename"];
+	        this.url = source["url"];
 	    }
 	}
 
