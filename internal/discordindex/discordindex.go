@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -513,9 +514,12 @@ func listAllArchivedThreads(ctx context.Context, client *http.Client, botToken, 
 	page := 0
 	for {
 		page++
+		// IMPORTANT : on URL-encode `before` pour que le `+` du timezone
+		// (ex: "2026-03-27T23:08:55.695000+00:00") devienne `%2B`. Sinon
+		// Discord le décode comme un espace et rejette en HTTP 400.
 		path := "/channels/" + forumID + "/threads/archived/public?limit=100"
 		if before != "" {
-			path += "&before=" + before
+			path += "&before=" + url.QueryEscape(before)
 		}
 		if progressFn != nil {
 			progressFn(0, 0, fmt.Sprintf("Archives : page %d (%d threads récupérés)…", page, len(out)))
