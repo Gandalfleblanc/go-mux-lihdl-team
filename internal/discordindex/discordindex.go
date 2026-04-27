@@ -84,10 +84,31 @@ type discordThreadMetadata struct {
 }
 
 type discordMessage struct {
-	ID        string `json:"id"`
-	Content   string `json:"content"`
-	ChannelID string `json:"channel_id"`
-	Timestamp string `json:"timestamp"`
+	ID        string          `json:"id"`
+	Content   string          `json:"content"`
+	ChannelID string          `json:"channel_id"`
+	Timestamp string          `json:"timestamp"`
+	Embeds    []discordEmbed  `json:"embeds,omitempty"`
+}
+
+// discordEmbed est l'embed riche envoyé par un bot/webhook (preview de lien).
+// On y cherche aussi le lien TMDB car beaucoup de posts utilisent ce format
+// au lieu d'avoir l'URL en clair dans content.
+type discordEmbed struct {
+	URL         string              `json:"url,omitempty"`
+	Title       string              `json:"title,omitempty"`
+	Description string              `json:"description,omitempty"`
+	Fields      []discordEmbedField `json:"fields,omitempty"`
+	Author      *discordEmbedAuthor `json:"author,omitempty"`
+}
+
+type discordEmbedField struct {
+	Name  string `json:"name,omitempty"`
+	Value string `json:"value,omitempty"`
+}
+
+type discordEmbedAuthor struct {
+	URL string `json:"url,omitempty"`
 }
 
 // --- Public API ---
@@ -228,7 +249,7 @@ func ScanForumIncremental(ctx context.Context, botToken, forumChannelID string, 
 			}
 			continue
 		}
-		tmdbID := extractTmdbID(msg.Content)
+		tmdbID := extractTmdbIDFromMessage(msg)
 		if tmdbID == "" {
 			progressFn(scanned, total, fmt.Sprintf("· %s : pas de lien TMDB", t.Name))
 			continue
@@ -562,6 +583,36 @@ func extractTmdbID(content string) string {
 	m := tmdbRegex.FindStringSubmatch(content)
 	if len(m) >= 2 {
 		return m[1]
+	}
+	return ""
+}
+
+// extractTmdbIDFromMessage cherche un lien TMDB dans le contenu brut ET dans
+// tous les embeds du message (URL, title, description, fields, author URL).
+// Beaucoup de posts Discord ont l'URL dans un embed riche au lieu du content.
+func extractTmdbIDFromMessage(msg *discordMessage) string {
+	if msg == nil {
+		return ""
+	}
+	if id := extractTmdbID(msg.Content); id != "" {
+		return id
+	}
+	for _, e := range msg.Embeds {
+		for _, s := range []string{e.URL, e.Title, e.Description} {
+			if id := extractTmdbID(s); id != "" {
+				return id
+			}
+		}
+		for _, f := range e.Fields {
+			if id := extractTmdbID(f.Name + " " + f.Value); id != "" {
+				return id
+			}
+		}
+		if e.Author != nil {
+			if id := extractTmdbID(e.Author.URL); id != "" {
+				return id
+			}
+		}
 	}
 	return ""
 }
