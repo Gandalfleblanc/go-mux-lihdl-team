@@ -4,7 +4,7 @@
   import logo from './assets/images/logo.png';
   import {
     GetVersion, GetConfig, SaveConfig, GetLihdlOptions,
-    SelectMkvFile, SelectSubFiles, SelectAudioFiles, SelectOutputDir, LocateMkvmerge, OpenFolder, SearchTmdbTV, SearchTmdbMovie, AnalyzeMkvSecondary, MoveToTrash, MoveDirContentsToTrash, LookupHydrackerURL, TestHydrackerKey, TestUnfrKey, OpenURL, GetMkvBasicInfo, ExtractRefSubs, ExtractFRAudios, CheckSubsSync,
+    SelectMkvFile, SelectMkvFiles, SelectSubFiles, SelectAudioFiles, SelectOutputDir, LocateMkvmerge, OpenFolder, SearchTmdbTV, SearchTmdbMovie, AnalyzeMkvSecondary, MoveToTrash, MoveDirContentsToTrash, LookupHydrackerURL, TestHydrackerKey, TestUnfrKey, OpenURL, GetMkvBasicInfo, ExtractRefSubs, ExtractFRAudios, CheckSubsSync,
     AnalyzeMkv, SearchTmdb, TestTmdbKey, FileSize,
     Mux, CancelMux,
     CheckUpdate, InstallUpdate,
@@ -148,6 +148,9 @@
   }
   // Dernière fiche TMDB sélectionnée — permet de basculer VF/VO sans re-chercher.
   let lastTmdbResult = null;
+  // Flag de validation TMDB : tant qu'il est false ET qu'on a une fiche TMDB,
+  // on bloque l'affichage des pistes/réglages pour forcer une confirmation visuelle.
+  let tmdbValidated = false;
 
   // Dropdowns pour le filename (ordre : résolution.source).
   const RESOLUTION_OPTIONS = ['720p', '1080p', '2160p'];
@@ -577,6 +580,7 @@
     externalSubs = [];
     externalAudios = [];
     lastTmdbResult = null;
+    tmdbValidated = false;
     tmdbResults = [];
     tmdbQuery = '';
     tmdbIdQuery = '';
@@ -647,6 +651,7 @@
 
   // Queue batch : liste de .mkv en attente de mux.
   let queue = [];
+  let bottomPaneTab = 'journal'; // 'journal' | 'queue' — tab actif dans la card secondaire en bas droite
 
   function queueAdd(paths) {
     if (!paths || !paths.length) return;
@@ -1346,6 +1351,8 @@
     sourcePath = path;
     sourceInfo = null;
     tracks = [];
+    // Reset validation TMDB : nouvelle source = nouvelle confirmation à demander.
+    tmdbValidated = false;
     // Reset le hash sync : nouvelle source = nouveau check à faire.
     lastSyncedSrtPathsHash = '';
     // Si des SRT externes sont déjà chargés, déclenche la vérif après init.
@@ -1985,6 +1992,17 @@
     if (p) openMkv(p);
   }
 
+  // Multi-sélection : ouvre un dialog pour choisir plusieurs MKV → ajoutés à la queue.
+  // Si aucune source actuelle, charge le 1er. Bascule l'onglet sur Queue.
+  async function pickMultipleMkvDialog() {
+    const paths = await SelectMkvFiles();
+    if (!paths || !paths.length) return;
+    queueAdd(paths);
+    appendLog('✓ ' + paths.length + ' .mkv ajoutés à la file');
+    if (!sourcePath && queue.length > 0) queueLoad(0);
+    bottomPaneTab = 'queue';
+  }
+
   // Renvoie le dossier de sortie selon le mode courant (mode-specific puis fallback).
   function effectiveOutputDir() {
     if (muxMode === 'lihdl') return config.output_dir_lihdl || config.output_dir || '';
@@ -2405,8 +2423,15 @@
     });
     EventsOn('files:dropped', (paths) => {
       if (!paths || !paths.length) return;
+      // Drop multi-MKV : autorisé uniquement sur la page d'accueil (pas de source chargée).
+      if (sourcePath) {
+        appendLog('ℹ Drop multi-MKV ignoré : termine d\'abord le mux en cours');
+        return;
+      }
       queueAdd(paths);
       appendLog('✓ ' + paths.length + ' .mkv ajoutés à la file');
+      if (!sourcePath && queue.length > 0) queueLoad(0);
+      bottomPaneTab = 'queue';
     });
     // Pattern chunked : analyze:start (n attendu) + analyze:track (x N).
     // On auto-finalise dès qu'on atteint n (l'event analyze:end de Wails
@@ -2444,55 +2469,107 @@
   });
 </script>
 
-<main>
-  <header class="topbar">
+<div class="app" class:no-source={!sourcePath && tracks.length === 0 && screen === 'source'} class:tmdb-pending={sourcePath && !tmdbValidated && lastTmdbResult && screen === 'source'} style:--banner-url="url({banner})">
+  <!-- Liquid glass background layers : banner + dark overlay + accent glow -->
+  <div class="bg-banner" aria-hidden="true"></div>
+  <div class="bg-overlay" aria-hidden="true"></div>
+  <div class="bg-glow bg-glow-1" aria-hidden="true"></div>
+  <div class="bg-glow bg-glow-2" aria-hidden="true"></div>
+
+  <!-- ─────── HEADER ─────── -->
+  <header class="header">
     <div class="brand">
-      <img class="logo" src={logo} alt="LiHDL" />
-      <div class="brand-text">
-        <div class="app-title">GO MUX <span class="brand-lihdl">LiHDL</span> TEAM</div>
-        <div class="app-subtitle">BY GANDALF</div>
+      <img class="brand-logo-img" src={logo} alt="LiHDL" />
+      <div>
+        <div class="brand-name">GO Mux LiHDL Team</div>
+        <div class="brand-version">{appVersion || 'v?'} · BY GANDALF</div>
       </div>
     </div>
-    <div class="topbar-right">
+
+    <div class="mode-switch">
+      <button class="mode-btn" class:active={muxMode === 'lihdl'} on:click={() => switchMuxMode('lihdl')}>⚡ MUX LiHDL</button>
+      <button class="mode-btn" class:active={muxMode === 'psa'}   on:click={() => switchMuxMode('psa')}>🎬 Custom PSA</button>
+    </div>
+
+    <!-- Film-bar : si TMDB sélectionné, on affiche poster + identité ; sinon placeholder -->
+    {#if lastTmdbResult}
+      <div class="film-bar">
+        {#if lastTmdbResult.poster_url}
+          <img src={lastTmdbResult.poster_url} alt="" class="film-poster" loading="lazy" />
+        {:else}
+          <div class="film-poster placeholder"></div>
+        {/if}
+        <div class="film-info">
+          <div class="film-title">{lastTmdbResult.titre_fr || lastTmdbResult.titre_vo || '—'}{lastTmdbResult.annee_fr ? ` (${lastTmdbResult.annee_fr})` : ''}</div>
+          <div class="film-meta">
+            {#if lastTmdbResult.tmdb_id}<button type="button" class="film-id film-id-link" on:click={() => OpenURL(lastTmdbResult.url || `https://www.themoviedb.org/movie/${lastTmdbResult.tmdb_id}`)} title="Ouvrir la fiche TMDB">↗ TMDB</button>{/if}
+            {#if lastTmdbResult.duree}<span>⏱ {lastTmdbResult.duree}</span>{/if}
+            {#if lastTmdbResult.note > 0}<span>★ {lastTmdbResult.note}</span>{/if}
+          </div>
+        </div>
+      </div>
+    {:else}
+      <div class="film-bar empty">
+        <div class="film-poster placeholder"></div>
+        <div class="film-info">
+          <div class="film-title">— Aucun film identifié —</div>
+          <div class="film-meta"><span>Charge une source MKV pour démarrer</span></div>
+        </div>
+      </div>
+    {/if}
+
+    <div class="header-actions">
       {#if updateInfo}
-        <button class="update-pill available" on:click={doInstallUpdate} disabled={installingUpdate}
+        <button class="btn update-pill available" on:click={doInstallUpdate} disabled={installingUpdate}
                 title="Installer {updateInfo.version}">
-          {installingUpdate ? '⟳ Installation…' : '⬇ Installer ' + updateInfo.version}
+          {installingUpdate ? '⟳ Installation…' : '⬇ ' + updateInfo.version}
         </button>
       {:else}
-        <button class="update-pill" on:click={checkForUpdate} disabled={checkingUpdate}
+        <button class="btn btn-ghost btn-icon" on:click={checkForUpdate} disabled={checkingUpdate}
                 title="Rechercher une mise à jour">
-          <span class="version-icon" class:spin={checkingUpdate}>⟳</span>
-          <span class="version-label">{appVersion}</span>
+          <span class:spin={checkingUpdate}>⟳</span>
         </button>
       {/if}
-      <button class="reset-btn" on:click={resetAll} disabled={muxing} title="Réinitialiser la session">
-        <span>↻</span>
-        <span class="reset-label">RESET</span>
-      </button>
-      <button class="settings-btn" on:click={() => screen = 'reglages'}>
-        <span class="gear">⚙</span>
-        <span class="settings-label">SETTINGS</span>
-      </button>
+      <button class="btn btn-ghost" on:click={resetAll} disabled={muxing} title="Réinitialiser la session">↻ RESET</button>
+      <button class="btn" on:click={() => screen = (screen === 'reglages' ? 'source' : 'reglages')}>⚙ SETTINGS</button>
+      {#if muxMode === 'psa' && secondaryPath && secondaryTracks.length > 0}
+        <button class="btn btn-accent" on:click={automate} disabled={muxing || !sourcePath}>⚡ MUX MANUEL</button>
+        <button class="btn btn-danger" on:click={muxAuto} disabled={muxing || !sourcePath}>🚀 MUX AUTO</button>
+      {:else}
+        <button class="btn btn-accent" on:click={() => automateLihdl()} disabled={muxing || !sourcePath || tracks.length === 0}>⚡ MUX MANUEL</button>
+        <button class="btn btn-danger" on:click={muxAutoLihdl} disabled={muxing || !sourcePath || tracks.length === 0}>🚀 MUX AUTO</button>
+      {/if}
     </div>
   </header>
 
-  <nav class="mux-mode-tabs">
-    <button class:active={muxMode === 'lihdl'} on:click={() => switchMuxMode('lihdl')}>⚡ MUX LiHDL</button>
-    <button class:active={muxMode === 'psa'}   on:click={() => switchMuxMode('psa')}>🎬 CUSTOM PSA SERIES</button>
-  </nav>
+  <!-- Sub-nav : Source / Cible / Sync / Réglages (utilisée seulement si on quitte 'source') -->
+  {#if screen !== 'source'}
+    <nav class="subnav">
+      <button class="btn btn-ghost" on:click={() => screen = 'source'}>← Retour</button>
+      <button class="subnav-btn" class:active={screen === 'source'}   on:click={() => screen = 'source'}>Source</button>
+      <button class="subnav-btn" class:active={screen === 'cible'}    on:click={() => screen = 'cible'}>Cible</button>
+      <button class="subnav-btn" class:active={screen === 'sync'}     on:click={() => screen = 'sync'}>Synchro Audios</button>
+      <button class="subnav-btn" class:active={screen === 'reglages'} on:click={() => screen = 'reglages'}>Réglages</button>
+    </nav>
+  {/if}
 
-  <nav class="tabs">
-    <button class:active={screen === 'source'}   on:click={() => screen = 'source'}>Source</button>
-    <button class:active={screen === 'cible'}    on:click={() => screen = 'cible'}>Cible</button>
-    <button class:active={screen === 'sync'}     on:click={() => screen = 'sync'}>Synchro Audios</button>
-    <button class:active={screen === 'reglages'} on:click={() => screen = 'reglages'}>Réglages</button>
-  </nav>
+  <!-- Mux progress bar : si en cours, on affiche au-dessus du main -->
+  {#if muxing}
+    <div class="mux-progress-bar">
+      <button class="btn btn-danger btn-stop-small" on:click={stopMux}>⏹ Stop</button>
+      <div class="progress-bar"><div class="progress-fill" style:width="{muxPercent}%"></div></div>
+      <span class="mono">{muxPercent}% · Mux en cours…</span>
+    </div>
+  {/if}
 
-  <section class="content">
+  <!-- ─────── MAIN ─────── -->
+  <main class="main">
     {#if screen === 'source'}
-      <!-- Bandeau persistant : statut du dernier MUX AUTO (succès / erreur).
-           Reste visible après l'auto-reset jusqu'au prochain mux ou clic ↻ RESET. -->
+
+    <!-- COLONNE GAUCHE -->
+    <div class="col">
+
+      <!-- Bandeau persistant : statut du dernier MUX AUTO (succès / erreur). -->
       {#if autoMuxStatus === 'success' && !muxing}
         <div class="card mux-status-banner success">
           <div class="auto-status done">✅ Mux terminé avec succès — fichier prêt dans ton dossier de sortie</div>
@@ -2504,65 +2581,57 @@
       {/if}
 
       <!-- Card unifiée : PSA + SUPPLY/FW (en mode PSA) ou seul (en mode LiHDL) -->
-      <div class="card sources-card drop-target" style:--wails-drop-target="drop">
-        <div class="section-title">Sources</div>
+      <div class="card drop-target" style:--wails-drop-target="drop">
+        <div class="card-title">📁 Sources</div>
 
-        <!-- Ligne ① PSA -->
-        <div class="source-row">
+        <div class="source-list">
+
+        <!-- Ligne ① Source principale -->
+        <div class="source-row" class:filled={sourcePath}>
+          <div class="source-num">1</div>
           <div class="source-info">
-            <div class="source-label">
-              <span class="source-num">①</span>
-              {muxMode === 'psa' ? 'Source PSA' : 'Source encodée'}
-              <span class="source-hint">(vidéo gardée)</span>
-            </div>
+            <div class="source-label">{muxMode === 'psa' ? 'Source PSA (vidéo gardée)' : 'Source encodée (vidéo gardée)'}</div>
             {#if sourcePath}
-              <div class="source-filename mono">{sourcePath.split('/').pop()}</div>
+              <div class="source-value">{sourcePath.split('/').pop()}</div>
             {:else}
-              <div class="source-empty">— Aucun fichier sélectionné —</div>
+              <div class="source-value empty">— Aucun fichier sélectionné —</div>
             {/if}
           </div>
-          <button class="btn-primary" on:click={pickMkvDialog}>
-            {sourcePath ? 'Changer' : (muxMode === 'psa' ? 'Choisir un fichier PSA' : 'Choisir un fichier')}
+          <button class="btn btn-ghost" on:click={pickMkvDialog}>
+            {sourcePath ? 'Changer' : (muxMode === 'psa' ? 'Choisir PSA' : 'Choisir')}
           </button>
         </div>
 
         <!-- Ligne ② SUPPLY/FW (mode PSA uniquement) -->
         {#if muxMode === 'psa'}
-          <div class="source-row secondary">
+          <div class="source-row" class:filled={secondaryPath}>
+            <div class="source-num">2</div>
             <div class="source-info">
-              <div class="source-label">
-                <span class="source-num">②</span>
-                Source SUPPLY / FW
-                <span class="source-hint">(audios + subs)</span>
-              </div>
+              <div class="source-label">Source SUPPLY / FW (audios + subs)</div>
               {#if secondaryPath}
-                <div class="source-filename mono">{secondaryPath.split('/').pop()}</div>
-                <div class="source-meta">{secondaryTracks.length} piste(s) audio/sub détectée(s)</div>
+                <div class="source-value">{secondaryPath.split('/').pop()} · {secondaryTracks.length} piste(s)</div>
               {:else}
-                <div class="source-empty">— Aucun fichier sélectionné —</div>
+                <div class="source-value empty">— Aucun fichier sélectionné —</div>
               {/if}
             </div>
-            <button class="btn-primary" on:click={pickSecondaryDialog}>
-              {secondaryPath ? 'Changer' : 'Choisir un fichier SUPPLY/FW'}
+            <button class="btn btn-ghost" on:click={pickSecondaryDialog}>
+              {secondaryPath ? 'Changer' : 'Choisir SUPPLY/FW'}
             </button>
           </div>
         {/if}
 
         <!-- Ligne ② Sous-titres externes (mode LiHDL uniquement) -->
         {#if muxMode === 'lihdl'}
-          <div class="source-row secondary">
+          <div class="source-row source-row-stacked" class:filled={externalSubs.length > 0}>
+            <div class="source-num">2</div>
             <div class="source-info">
-              <div class="source-label">
-                <span class="source-num">②</span>
-                Sous-titres
-                <span class="source-hint">(SRT/PGS/ASS · optionnel)</span>
-              </div>
+              <div class="source-label">Sous-titres (SRT/PGS/ASS · optionnel)</div>
               {#if externalSubs.length > 0}
-                <div class="source-filename mono">
+                <div class="source-value">
                   {externalSubs.length} fichier(s) : {basename(externalSubs[0].path)}{externalSubs.length > 1 ? ` +${externalSubs.length - 1} autre(s)` : ''}
                 </div>
               {:else}
-                <div class="source-empty">— Aucun sous-titre chargé —</div>
+                <div class="source-value empty">— Aucun sous-titre chargé —</div>
               {/if}
               {#if srtExtracting || srtExtractionResult}
                 <div class="extract-progress" class:done={srtExtractionResult === 'success' && !srtExtracting} class:err={srtExtractionResult === 'error' && !srtExtracting}>
@@ -2644,11 +2713,11 @@
               {/if}
             </div>
             <div class="source-row-actions">
-              <button class="btn-primary" on:click={pickSubsDialog} disabled={srtExtracting}>
-                {externalSubs.length > 0 ? '+ Ajouter' : 'Choisir des fichiers'}
+              <button class="btn btn-ghost" on:click={pickSubsDialog} disabled={srtExtracting}>
+                {externalSubs.length > 0 ? '+ Ajouter' : 'Choisir'}
               </button>
               {#if externalSubs.length > 0}
-                <button class="btn-icon" on:click={() => externalSubs = []} title="Vider la liste" disabled={srtExtracting}>✕</button>
+                <button class="btn btn-ghost btn-icon" on:click={() => externalSubs = []} title="Vider la liste" disabled={srtExtracting}>✕</button>
               {/if}
             </div>
           </div>
@@ -2656,15 +2725,12 @@
           <!-- Ligne ③ Source de référence : compat durée/FPS + extraction SRT (auto) + extraction FR audio (toggles) avec sync auto -->
           {#if showReferenceBar}
             {@const compat = checkCompat(sourceMkvInfo, referenceMkvInfo)}
-            <div class="source-row secondary">
+            <div class="source-row source-row-stacked" class:filled={referencePath}>
+              <div class="source-num">3</div>
               <div class="source-info">
-                <div class="source-label">
-                  <span class="source-num">③</span>
-                  Source de référence
-                  <span class="source-hint">(extraction SRT auto + FR audio sur demande, sync auto)</span>
-                </div>
+                <div class="source-label">Source de référence (extraction auto SRT + FR audio)</div>
                 {#if referencePath}
-                  <div class="source-filename mono">{basename(referencePath)}</div>
+                  <div class="source-value">{basename(referencePath)}</div>
                   {#if referenceMkvInfo && sourceMkvInfo}
                     <div class="compat-grid">
                       <span>Durée : {formatDuration(sourceMkvInfo.duration_seconds)} vs {formatDuration(referenceMkvInfo.duration_seconds)} <span class:compat-ok={compat.durationOK} class:compat-bad={compat.durationOK === false}>{compat.durationOK ? '✓' : '✗'}</span></span>
@@ -2729,207 +2795,54 @@
                 {/if}
               </div>
               <div class="source-row-actions">
-                <button class="btn-primary" on:click={pickReferenceDialog} disabled={frAudioExtracting}>
-                  {referencePath ? 'Changer' : 'Choisir un fichier'}
+                <button class="btn btn-ghost" on:click={pickReferenceDialog} disabled={frAudioExtracting}>
+                  {referencePath ? 'Changer' : 'Choisir'}
                 </button>
-                <button class="btn-icon" on:click={() => { clearReference(); showReferenceBar = false; }} title="Retirer la source de référence" disabled={frAudioExtracting}>✕</button>
+                <button class="btn btn-ghost btn-icon" on:click={() => { clearReference(); showReferenceBar = false; }} title="Retirer la source de référence" disabled={frAudioExtracting}>✕</button>
               </div>
             </div>
           {:else}
-            <button class="source-row-placeholder" on:click={() => { showReferenceBar = true; }}>+ Ajouter source de référence (SRT auto + FR audio sur demande)</button>
+            <div class="source-row">
+              <div class="source-num">3</div>
+              <div class="source-info">
+                <div class="source-label">Source de référence (extraction auto SRT + FR audio)</div>
+                <div class="source-value empty">— Aucun fichier de référence —</div>
+              </div>
+              <button class="btn btn-ghost" on:click={() => { showReferenceBar = true; pickReferenceDialog(); }}>Choisir</button>
+            </div>
           {/if}
 
         {/if}
-      </div>
+        </div><!-- /source-list -->
+      </div><!-- /card sources -->
 
-      <!-- Actions : barre d'automatisation (mode PSA, après chargement des 2) -->
-      <!-- Barre d'actions mode LiHDL : MUX MANUEL / MUX AUTO / Suivant -->
-      {#if muxMode === 'lihdl' && sourcePath && tracks.length > 0}
-        <div class="card automate-bar">
-          <!-- Poster TMDB + identité du film, pour vérification visuelle avant MUX AUTO -->
-          {#if lastTmdbResult && lastTmdbResult.poster_url}
-            <div class="tmdb-preview">
-              <img src={lastTmdbResult.poster_url} alt="Poster {lastTmdbResult.titre_fr || lastTmdbResult.titre_vo}" class="tmdb-preview-poster" loading="lazy" />
-              <div class="tmdb-preview-info">
-                <div class="tmdb-preview-title">{lastTmdbResult.titre_fr || lastTmdbResult.titre_vo}</div>
-                {#if lastTmdbResult.titre_vo && lastTmdbResult.titre_fr && lastTmdbResult.titre_vo !== lastTmdbResult.titre_fr}
-                  <div class="tmdb-preview-vo">VO : {lastTmdbResult.titre_vo}</div>
-                {/if}
-                <div class="tmdb-preview-meta">
-                  {#if lastTmdbResult.annee_fr}<span>📅 {lastTmdbResult.annee_fr}</span>{/if}
-                  {#if lastTmdbResult.duree}<span>⏱️ {lastTmdbResult.duree}</span>{/if}
-                  {#if lastTmdbResult.note > 0}<span>★ {lastTmdbResult.note}</span>{/if}
-                  {#if lastTmdbResult.original_language}<span>🌐 {lastTmdbResult.original_language.toUpperCase()}</span>{/if}
-                </div>
-                {#if lastTmdbResult.tmdb_id}
-                  <button class="vfq-link tmdb-preview-link" type="button" on:click={() => OpenURL(`https://www.themoviedb.org/movie/${lastTmdbResult.tmdb_id}`)}>↗ Vérifier sur TMDB (ID {lastTmdbResult.tmdb_id})</button>
-                {/if}
-                <!-- Override : si ce n'est pas le bon film, taper un ID TMDB manuellement -->
-                <div class="tmdb-preview-override">
-                  <span class="tmdb-preview-override-label">Pas le bon film ? Forcer l'ID :</span>
-                  <input
-                    type="text"
-                    class="tmdb-preview-override-input"
-                    bind:value={tmdbIdQuery}
-                    placeholder="ex: 12345"
-                    inputmode="numeric"
-                    pattern="[0-9]*"
-                    on:keydown={(e) => e.key === 'Enter' && searchTmdbById()}
-                  />
-                  <button class="btn-tiny tmdb-preview-override-btn" on:click={searchTmdbById} disabled={tmdbSearching || !tmdbIdQuery}>
-                    {tmdbSearching ? '⏳' : '↻ Forcer'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          {/if}
-          <div class="actions-row" style:gap="8px">
-            <button class="btn-primary" on:click={() => automateLihdl()} disabled={muxing}>⚡ MUX MANUEL</button>
-            <button class="btn-primary btn-auto" on:click={muxAutoLihdl} disabled={muxing}>🚀 MUX AUTO</button>
-            <button class="btn-primary" on:click={() => screen = 'cible'} disabled={muxing}>Suivant → Cible</button>
-          </div>
-          <!-- Recherche sous-titres SRT : liens externes (via Wails BrowserOpenURL) -->
-          {#if lastTmdbResult && lastTmdbResult.tmdb_id}
-            <div class="vfq-toggle" style:margin-top="8px">
-              <span class="srt-label">🔍 Recherche sous-titres SRT</span>
-              <button class="vfq-link" type="button" on:click={() => OpenURL(hydrackerURL || `https://hydracker.com/titles?search=${encodeURIComponent(lastTmdbResult.titre_fr || lastTmdbResult.titre_vo || '')}`)}>vérifier sur Hydra ↗</button>
-              <button class="vfq-link" type="button" on:click={() => OpenURL(`https://unfr.pw/?d=fiche&movieid=${lastTmdbResult.tmdb_id}`)}>vérifier sur UNFR ↗</button>
-            </div>
-          {/if}
-          <label class="vfq-toggle" style:margin-top="8px">
-            <input type="checkbox" bind:checked={useVFi} on:change={applyVFiSwap} />
-            <span class:vfq-yes={useVFi} class:vfq-no={!useVFi}>
-              {useVFi ? '✓ FR VFi (doublage international)' : '☐ FR VFF (doublage France métropolitaine)'}
-            </span>
-            {#if lastTmdbResult && lastTmdbResult.tmdb_id}
-              <button class="vfq-link" type="button" on:click={() => OpenURL(`https://www.themoviedb.org/movie/${lastTmdbResult.tmdb_id}/translations`)}>vérifier sur TMDB ↗</button>
-              <button class="vfq-link" type="button" on:click={() => OpenURL(`https://fr.wikipedia.org/w/index.php?title=Special:Search&go=Go&search=${encodeURIComponent(lastTmdbResult.titre_fr || lastTmdbResult.titre_vo || '')}`)}>vérifier sur Wikipédia ↗</button>
-            {/if}
-          </label>
+      <!-- Queue déplacée dans la card secondaire en bas droite (tab "Queue"). -->
 
-          {#if muxing}
-            <div class="auto-progress">
-              <div class="auto-progress-row">
-                <button class="btn-cancel btn-stop" on:click={stopMux}>⏹ Stop</button>
-                <div class="progress-bar"><div class="progress-fill" style:width="{muxPercent}%"></div></div>
-                <span class="mono">{muxPercent}%</span>
-              </div>
-              <div class="auto-status">Mux en cours…</div>
-            </div>
-          {:else if autoMuxStatus === 'success'}
-            <div class="auto-progress">
-              <div class="progress-bar done"><div class="progress-fill done-fill" style:width="100%"></div></div>
-              <div class="auto-status done">✅ Mux terminé avec succès — fichier prêt dans ton dossier de sortie</div>
-            </div>
-          {:else if autoMuxStatus === 'error'}
-            <div class="auto-progress">
-              <div class="progress-bar error"><div class="progress-fill error-fill" style:width="100%"></div></div>
-              <div class="auto-status error">❌ Mux échoué — vérifie les logs en bas</div>
-            </div>
-          {/if}
-        </div>
-      {/if}
 
-      {#if muxMode === 'psa' && secondaryPath && secondaryTracks.length > 0}
-        <div class="card automate-bar">
-          <div class="actions-row" style:gap="8px">
-            <button class="btn-primary" on:click={automate} disabled={muxing || !sourcePath}>⚡ MUX MANUEL</button>
-            <button class="btn-primary btn-auto" on:click={muxAuto} disabled={muxing || !sourcePath}>🚀 MUX AUTO</button>
-            <button class="btn-primary" on:click={() => screen = 'cible'} disabled={muxing}>Suivant → Cible</button>
-          </div>
-
-          {#if muxing}
-            <div class="auto-progress">
-              <div class="auto-progress-row">
-                <button class="btn-cancel btn-stop" on:click={stopMux}>⏹ Stop</button>
-                <div class="progress-bar"><div class="progress-fill" style:width="{muxPercent}%"></div></div>
-                <span class="mono">{muxPercent}%</span>
-              </div>
-              <div class="auto-status">Mux en cours…</div>
-            </div>
-          {:else if autoMuxStatus === 'success'}
-            <div class="auto-progress">
-              <div class="progress-bar done"><div class="progress-fill done-fill" style:width="100%"></div></div>
-              <div class="auto-status done">✅ Mux terminé avec succès — fichier prêt dans ton dossier de sortie</div>
-            </div>
-          {:else if autoMuxStatus === 'error'}
-            <div class="auto-progress">
-              <div class="progress-bar error"><div class="progress-fill error-fill" style:width="100%"></div></div>
-              <div class="auto-status error">❌ Mux échoué — vérifie les logs en bas</div>
-            </div>
-          {:else if secondarySelected.length > 0}
-            <div class="field-hint" style:margin-top="8px">
-              ✓ {secondarySelected.filter(t=>t.type==='audio').length} audio(s) + {secondarySelected.filter(t=>t.type==='subtitles').length} sub(s) prêts à muxer
-            </div>
-          {/if}
-        </div>
-      {/if}
-
-      <!-- Queue batch -->
-      {#if queue.length > 0}
-        <div class="card">
-          <div class="section-title-row">
-            <div class="section-title">File d'attente ({queue.length})</div>
-            <div class="section-actions">
-              <button class="btn-ghost" on:click={queueNext} disabled={muxing}>Charger le suivant</button>
-              <button class="btn-ghost" on:click={() => queue = []}>Vider</button>
-            </div>
-          </div>
-          <ul class="queue-list">
-            {#each queue as p, i}
-              <li class="queue-row">
-                <span class="queue-idx">{i + 1}</span>
-                <span class="queue-name mono">{p.split('/').pop()}</span>
-                <button class="btn-ghost btn-xs" on:click={() => queueLoad(i)} disabled={muxing}>Charger</button>
-                <button class="btn-delete" on:click={() => queueRemove(i)} title="Retirer de la file">✕</button>
-              </li>
-            {/each}
-          </ul>
-        </div>
-      {/if}
-
-      <!-- Tracks -->
+      <!-- Tracks (vidéo + audio + subs) — vue compacte mockup -->
       {#if tracks.length > 0}
-        <!-- Video -->
-        <div class="card">
-          <div class="section-title">Piste vidéo</div>
+        {@const audioCount = tracks.filter(t=>t.type==='audio').length + externalAudios.length + secondarySelected.filter(t=>t.type==='audio').length}
+        {@const subCount   = tracks.filter(t=>t.type==='subtitles').length + externalSubs.length + secondarySelected.filter(t=>t.type==='subtitles').length}
+        {@const videoCount = tracks.filter(t=>t.type==='video').length}
+        <div class="card card-grow">
+          <div class="card-title-row">
+            <div class="card-title">🎞️ Pistes ({videoCount} vidéo · {audioCount} audio · {subCount} subs)</div>
+            <div class="card-title-actions">
+              <button class="btn btn-ghost btn-tiny" on:click={pickAudioDialog}>+ audio</button>
+              <button class="btn btn-ghost btn-tiny" on:click={pickSubsDialog}>+ sub</button>
+            </div>
+          </div>
+
+          <!-- Vidéo -->
           {#each tracks.filter(t => t.type === 'video') as t}
-            <div class="track-row video">
-              <div class="track-meta">
-                <span class="badge video">VIDEO</span>
-                <span class="mono">#{t.id} · {t.codec} · {t.pixelDims || ''}</span>
-              </div>
-              <div class="video-dropdowns">
-                <label>Qualité
-                  <select bind:value={videoChoice.quality}>
-                    {#each options.video_qualities as q}<option>{q}</option>{/each}
-                  </select>
-                </label>
-                <label>Encodeur
-                  <select bind:value={videoChoice.encoder}>
-                    {#each options.video_encoders as e}<option>{e}</option>{/each}
-                  </select>
-                </label>
-                <label>Type source
-                  <select bind:value={videoChoice.sourceType} on:change={onSourceTypeChange}>
-                    {#each VIDEO_SOURCE_TYPE_OPTIONS as s}<option>{s}</option>{/each}
-                  </select>
-                </label>
-                <label>Team de la source
-                  <input type="text" bind:value={videoChoice.sourceTeam} placeholder="ex: Alkaline" />
-                </label>
-              </div>
-              <div class="track-preview mono">→ {previewVideoName}</div>
+            <div class="track">
+              <div class="track-icon video">▶</div>
+              <div class="track-label">#{t.id} · {t.codec} · {t.pixelDims || ''} → {previewVideoName}</div>
+              <div class="track-flag">{videoChoice.quality}</div>
             </div>
           {/each}
-        </div>
 
-        <!-- Audio -->
-        <div class="card">
-          <div class="section-title-row">
-            <div class="section-title">Pistes audio</div>
-            <button class="btn-tiny" on:click={pickAudioDialog}>+ Ajouter un fichier</button>
-          </div>
+          <!-- Audio (merge internal/external/secondary triés par ordre) -->
           {#if tracks.some(t => t.type === 'audio') || externalAudios.length > 0 || secondarySelected.some(t => t.type === 'audio')}
             {@const internalAudios = tracks.filter(t => t.type === 'audio')}
             {@const secondaryAudios = secondarySelected.filter(t => t.type === 'audio')}
@@ -2939,23 +2852,26 @@
               ...secondaryAudios.map((s, i) => ({ kind: 'secondary', idx: i, ref: s, order: s.order ?? 0 })),
             ].sort((a, b) => a.order - b.order)}
             {#each mergedAudios as item (item.kind + '-' + item.idx)}
-              <div class="track-row" class:dropped={!item.ref.keep}>
-                <div class="track-meta">
-                  {#if item.kind === 'internal'}
-                    <span class="badge audio">AUDIO</span>
-                    <span class="mono">#{item.ref.id} · {item.ref.codec} · {item.ref.lang || '??'} · {item.ref.channels || '?'}ch</span>
-                    {#if item.ref.name}<span class="track-current">« {item.ref.name} »</span>{/if}
-                  {:else if item.kind === 'secondary'}
-                    <span class="badge audio-ext">SUPPLY/FW</span>
-                    <span class="mono">#{item.ref.id} · {item.ref.codec || ''} · {item.ref.language || '??'}</span>
-                  {:else}
-                    <span class="badge audio-ext">AUDIO EXT</span>
-                    <span class="mono">{basename(item.ref.path)}</span>
-                    {#if item.ref.size != null && item.ref.size >= 0}
-                      <span class="sub-size mono">{formatBytes(item.ref.size)}</span>
+              <div class="track track-editable" class:dropped={!item.ref.keep}>
+                <div class="track-icon audio">♪</div>
+                <div class="track-body">
+                  <div class="track-label">
+                    {#if item.kind === 'internal'}
+                      #{item.ref.id} · {item.ref.codec} · {item.ref.lang || '??'} · {item.ref.channels || '?'}ch
+                    {:else if item.kind === 'secondary'}
+                      SUPPLY · #{item.ref.id} · {item.ref.codec || ''} · {item.ref.language || '??'}
+                    {:else}
+                      EXT · {basename(item.ref.path)}{item.ref.size != null && item.ref.size >= 0 ? ' · ' + formatBytes(item.ref.size) : ''}
                     {/if}
-                  {/if}
-                  <div class="order-ctrls">
+                  </div>
+                  <div class="track-controls">
+                    <select bind:value={item.ref.label}>
+                      <option value="">— label —</option>
+                      {#each options.audio_labels as lbl}<option>{lbl}</option>{/each}
+                    </select>
+                    <label class="chk"><input type="checkbox" bind:checked={item.ref.keep}/>Keep</label>
+                    <label class="chk"><input type="checkbox" bind:checked={item.ref.default}/>Default</label>
+                    <label class="chk"><input type="checkbox" bind:checked={item.ref.forced}/>Forced</label>
                     <button class="btn-arrow" title="Monter" on:click={() => moveAudioTrack(item.kind, item.idx, -1)}>↑</button>
                     <button class="btn-arrow" title="Descendre" on:click={() => moveAudioTrack(item.kind, item.idx, +1)}>↓</button>
                     {#if item.kind === 'internal'}
@@ -2967,28 +2883,20 @@
                     {/if}
                   </div>
                 </div>
-                <div class="track-controls">
-                  <select bind:value={item.ref.label}>
-                    <option value="">— choisir —</option>
-                    {#each options.audio_labels as lbl}<option>{lbl}</option>{/each}
-                  </select>
-                  <label class="chk"><input type="checkbox" bind:checked={item.ref.keep}/> Garder</label>
-                  <label class="chk"><input type="checkbox" bind:checked={item.ref.default}/> Default</label>
-                  <label class="chk"><input type="checkbox" bind:checked={item.ref.forced}/> Forced</label>
-                </div>
+                {#if item.ref.default}
+                  <div class="track-flag success">Default</div>
+                {:else if item.ref.forced}
+                  <div class="track-flag warn">Forced</div>
+                {:else if !item.ref.keep}
+                  <div class="track-flag err">Drop</div>
+                {:else}
+                  <div class="track-flag">Keep</div>
+                {/if}
               </div>
             {/each}
-          {:else}
-            <div class="empty-hint">Aucune piste audio détectée. Clique "+ Ajouter un fichier" pour ajouter un audio externe.</div>
           {/if}
-        </div>
 
-        <!-- Subtitles (internes + externes triés par ordre) -->
-        <div class="card">
-          <div class="section-title-row">
-            <div class="section-title">Sous-titres</div>
-            <button class="btn-tiny" on:click={pickSubsDialog}>+ Ajouter un fichier</button>
-          </div>
+          <!-- Subtitles -->
           {#if tracks.some(t => t.type === 'subtitles') || externalSubs.length > 0 || secondarySelected.some(t => t.type === 'subtitles')}
             {@const internalSubs = tracks.filter(t => t.type === 'subtitles')}
             {@const secondarySubs = secondarySelected.filter(t => t.type === 'subtitles')}
@@ -2998,23 +2906,26 @@
               ...secondarySubs.map((s, i) => ({ kind: 'secondary', idx: i, ref: s, order: s.order ?? 0 })),
             ].sort((a, b) => a.order - b.order)}
             {#each mergedSubs as item (item.kind + '-' + item.idx)}
-              <div class="track-row">
-                <div class="track-meta">
-                  {#if item.kind === 'internal'}
-                    <span class="badge subs">SUBS</span>
-                    <span class="mono">#{item.ref.id} · {item.ref.codec} · {item.ref.lang || '??'}</span>
-                    {#if item.ref.name}<span class="track-current">« {item.ref.name} »</span>{/if}
-                  {:else if item.kind === 'secondary'}
-                    <span class="badge subs-ext">SUPPLY/FW</span>
-                    <span class="mono">#{item.ref.id} · {item.ref.codec || ''} · {item.ref.language || '??'}</span>
-                  {:else}
-                    <span class="badge subs-ext">SUBS EXT</span>
-                    <span class="mono">{basename(item.ref.path)}</span>
-                    {#if item.ref.size != null && item.ref.size >= 0}
-                      <span class="sub-size mono">{formatBytes(item.ref.size)}</span>
+              <div class="track track-editable">
+                <div class="track-icon sub">A</div>
+                <div class="track-body">
+                  <div class="track-label">
+                    {#if item.kind === 'internal'}
+                      #{item.ref.id} · {item.ref.codec} · {item.ref.lang || '??'}
+                    {:else if item.kind === 'secondary'}
+                      SUPPLY · #{item.ref.id} · {item.ref.codec || ''} · {item.ref.language || '??'}
+                    {:else}
+                      EXT · {basename(item.ref.path)}{item.ref.size != null && item.ref.size >= 0 ? ' · ' + formatBytes(item.ref.size) : ''}
                     {/if}
-                  {/if}
-                  <div class="order-ctrls">
+                  </div>
+                  <div class="track-controls">
+                    <select bind:value={item.ref.label} on:change={onSubLabelChange}>
+                      <option value="">— label —</option>
+                      {#each options.subtitle_labels as lbl}<option>{lbl}</option>{/each}
+                    </select>
+                    <label class="chk"><input type="checkbox" bind:checked={item.ref.keep}/>Keep</label>
+                    <label class="chk"><input type="checkbox" bind:checked={item.ref.default}/>Default</label>
+                    <label class="chk"><input type="checkbox" bind:checked={item.ref.forced}/>Forced</label>
                     <button class="btn-arrow" title="Monter" on:click={() => moveTrack(item.kind, item.idx, -1)}>↑</button>
                     <button class="btn-arrow" title="Descendre" on:click={() => moveTrack(item.kind, item.idx, +1)}>↓</button>
                     {#if item.kind === 'internal'}
@@ -3026,41 +2937,391 @@
                     {/if}
                   </div>
                 </div>
-                <div class="track-controls">
-                  <select bind:value={item.ref.label} on:change={onSubLabelChange}>
-                    <option value="">— choisir —</option>
-                    {#each options.subtitle_labels as lbl}<option>{lbl}</option>{/each}
-                  </select>
-                  <label class="chk"><input type="checkbox" bind:checked={item.ref.keep}/> Garder</label>
-                  <label class="chk"><input type="checkbox" bind:checked={item.ref.default}/> Default</label>
-                  <label class="chk"><input type="checkbox" bind:checked={item.ref.forced}/> Forced</label>
-                </div>
+                {#if item.ref.forced}
+                  <div class="track-flag warn">Forced</div>
+                {:else if item.ref.default}
+                  <div class="track-flag success">Default</div>
+                {:else if !item.ref.keep}
+                  <div class="track-flag err">Drop</div>
+                {:else}
+                  <div class="track-flag">Keep</div>
+                {/if}
               </div>
             {/each}
-          {:else}
-            <div class="empty-hint">Aucun sous-titre détecté. Drop un .srt/.sup/.ass/.sub ici ou clique "+ Ajouter un fichier".</div>
           {/if}
-        </div>
 
-        <div class="actions-row">
-          <button class="btn-primary" on:click={() => screen = 'cible'}>Suivant → Cible</button>
+          {#if !tracks.some(t => t.type === 'audio') && externalAudios.length === 0 && secondarySelected.length === 0}
+            <div class="empty-hint">Aucune piste audio détectée. Clique "+ audio" pour ajouter un audio externe.</div>
+          {/if}
         </div>
       {/if}
 
+    </div><!-- /col gauche -->
+
+    <!-- COLONNE DROITE -->
+    <div class="col">
+
+      <!-- Empty state : visible quand aucune source OU quand source chargée mais TMDB pas encore validé -->
+      {#if (!sourcePath && tracks.length === 0) || (sourcePath && !tmdbValidated && lastTmdbResult)}
+        <div class="card empty-hero" class:compact={sourcePath && lastTmdbResult}>
+          <div class="empty-hero-aurora" aria-hidden="true"></div>
+          <div class="empty-hero-content">
+            <div class="empty-hero-badge">{muxMode === 'psa' ? 'CUSTOM PSA · SUPPLY/FW MUX' : 'LiHDL · FILM MUX PIPELINE'}</div>
+            <div class="empty-hero-icon">
+              <span class="empty-hero-icon-bg" aria-hidden="true"></span>
+              <span class="empty-hero-icon-glyph">{sourcePath ? '✓' : '▶'}</span>
+            </div>
+            <div class="empty-hero-title">{sourcePath ? 'Source chargée.' : 'Prêt à muxer.'}</div>
+            <div class="empty-hero-sub">
+              {#if sourcePath}
+                <b class="mono">{sourcePath.split('/').pop()}</b><br>
+                Confirme la fiche TMDB ci-dessous pour passer aux pistes & réglages.
+              {:else}
+                Charge un fichier <b class="mono">.mkv</b> source pour démarrer.<br>
+                Pistes, réglages TMDB, validation et boutons MUX apparaîtront ici.
+              {/if}
+            </div>
+            {#if !sourcePath}
+              <div class="empty-hero-cta-row">
+                <button class="btn btn-accent empty-hero-cta" on:click={pickMkvDialog}>
+                  <span>📁</span> Choisir un MKV
+                </button>
+                <button class="btn empty-hero-cta-secondary" on:click={pickMultipleMkvDialog}>
+                  <span>📋</span> Choisir plusieurs (queue)
+                </button>
+              </div>
+              <div class="empty-hero-droptip">↓ Ou glisse plusieurs MKV ici pour les mettre en file ↓</div>
+              <div class="empty-hero-hints">
+                <span class="empty-hero-hint">⚡ MUX rapide bit-à-bit</span>
+                <span class="empty-hero-hint-dot">·</span>
+                <span class="empty-hero-hint">🎬 Fiche TMDB auto</span>
+                <span class="empty-hero-hint-dot">·</span>
+                <span class="empty-hero-hint">🔊 Sync audio AC3/EAC3</span>
+              </div>
+            {/if}
+          </div>
+        </div>
+      {/if}
+
+      <!-- Card validation TMDB : confirmation visuelle du film identifié avant de passer à l'étape pistes/réglages -->
+      {#if sourcePath && !tmdbValidated && lastTmdbResult}
+        <div class="card tmdb-validate-card">
+          <div class="tmdb-validate-header">
+            <div class="tmdb-validate-badge">🎬 FILM IDENTIFIÉ — CONFIRME POUR CONTINUER</div>
+            <div class="tmdb-validate-force-mini" title="Pas le bon film ? Forcer l'ID TMDB">
+              <span class="tmdb-validate-force-mini-hash">#</span>
+              <input
+                type="text"
+                class="tmdb-validate-force-mini-input"
+                bind:value={tmdbIdQuery}
+                placeholder="ID TMDB"
+                inputmode="numeric"
+                pattern="[0-9]*"
+                on:keydown={(e) => e.key === 'Enter' && searchTmdbById()}
+              />
+              <button class="tmdb-validate-force-mini-btn" on:click={searchTmdbById} disabled={tmdbSearching || !tmdbIdQuery} title="Forcer cet ID">
+                {tmdbSearching ? '⏳' : '↻'}
+              </button>
+            </div>
+          </div>
+          <div class="tmdb-validate-body">
+            {#if lastTmdbResult.poster_url}
+              <img src={lastTmdbResult.poster_url} alt="Affiche du film" class="tmdb-validate-poster" />
+            {:else}
+              <div class="tmdb-validate-poster placeholder">🎞️</div>
+            {/if}
+            <div class="tmdb-validate-info">
+              <div class="tmdb-validate-title">{lastTmdbResult.titre_fr || lastTmdbResult.titre_vo || '—'}{lastTmdbResult.annee_fr ? ` (${lastTmdbResult.annee_fr})` : ''}</div>
+              {#if lastTmdbResult.titre_vo && lastTmdbResult.titre_fr && lastTmdbResult.titre_vo !== lastTmdbResult.titre_fr}
+                <div class="tmdb-validate-original">VO : {lastTmdbResult.titre_vo}</div>
+              {/if}
+              <div class="tmdb-validate-meta">
+                {#if lastTmdbResult.tmdb_id}<span class="tmdb-validate-pill">TMDB {lastTmdbResult.tmdb_id}</span>{/if}
+                {#if lastTmdbResult.duree}<span class="tmdb-validate-pill">⏱ {lastTmdbResult.duree}</span>{/if}
+                {#if lastTmdbResult.note > 0}<span class="tmdb-validate-pill rating">★ {lastTmdbResult.note}</span>{/if}
+                {#if lastTmdbResult.original_language}<span class="tmdb-validate-pill">🌐 {String(lastTmdbResult.original_language).toUpperCase()}</span>{/if}
+              </div>
+              {#if lastTmdbResult.description || lastTmdbResult.overview || lastTmdbResult.synopsis}
+                <div class="tmdb-validate-desc">{lastTmdbResult.description || lastTmdbResult.overview || lastTmdbResult.synopsis}</div>
+              {/if}
+            </div>
+          </div>
+          <div class="tmdb-validate-actions">
+            <button class="btn btn-accent tmdb-validate-cta" on:click={() => { tmdbValidated = true; }}>✓ C'est bien ce film — continuer</button>
+          </div>
+        </div>
+      {/if}
+
+      <!-- Card FICHE FILM supprimée — infos déjà visibles dans la card validation et le header film-bar. -->
+
+      <!-- Réglages piste vidéo -->
+      {#if tracks.length > 0 && tracks.some(t => t.type === 'video')}
+        <div class="card">
+          <div class="card-title">🎛️ Réglages piste vidéo</div>
+          <div class="field-grid">
+            <div class="field">
+              <span class="field-label">Qualité</span>
+              <select bind:value={videoChoice.quality}>
+                {#each options.video_qualities as q}<option>{q}</option>{/each}
+              </select>
+            </div>
+            <div class="field">
+              <span class="field-label">Encodeur</span>
+              <select bind:value={videoChoice.encoder}>
+                {#each options.video_encoders as e}<option>{e}</option>{/each}
+              </select>
+            </div>
+            <div class="field">
+              <span class="field-label">Type source</span>
+              <select bind:value={videoChoice.sourceType} on:change={onSourceTypeChange}>
+                {#each VIDEO_SOURCE_TYPE_OPTIONS as s}<option>{s}</option>{/each}
+              </select>
+            </div>
+            <div class="field">
+              <span class="field-label">Team source</span>
+              <input type="text" bind:value={videoChoice.sourceTeam} placeholder="ex: Alkaline" />
+            </div>
+            <div class="field">
+              <span class="field-label">Résolution</span>
+              <select bind:value={target.resolution}>
+                {#each RESOLUTION_OPTIONS as r}<option>{r}</option>{/each}
+              </select>
+            </div>
+            <div class="field">
+              <span class="field-label">Source (sortie)</span>
+              <select bind:value={target.source}>
+                {#each TARGET_SOURCE_OPTIONS as s}<option>{s}</option>{/each}
+              </select>
+            </div>
+            <div class="field">
+              <span class="field-label">Codec vidéo</span>
+              <select bind:value={target.video_codec}>
+                {#each VIDEO_CODEC_OPTIONS as c}<option>{c}</option>{/each}
+              </select>
+            </div>
+            <div class="field">
+              <span class="field-label">Team (sortie)</span>
+              <select bind:value={videoChoice.team}>
+                {#each options.video_teams as t}<option>{t}</option>{/each}
+              </select>
+            </div>
+            <div class="field">
+              <span class="field-label">Flag langue</span>
+              <select bind:value={target.flagOverride}>
+                {#each FLAG_OVERRIDE_OPTIONS as f}
+                  <option value={f}>{f === 'auto' ? 'Auto' : f}</option>
+                {/each}
+              </select>
+            </div>
+            <div class="field">
+              <span class="field-label">Titre</span>
+              <input type="text" bind:value={target.title} placeholder="Titre" />
+            </div>
+            <div class="field">
+              <span class="field-label">{target.episode ? 'Épisode' : 'Année'}</span>
+              {#if target.episode}
+                <input type="text" bind:value={target.episode} placeholder="S01E01" maxlength="10" />
+              {:else}
+                <input type="text" bind:value={target.year} placeholder="2025" maxlength="4" />
+              {/if}
+            </div>
+            <div class="field">
+              <span class="field-label">Codec auto-suggéré</span>
+              <input type="text" value={suggestedCodecDisplay || '—'} readonly />
+            </div>
+          </div>
+        </div>
+      {/if}
+
+      <!-- Filename preview -->
+      {#if tracks.length > 0}
+        <div class="card">
+          <div class="card-title">📝 Nom de fichier final</div>
+          {#if lastTmdbResult}
+            <div class="lang-toggle" style:margin-bottom="6px">
+              <button class:active={target.lang === 'auto'} on:click={() => target.lang = 'auto'}>Auto</button>
+              <button class:active={target.lang === 'vf'}   on:click={() => target.lang = 'vf'}>VF</button>
+              <button class:active={target.lang === 'vo'}   on:click={() => target.lang = 'vo'}>VO</button>
+            </div>
+          {/if}
+          {#if filenameOverride}
+            <input class="filename-input mono" type="text" bind:value={manualFilename} placeholder="nom-de-fichier.mkv" />
+            <div class="filename-actions">
+              <button class="btn btn-ghost btn-tiny" on:click={resetFilenameOverride} title="Revenir à l'auto">↺ Auto</button>
+              {#if effectiveFilename}
+                <button class="btn btn-ghost btn-tiny" on:click={copyFilename}>{filenameCopied ? '✓ Copié' : '📋 Copier'}</button>
+                <button class="btn btn-ghost btn-tiny" on:click={openOutputDir} disabled={!effectiveOutputDir()}>📂 Dossier</button>
+              {/if}
+            </div>
+          {:else}
+            <div class="filename mono">{previewFilename || '—'}</div>
+            <div class="filename-actions">
+              {#if previewFilename}
+                <button class="btn btn-ghost btn-tiny" on:click={startFilenameOverride} title="Modifier manuellement">✏ Modifier</button>
+              {/if}
+              {#if effectiveFilename}
+                <button class="btn btn-ghost btn-tiny" on:click={copyFilename}>{filenameCopied ? '✓ Copié' : '📋 Copier'}</button>
+                <button class="btn btn-ghost btn-tiny" on:click={openOutputDir} disabled={!effectiveOutputDir()}>📂 Dossier</button>
+              {/if}
+            </div>
+          {/if}
+        </div>
+      {/if}
+
+      <!-- Toggle FR VFi + liens externes (TMDB / Wikipédia / Hydra / UNFR) -->
+      {#if lastTmdbResult}
+        <div class="card vfq-links-card">
+          <div class="card-title">🌐 Langues, Sous-Titres & Liens</div>
+          {#if muxMode === 'lihdl'}
+            <label class="vfq-toggle">
+              <input type="checkbox" bind:checked={useVFi} on:change={applyVFiSwap} />
+              <span class:vfq-yes={useVFi} class:vfq-no={!useVFi}>
+                {useVFi ? '✓ FR VFi (international)' : '☐ FR VFF (France)'}
+              </span>
+              {#if lastTmdbResult.tmdb_id}
+                <button class="vfq-link" type="button" on:click={() => OpenURL(`https://www.themoviedb.org/movie/${lastTmdbResult.tmdb_id}/translations`)}>TMDB ↗</button>
+                <button class="vfq-link" type="button" on:click={() => OpenURL(`https://fr.wikipedia.org/w/index.php?title=Special:Search&go=Go&search=${encodeURIComponent(lastTmdbResult.titre_fr || lastTmdbResult.titre_vo || '')}`)}>Wikipédia ↗</button>
+              {/if}
+            </label>
+          {/if}
+          {#if lastTmdbResult.tmdb_id}
+            <div class="vfq-toggle" style:margin-top="6px">
+              <span class="srt-label">🔍 Sous-titres SRT :</span>
+              <button class="vfq-link" type="button" on:click={() => OpenURL(hydrackerURL || `https://hydracker.com/titles?search=${encodeURIComponent(lastTmdbResult.titre_fr || lastTmdbResult.titre_vo || '')}`)}>Hydra ↗</button>
+              <button class="vfq-link" type="button" on:click={() => OpenURL(`https://unfr.pw/?d=fiche&movieid=${lastTmdbResult.tmdb_id}`)}>UNFR ↗</button>
+            </div>
+          {/if}
+        </div>
+      {:else if sourcePath}
+        <!-- Recherche TMDB inline si pas encore picked -->
+        <div class="card">
+          <div class="card-title">🎬 Recherche TMDB</div>
+          <div class="lang-toggle" style:margin-bottom="6px">
+            <button class:active={tmdbMode === 'movie'} on:click={() => tmdbMode = 'movie'}>🎬 Film</button>
+            <button class:active={tmdbMode === 'tv'}    on:click={() => tmdbMode = 'tv'}>📺 Série</button>
+          </div>
+          <div class="field-row">
+            <input type="text" bind:value={tmdbQuery} placeholder={tmdbMode === 'tv' ? 'Titre de série…' : 'Titre du film…'} on:keydown={(e) => e.key === 'Enter' && searchTmdb()} />
+            <button class="btn btn-accent btn-tiny" on:click={searchTmdb} disabled={tmdbSearching}>{tmdbSearching ? '…' : 'Titre'}</button>
+          </div>
+          <div class="field-row" style:margin-top="6px">
+            <input type="text" bind:value={tmdbIdQuery} placeholder="ID TMDB (ex: 12345)" inputmode="numeric" pattern="[0-9]*" on:keydown={(e) => e.key === 'Enter' && searchTmdbById()} />
+            <button class="btn btn-accent btn-tiny" on:click={searchTmdbById} disabled={tmdbSearching}>{tmdbSearching ? '…' : 'ID'}</button>
+          </div>
+          {#if tmdbResults.length > 0}
+            <ul class="tmdb-list">
+              {#each tmdbResults.slice(0, 3) as r}
+                <li>
+                  <button class="tmdb-item" on:click={() => pickTmdb(r)}>
+                    {#if r.poster_url}<img class="tmdb-poster" src={r.poster_url} alt=""/>{/if}
+                    <div class="tmdb-body">
+                      <div class="tmdb-title">{r.titre_fr || r.titre_vo} <span class="tmdb-year">({r.annee_fr})</span></div>
+                      <div class="tmdb-meta">{r.duree || ''} · ⭐ {r.note || '?'}</div>
+                    </div>
+                  </button>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        </div>
+      {/if}
+
+      <!-- Output dir : géré dans les Réglages, plus affiché ici. -->
+
+      <!-- PSA secondary status (mode PSA) -->
+      {#if muxMode === 'psa' && secondarySelected.length > 0}
+        <div class="card">
+          <div class="card-title">✓ SUPPLY/FW prêt</div>
+          <div class="validation">
+            <span class="pill ok">✓ {secondarySelected.filter(t=>t.type==='audio').length} audio(s)</span>
+            <span class="pill ok">✓ {secondarySelected.filter(t=>t.type==='subtitles').length} sub(s)</span>
+          </div>
+        </div>
+      {/if}
+
+      <!-- Audio sync screen access -->
+      {#if tracks.length > 0}
+        <div class="card">
+          <div class="card-title">🔊 Outils additionnels</div>
+          <div class="tools-row">
+            <button class="btn btn-ghost btn-tiny" on:click={() => screen = 'sync'}>🔊 Synchro audios</button>
+            <button class="btn btn-ghost btn-tiny" on:click={() => screen = 'cible'}>🎯 Vue Cible détaillée</button>
+          </div>
+        </div>
+      {/if}
+
+      <!-- Card secondaire en bas droite : tabs Journal | Queue -->
+      {#if sourcePath && tmdbValidated}
+        <div class="card journal-card journal-inline">
+          <div class="bottom-pane-tabs">
+            <button class="bottom-pane-tab" class:active={bottomPaneTab === 'journal'} on:click={() => bottomPaneTab = 'journal'}>
+              📜 Journal{logLines.length > 0 ? ` (${logLines.length})` : ''}
+            </button>
+            <button class="bottom-pane-tab" class:active={bottomPaneTab === 'queue'} on:click={() => bottomPaneTab = 'queue'}>
+              📋 Queue{queue.length > 0 ? ` (${queue.length})` : ''}
+            </button>
+          </div>
+
+          {#if bottomPaneTab === 'journal'}
+            <div class="journal-scroll" bind:this={logEl}>
+              {#if logLines.length === 0}
+                <div class="journal-line"><span class="log-time">--:--:--</span><span class="log-msg lvl-info">Journal vide.</span></div>
+              {:else}
+                {#each logLines as l}
+                  <div class="journal-line">
+                    <span class="log-time">{l.time}</span>
+                    <span class="log-msg lvl-{l.level}">{l.text}</span>
+                  </div>
+                {/each}
+              {/if}
+            </div>
+          {:else}
+            <!-- bind:this conservé caché pour ne pas casser appendLog/logEl scroll -->
+            <div hidden bind:this={logEl}>{#each logLines as l}<span>{l.text}</span>{/each}</div>
+            <div class="queue-pane">
+              {#if queue.length === 0}
+                <div class="queue-empty">
+                  <div class="queue-empty-icon">📋</div>
+                  <div class="queue-empty-title">File vide</div>
+                </div>
+              {:else}
+                <ul class="queue-list">
+                  {#each queue as p, i}
+                    <li class="queue-row" class:current={p === sourcePath}>
+                      <span class="queue-idx">{i + 1}</span>
+                      <span class="queue-name mono" title={p}>{p.split('/').pop()}</span>
+                      <button class="btn btn-ghost btn-tiny" on:click={() => queueLoad(i)} disabled={muxing}>Charger</button>
+                      <button class="btn btn-ghost btn-icon" on:click={() => queueRemove(i)} title="Retirer">✕</button>
+                    </li>
+                  {/each}
+                </ul>
+                <div class="queue-actions">
+                  <button class="btn btn-ghost btn-tiny" on:click={queueNext} disabled={muxing}>↓ Charger le suivant</button>
+                  <button class="btn btn-ghost btn-tiny" on:click={() => queue = []}>🗑 Vider</button>
+                </div>
+              {/if}
+            </div>
+          {/if}
+        </div>
+      {/if}
+
+    </div><!-- /col droite -->
+
     {:else if screen === 'cible'}
+    <div class="fullscreen">
       <div class="card">
-        <div class="section-title">Recherche TMDB</div>
+        <div class="card-title">Recherche TMDB</div>
         <div class="lang-toggle" style:margin-bottom="8px">
           <button class:active={tmdbMode === 'movie'} on:click={() => tmdbMode = 'movie'}>🎬 Film</button>
           <button class:active={tmdbMode === 'tv'}    on:click={() => tmdbMode = 'tv'}>📺 Série</button>
         </div>
         <div class="field-row">
           <input type="text" bind:value={tmdbQuery} placeholder={tmdbMode === 'tv' ? 'Titre de série…' : 'Titre du film…'} on:keydown={(e) => e.key === 'Enter' && searchTmdb()} />
-          <button class="btn-primary" on:click={searchTmdb} disabled={tmdbSearching}>{tmdbSearching ? '…' : 'Chercher par titre'}</button>
+          <button class="btn btn-accent" on:click={searchTmdb} disabled={tmdbSearching}>{tmdbSearching ? '…' : 'Chercher par titre'}</button>
         </div>
         <div class="field-row" style:margin-top="6px">
           <input type="text" bind:value={tmdbIdQuery} placeholder="ID TMDB numérique (ex: 12345)…" inputmode="numeric" pattern="[0-9]*" on:keydown={(e) => e.key === 'Enter' && searchTmdbById()} />
-          <button class="btn-primary" on:click={searchTmdbById} disabled={tmdbSearching}>{tmdbSearching ? '…' : 'Chercher par ID'}</button>
+          <button class="btn btn-accent" on:click={searchTmdbById} disabled={tmdbSearching}>{tmdbSearching ? '…' : 'Chercher par ID'}</button>
         </div>
         {#if tmdbMode === 'tv' && !config.tmdb_key}
           <div class="field-hint">⚠ Clé API TMDB requise pour chercher des séries — Réglages.</div>
@@ -3135,7 +3396,7 @@
       </div>
 
       <div class="card">
-        <div class="section-title">Titre cible</div>
+        <div class="card-title">Titre cible</div>
         {#if target.title}
           <div class="tmdb-preview mono">{target.title}</div>
         {/if}
@@ -3224,17 +3485,19 @@
 
       <div class="actions-row">
         {#if muxing}
-          <button class="btn-cancel btn-stop" on:click={stopMux}>⏹ Stop</button>
+          <button class="btn btn-danger" on:click={stopMux}>⏹ Stop</button>
           <div class="progress-bar"><div class="progress-fill" style:width="{muxPercent}%"></div></div>
           <span class="mono">{muxPercent}%</span>
         {:else}
-          <button class="btn-primary" on:click={doMux} disabled={!sourcePath || !effectiveFilename}>Muxer</button>
+          <button class="btn btn-accent" on:click={doMux} disabled={!sourcePath || !effectiveFilename}>Muxer</button>
         {/if}
       </div>
+    </div><!-- /fullscreen cible -->
 
     {:else if screen === 'sync'}
+    <div class="fullscreen">
       <div class="card">
-        <div class="section-title">🔊 Synchro des Pistes Audios</div>
+        <div class="card-title">🔊 Synchro des Pistes Audios</div>
         <p class="hint">
           Charge un .mkv contenant plusieurs pistes audio (ex : VFF + VFQ).
           Choisis la piste de <strong>référence</strong> et indique pour chaque autre
@@ -3360,10 +3623,12 @@
           </div>
         {/if}
       </div>
+    </div><!-- /fullscreen sync -->
 
     {:else if screen === 'reglages'}
+    <div class="fullscreen">
       <div class="card">
-        <div class="section-title">TMDB</div>
+        <div class="card-title">TMDB</div>
         <div class="field"><label>Clé API TMDB</label>
           <div class="field-row">
             <input type="password" bind:value={config.tmdb_key} placeholder="ex: a1b2c3d4e5f6… (themoviedb.org → Settings → API)" />
@@ -3394,7 +3659,7 @@
       </div>
 
       <div class="card">
-        <div class="section-title">Recherche sous-titres SRT</div>
+        <div class="card-title">Recherche sous-titres SRT</div>
         <div class="field"><label>Clé API Hydracker</label>
           <div class="field-row">
             <input type="password" bind:value={config.hydracker_key} placeholder="ex: a1b2c3d4… (hydracker.com/account-settings)" />
@@ -3426,7 +3691,7 @@
       </div>
 
       <div class="card">
-        <div class="section-title">Dossiers de sortie</div>
+        <div class="card-title">Dossiers de sortie</div>
         <div class="field"><label>⚡ MUX LiHDL (films)</label>
           <div class="field-row">
             <input type="text" bind:value={config.output_dir_lihdl} placeholder="/Users/…/Mux/LiHDL" readonly />
@@ -3451,7 +3716,7 @@
       </div>
 
       <div class="card">
-        <div class="section-title">MKVToolNix</div>
+        <div class="card-title">MKVToolNix</div>
         <div class="field"><label>Chemin mkvmerge (optionnel — auto-détecté sinon)</label>
           <input type="text" bind:value={config.mkvmerge_path} placeholder="/opt/homebrew/bin/mkvmerge" />
         </div>
@@ -3459,800 +3724,2383 @@
       </div>
 
       <div class="actions-row">
-        <button class="btn-primary" on:click={saveSettings}>Enregistrer</button>
+        <button class="btn btn-accent" on:click={saveSettings}>Enregistrer</button>
       </div>
+    </div><!-- /fullscreen reglages -->
     {/if}
-  </section>
 
-  <section class="log-panel" bind:this={logEl}>
-    {#each logLines as l}
-      <div class="log-line">
-        <span class="log-time">{l.time}</span>
-        <span class="log-msg lvl-{l.level}">{l.text}</span>
-      </div>
-    {/each}
-  </section>
-</main>
+  </main>
+
+  <!-- Le journal est rendu dans la col droite quand sourcePath && tmdbValidated && screen === 'source'.
+       Sinon on garde un placeholder vide pour ne pas casser appendLog (logEl est lié dans la card). -->
+</div><!-- /app -->
 
 <style>
   :root {
-    --bg:         #0d0a10;
-    --bg-tint:    #14101a;
-    --bg2:        #1a1420;
-    --border:     rgba(255, 255, 255, 0.08);
-    --border-strong: rgba(255, 255, 255, 0.14);
-    --red:        #e63946;
-    --red-hot:    #ff5a4a;
-    --blue:       #00b4d8;
-    --blue-hot:   #48cae4;
-    --yellow:     #ffd60a;
-    --green:      #7ef0c0;
-    --text:       #f5efe7;
-    --text2:      #b5a9a1;
-    --text3:      #7a6e68;
+    color-scheme: dark;
+    --bg:           #0a0712;
+    --bg-deep:      #06040c;
+    --card:         rgba(26, 22, 34, 0.55);
+    --card-solid:   rgba(26, 22, 34, 0.75);
+    --card-hi:      rgba(40, 33, 54, 0.65);
+    --border:       rgba(255, 255, 255, 0.08);
+    --border-hi:    rgba(255, 255, 255, 0.18);
+    --border-glow:  rgba(255, 255, 255, 0.06);
+    --text:         #f3eff5;
+    --text2:        #a8a0b0;
+    --text3:        #6f677a;
+    --accent:       #7c5cff;
+    --accent-hot:   #9b80ff;
+    --accent-soft:  rgba(124, 92, 255, 0.55);
+    --red:          #ff3d5e;
+    --red-hot:      #ff6680;
+    --red-soft:     rgba(255, 61, 94, 0.55);
+    --green:        #5cc999;
+    --orange:       #ffb547;
+    --pink:         #ff5cb3;
+    --blue:         #5ec5ff;
+    --glass-blur:   blur(22px) saturate(180%);
+    --glass-blur-strong: blur(32px) saturate(200%);
+    --shadow-card:  0 8px 32px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    --shadow-card-hi: 0 12px 40px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.08);
   }
-
-  :global(body) {
+  :global(*) { box-sizing: border-box; }
+  :global(html), :global(body) {
+    margin: 0; padding: 0;
+    font-family: -apple-system, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
     color: var(--text);
-    background:
-      radial-gradient(1400px 900px at 50% 30%, rgba(230, 57, 70, 0.07), transparent 70%),
-      var(--bg);
+    background: var(--bg-deep);
+    font-size: 13px; line-height: 1.4;
+    height: 100vh; overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
+  .mono { font-family: "JetBrains Mono", "SF Mono", "Consolas", ui-monospace, monospace; }
 
-  main {
-    display: flex;
-    flex-direction: column;
-    min-height: 100vh;
-    text-align: left;
+  /* Page = grille header / (subnav?) / (mux-progress?) / main / footer */
+  .app {
+    display: grid;
+    grid-template-rows: auto auto auto 1fr auto;
+    height: 100vh;
+    overflow: hidden;
     position: relative;
     isolation: isolate;
+    background: var(--bg-deep);
   }
-
-  /* Banner en watermark de fond, centré, opacité réduite */
-  main::before {
-    content: '';
-    position: fixed;
-    inset: 100px 0 180px 0;
-    background-image: url(./assets/images/banner.png);
-    background-repeat: no-repeat;
-    background-position: center center;
-    background-size: clamp(500px, 70%, 1100px) auto;
-    opacity: 0.10;
-    pointer-events: none;
-    z-index: -1;
-  }
-
-  /* ---- Topbar (header style LiHDL Post Discord v3) ---- */
-  .topbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 14px 20px;
-    border-bottom: 1px solid var(--border);
-    background: rgba(13, 10, 16, 0.65);
-    backdrop-filter: blur(12px) saturate(140%);
-    -webkit-backdrop-filter: blur(12px) saturate(140%);
-  }
-  .brand {
-    display: flex; align-items: center; gap: 14px;
-  }
-  .logo {
-    width: 48px; height: 48px; border-radius: 10px;
-    object-fit: contain;
-    box-shadow: 0 0 24px rgba(230, 57, 70, 0.35);
-  }
-  .brand-text { display: flex; flex-direction: column; gap: 3px; line-height: 1; }
-  .app-title {
-    font-size: 15px; font-weight: 800;
-    letter-spacing: 2.5px;
-    background: linear-gradient(90deg, #ff5a4a 0%, #ffd60a 35%, #7ef0c0 70%, #48cae4 100%);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
-  }
-  /* LiHDL garde sa casse d'origine (L majuscule, i minuscule, HDL majuscule). */
-  .brand-lihdl { letter-spacing: 1.5px; }
-  .app-subtitle {
-    display: inline-block; align-self: flex-start;
-    padding: 2px 8px; border-radius: 10px;
-    font-size: 10px; font-weight: 700; letter-spacing: 1.8px;
-    background: rgba(255,255,255,0.06);
-    border: 1px solid var(--border);
-    color: var(--text2);
-  }
-
-  .topbar-right { display: flex; align-items: center; gap: 10px; }
-
-  .update-pill {
-    display: inline-flex; align-items: center; gap: 7px;
-    padding: 7px 13px; border-radius: 10px;
-    background: rgba(0, 180, 216, 0.08);
-    border: 1px solid rgba(0, 180, 216, 0.35);
-    color: var(--blue-hot);
-    font: inherit; font-size: 12px; font-weight: 700;
-    letter-spacing: 0.5px;
-    cursor: pointer; transition: all 150ms;
-  }
-  .update-pill:hover:not(:disabled) {
-    background: rgba(0, 180, 216, 0.18);
-    border-color: rgba(0, 180, 216, 0.55);
-  }
-  .update-pill:disabled { cursor: wait; opacity: 0.7; }
-  .update-pill.available {
-    background: rgba(126, 240, 192, 0.12);
-    border-color: rgba(126, 240, 192, 0.5);
-    color: var(--green);
-    animation: pulse-available 2s infinite;
-  }
-  .update-pill.available:hover:not(:disabled) {
-    background: rgba(126, 240, 192, 0.22);
-  }
-  @keyframes pulse-available {
-    0%,100% { box-shadow: 0 0 0 0 rgba(126, 240, 192, 0.3); }
-    50%     { box-shadow: 0 0 0 6px rgba(126, 240, 192, 0); }
-  }
-  .version-icon { opacity: 0.7; display: inline-block; }
-  .version-icon.spin { animation: spin-icon 1s linear infinite; }
-  @keyframes spin-icon { to { transform: rotate(360deg); } }
-  .version-label { font-variant-numeric: tabular-nums; }
-
-  .settings-btn {
-    display: inline-flex; align-items: center; gap: 8px;
-    padding: 7px 13px; border-radius: 10px;
-    border: 1px solid var(--border);
-    background: rgba(255,255,255,0.04);
-    color: var(--text2);
-    font: inherit; font-size: 11px; font-weight: 700;
-    letter-spacing: 1.5px;
-    cursor: pointer; transition: all 150ms;
-  }
-  .settings-btn:hover {
-    background: rgba(255,255,255,0.08);
-    color: var(--text); border-color: var(--border-strong);
-  }
-  .gear { font-size: 14px; }
-
-  .reset-btn {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 7px 13px; border-radius: 10px;
-    border: 1px solid var(--border);
-    background: rgba(255,255,255,0.04);
-    color: var(--text2);
-    font: inherit; font-size: 11px; font-weight: 700;
-    letter-spacing: 1.5px;
-    cursor: pointer; transition: all 150ms;
-  }
-  .reset-btn:hover:not(:disabled) {
-    background: rgba(239,68,68,0.18);
-    border-color: rgba(239,68,68,0.5);
-    color: rgb(255,180,180);
-  }
-  .reset-btn:hover:not(:disabled) span:first-child { transform: rotate(-180deg); }
-  .reset-btn span:first-child { transition: transform 200ms; font-size: 14px; display: inline-block; }
-  .reset-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-  .reset-label { font-size: 11px; }
-
-  .mux-mode-tabs {
-    display: flex; gap: 8px; padding: 8px 20px;
-    background: var(--bg-tint);
-    border-bottom: 1px solid var(--border);
-  }
-  .mux-mode-tabs button {
-    flex: 1; padding: 10px 18px; border: 1px solid var(--border); border-radius: 8px;
-    background: rgba(0,0,0,0.25); color: var(--text2);
-    font: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
-    letter-spacing: 0.3px;
-    transition: all 150ms;
-  }
-  .mux-mode-tabs button:hover { color: var(--text); border-color: var(--border-hover); }
-  .mux-mode-tabs button.active {
-    color: var(--red-hot);
-    border-color: var(--red);
-    background: linear-gradient(180deg, rgba(255,40,80,0.15), rgba(255,40,80,0.05));
-    box-shadow: 0 0 0 1px var(--red), inset 0 1px 0 rgba(255,255,255,0.05);
-  }
-
-  .tabs {
-    display: flex; gap: 2px; padding: 0 20px;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-tint);
-  }
-  .tabs button {
-    padding: 12px 18px; border: none; border-bottom: 2px solid transparent;
-    background: transparent; color: var(--text2);
-    font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
-    transition: all 150ms;
-  }
-  .tabs button:hover { color: var(--text); }
-  .tabs button.active { color: var(--red-hot); border-bottom-color: var(--red); }
-
-  .content { flex: 1; padding: 20px; overflow-y: auto; }
-
-  .card {
-    background: linear-gradient(180deg, rgba(26, 20, 32, 0.75), rgba(18, 14, 24, 0.75));
-    border: 1px solid var(--border);
+  /* Journal d'activité inline : placé dans la col droite après "Outils additionnels",
+     prend tout l'espace restant pour combler le vide en bas à droite. */
+  .journal-card.journal-inline {
+    flex: 1 1 auto;
+    min-height: 160px;
+    display: flex; flex-direction: column;
+    background: linear-gradient(180deg, rgba(20, 16, 28, 0.62), rgba(16, 12, 22, 0.5));
+    backdrop-filter: blur(24px) saturate(170%);
+    -webkit-backdrop-filter: blur(24px) saturate(170%);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.04);
     border-radius: 14px;
-    padding: 18px 20px;
-    margin-bottom: 14px;
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 10px 30px -12px rgba(0,0,0,0.5);
+    padding: 12px 14px;
   }
-  .section-title {
-    font-size: 11px; font-weight: 700;
-    color: var(--text2);
-    text-transform: uppercase; letter-spacing: 1.2px;
-    margin-bottom: 12px;
+  .journal-card.journal-inline .card-title {
+    margin-bottom: 8px;
+    flex-shrink: 0;
   }
-
-  .drop-target {
-    border: 2px dashed rgba(230, 57, 70, 0.3);
-    text-align: center;
-    padding: 48px 28px;
-    max-width: 640px;
-    margin-left: auto;
-    margin-right: auto;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-  }
-  .drop-icon { font-size: 42px; margin-bottom: 10px; }
-  .drop-title { font-size: 15px; font-weight: 700; color: var(--text); }
-  .drop-sub { font-size: 12px; color: var(--text2); margin: 4px 0 10px; word-break: break-all; }
-  .drop-label { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
-  .drop-hint { color: var(--text2); text-transform: none; letter-spacing: 0; }
-
-  /* Card unifiée Sources — design harmonisé moderne */
-  .sources-card { padding: 18px 18px 18px 18px; }
-  .sources-card .section-title { margin-bottom: 14px; font-size: 13px; letter-spacing: 1px; }
-
-  .source-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 16px;
-    padding: 14px 18px;
-    background: linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.18));
-    border: 1px solid var(--border);
-    border-radius: 10px;
+  .bottom-pane-tabs {
+    display: flex; gap: 4px;
     margin-bottom: 10px;
-    min-height: 90px;
-    box-sizing: border-box;
+    flex-shrink: 0;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    padding: 3px;
+  }
+  .bottom-pane-tab {
+    flex: 1;
+    background: transparent; border: none;
+    color: var(--text2);
+    font: inherit; font-size: 11px; font-weight: 600;
+    padding: 5px 10px; border-radius: 6px;
+    cursor: pointer;
+    transition: all 150ms;
+    text-transform: uppercase; letter-spacing: 0.4px;
+  }
+  .bottom-pane-tab:hover { color: var(--text); }
+  .bottom-pane-tab.active {
+    background: linear-gradient(180deg, rgba(124, 92, 255, 0.85), rgba(124, 92, 255, 0.65));
+    color: #fff;
+    box-shadow: 0 2px 8px rgba(124, 92, 255, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  }
+  .queue-pane {
+    flex: 1 1 auto; min-height: 0;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .queue-empty {
+    flex: 1; display: flex; flex-direction: column;
+    align-items: center; justify-content: flex-start;
+    gap: 4px; text-align: center; padding: 14px 16px 12px;
+    color: var(--text2);
+  }
+  .queue-empty-icon { font-size: 26px; opacity: 0.6; line-height: 1; }
+  .queue-empty-title { font-size: 12px; font-weight: 700; color: var(--text); }
+  .queue-empty-sub { font-size: 10.5px; line-height: 1.35; max-width: 220px; }
+  .queue-list {
+    list-style: none; margin: 0; padding: 0;
+    flex: 1; overflow-y: auto; min-height: 0;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .queue-row {
+    display: grid;
+    grid-template-columns: 22px 1fr auto auto;
+    gap: 6px; align-items: center;
+    padding: 6px 8px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 7px;
     transition: all 150ms;
   }
-  .source-row:hover { border-color: var(--border-hover); background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(0,0,0,0.2)); }
-  .source-row:last-child { margin-bottom: 0; }
-  .source-row.secondary { border-left: 3px solid rgba(50,130,200,0.55); }
-
-  .source-info { overflow: hidden; min-width: 0; }
-  .source-label {
-    display: flex; align-items: center; gap: 6px;
-    font-size: 12px; color: var(--text2); font-weight: 600;
-    text-transform: uppercase; letter-spacing: 0.5px;
+  .queue-row:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.1);
   }
-  .source-num {
-    display: inline-flex; align-items: center; justify-content: center;
+  .queue-row.current {
+    background: rgba(92, 201, 153, 0.08);
+    border-color: rgba(92, 201, 153, 0.3);
+  }
+  .queue-idx {
     width: 22px; height: 22px; border-radius: 50%;
-    background: rgba(230,57,70,0.15); color: var(--red-hot);
-    font-size: 13px; font-weight: 700; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(124, 92, 255, 0.18);
+    color: var(--accent-hot, #9b80ff);
+    font-size: 10px; font-weight: 700;
   }
-  .source-row.secondary .source-num { background: rgba(50,130,200,0.15); color: rgb(120,170,220); }
-  .source-hint { color: var(--text3); font-weight: 400; font-size: 11px; text-transform: none; letter-spacing: 0; }
+  .queue-row.current .queue-idx { background: var(--green); color: #0e0c14; }
+  .queue-name {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: 11px; color: var(--text);
+  }
+  .queue-actions {
+    display: flex; gap: 6px; padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    margin-top: 6px;
+    flex-shrink: 0;
+  }
+  .journal-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    font-family: "SF Mono", "Consolas", monospace;
+    font-size: 10.5px;
+    padding-right: 4px;
+  }
+  .journal-scroll .journal-line {
+    display: flex; gap: 8px; padding: 2px 0;
+    border-bottom: 1px dashed rgba(255, 255, 255, 0.025);
+    line-height: 1.4;
+  }
+  .journal-scroll .journal-line:last-child { border-bottom: none; }
+  .journal-scroll .log-time { color: var(--text3); flex-shrink: 0; opacity: 0.7; }
+  .journal-scroll .log-msg { color: var(--text); word-break: break-word; }
+  .journal-scroll .log-msg.lvl-info { color: var(--text2); }
+  .journal-scroll .log-msg.lvl-ok,
+  .journal-scroll .log-msg.lvl-success { color: var(--green); }
+  .journal-scroll .log-msg.lvl-warn { color: var(--orange); }
+  .journal-scroll .log-msg.lvl-err,
+  .journal-scroll .log-msg.lvl-error { color: var(--red); }
 
-  .source-filename {
-    font-size: 13px; color: var(--green); margin-top: 4px;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    font-family: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+  /* ─── BACKGROUND LAYERS (banner + overlay + glow) ─── */
+  .bg-banner {
+    position: absolute; inset: 0;
+    background-image: var(--banner-url);
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    opacity: 0.7;
+    filter: saturate(125%) contrast(112%);
+    z-index: -3;
+    pointer-events: none;
   }
-  .source-empty {
-    font-size: 12px; color: var(--text3); margin-top: 4px; font-style: italic;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  }
-  .source-meta {
-    font-size: 11px; color: var(--text3); margin-top: 4px;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  }
-
-  .fr-audio-options {
-    display: flex; flex-direction: row; gap: 14px; margin-top: 6px;
-    flex-wrap: wrap; align-items: center;
-  }
-  .fr-audio-options .vfq-toggle {
-    margin: 0;
-  }
-
-  .compat-grid {
-    display: flex; flex-direction: row; flex-wrap: wrap;
-    gap: 6px 18px; margin-top: 6px;
-    font-size: 12px; color: var(--text2);
-  }
-  .compat-grid .compat-ok { color: #51cf66; font-weight: 600; }
-  .compat-grid .compat-bad { color: #ff6b6b; font-weight: 600; }
-
-  .extract-progress {
-    display: flex; flex-direction: column; gap: 4px;
-    margin-top: 8px;
-  }
-  .extract-progress-label {
-    font-size: 11px; color: var(--text2); font-weight: 500;
-  }
-  .extract-progress progress {
-    width: 100%; height: 6px; border: none; border-radius: 3px;
-    background: rgba(0,0,0,0.4); overflow: hidden;
-  }
-  .extract-progress progress::-webkit-progress-bar {
-    background: rgba(0,0,0,0.4); border-radius: 3px;
-  }
-  .extract-progress progress::-webkit-progress-value {
-    background: linear-gradient(90deg, var(--red), var(--red-hot));
-    border-radius: 3px;
-  }
-  /* Indeterminate progress (no value) — animated stripes */
-  .extract-progress progress:not([value]) {
+  .bg-overlay {
+    position: absolute; inset: 0;
     background:
-      linear-gradient(90deg, transparent 0%, var(--red-hot) 50%, transparent 100%) 0/40% 100% no-repeat,
-      rgba(0,0,0,0.4);
-    animation: indeterminate-slide 1.4s linear infinite;
+      radial-gradient(ellipse 120% 80% at 50% 0%, rgba(124, 92, 255, 0.12), transparent 60%),
+      radial-gradient(ellipse 100% 60% at 50% 100%, rgba(255, 61, 94, 0.08), transparent 70%),
+      linear-gradient(180deg, rgba(10, 7, 18, 0.45) 0%, rgba(10, 7, 18, 0.55) 50%, rgba(6, 4, 12, 0.7) 100%);
+    z-index: -2;
+    pointer-events: none;
   }
-  @keyframes indeterminate-slide {
-    0%   { background-position: -40% 0; }
-    100% { background-position: 140% 0; }
+  .bg-glow {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(120px);
+    opacity: 0.55;
+    z-index: -2;
+    pointer-events: none;
+    will-change: transform;
+  }
+  .bg-glow-1 {
+    width: 520px; height: 520px;
+    top: -180px; left: -120px;
+    background: radial-gradient(circle, rgba(124, 92, 255, 0.55), transparent 70%);
+    animation: float-glow 18s ease-in-out infinite;
+  }
+  .bg-glow-2 {
+    width: 480px; height: 480px;
+    bottom: -160px; right: -100px;
+    background: radial-gradient(circle, rgba(255, 61, 94, 0.45), transparent 70%);
+    animation: float-glow 22s ease-in-out infinite reverse;
+  }
+  @keyframes float-glow {
+    0%, 100% { transform: translate(0, 0) scale(1); }
+    50% { transform: translate(40px, -30px) scale(1.08); }
   }
 
-  /* État succès : barre pleine verte + label vert */
-  .extract-progress.done .extract-progress-label { color: #51cf66; font-weight: 600; }
-  .extract-progress.done progress[value]::-webkit-progress-value {
-    background: linear-gradient(90deg, #2f9e44, #51cf66);
+  /* ─── HEADER (sticky liquid glass) ─── */
+  .header {
+    display: grid;
+    grid-template-columns: auto auto 1fr auto;
+    gap: 14px;
+    align-items: center;
+    padding: 10px 16px;
+    background: linear-gradient(180deg, rgba(21, 17, 29, 0.28), rgba(17, 13, 24, 0.22));
+    backdrop-filter: var(--glass-blur-strong);
+    -webkit-backdrop-filter: var(--glass-blur-strong);
+    border-bottom: 1px solid var(--border);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.04) inset,
+      0 8px 24px rgba(0, 0, 0, 0.25);
+    position: relative;
+    z-index: 10;
   }
-  .extract-progress.done progress[value] {
-    background: rgba(81, 207, 102, 0.15);
+  .header::after {
+    content: "";
+    position: absolute; left: 0; right: 0; bottom: -1px; height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(124, 92, 255, 0.4), rgba(255, 61, 94, 0.3), transparent);
+    pointer-events: none;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand-logo-img {
+    width: 38px; height: 38px; border-radius: 9px;
+    object-fit: contain;
+    box-shadow:
+      0 4px 14px rgba(124, 92, 255, 0.35),
+      0 0 0 1px rgba(255, 255, 255, 0.08);
+  }
+  .brand-name {
+    font-size: 13px; font-weight: 700; line-height: 1.1;
+    letter-spacing: -0.1px;
+    background: linear-gradient(135deg, #fff 0%, #c8b5ff 100%);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .brand-version {
+    font-size: 10px; color: var(--text3);
+    font-weight: 500;
+    letter-spacing: 0.3px;
   }
 
-  /* État erreur : barre pleine rouge + label rouge */
-  .extract-progress.err .extract-progress-label { color: #ff6b6b; font-weight: 600; }
-  .extract-progress.err progress[value]::-webkit-progress-value {
-    background: linear-gradient(90deg, #c92a2a, #ff6b6b);
-  }
-  .extract-progress.err progress[value] {
-    background: rgba(255, 107, 107, 0.15);
-  }
-
-  /* Preview TMDB (poster + infos) avant MUX AUTO */
-  .tmdb-preview {
-    display: flex; flex-direction: row; gap: 16px; align-items: flex-start;
-    padding: 12px;
-    background: linear-gradient(135deg, rgba(108, 99, 255, 0.08), rgba(0,0,0,0.2));
+  /* Mode switch — premium glass pill */
+  .mode-switch {
+    display: flex;
+    background: rgba(8, 6, 14, 0.55);
+    backdrop-filter: blur(14px) saturate(160%);
+    -webkit-backdrop-filter: blur(14px) saturate(160%);
     border: 1px solid var(--border);
     border-radius: 10px;
-    margin-bottom: 14px;
+    padding: 3px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 2px 8px rgba(0, 0, 0, 0.25);
   }
-  .tmdb-preview-poster {
-    width: 100px; height: 150px; flex-shrink: 0;
+  .mode-btn {
+    background: transparent; border: none; color: var(--text2);
+    font: inherit; font-size: 11.5px; font-weight: 500;
+    padding: 7px 14px; border-radius: 7px; cursor: pointer;
+    transition: all 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    display: inline-flex; align-items: center; gap: 5px;
+    white-space: nowrap;
+    position: relative;
+  }
+  .mode-btn.active {
+    background: linear-gradient(135deg, var(--accent), #6845e8);
+    color: #fff; font-weight: 600;
+    box-shadow:
+      0 4px 14px rgba(124, 92, 255, 0.45),
+      inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  }
+  .mode-btn:not(.active):hover { color: var(--text); background: rgba(255, 255, 255, 0.04); }
+
+  /* Film identity — glass pill */
+  .film-bar {
+    display: flex; align-items: center; gap: 10px;
+    background: rgba(26, 22, 34, 0.55);
+    backdrop-filter: blur(18px) saturate(160%);
+    -webkit-backdrop-filter: blur(18px) saturate(160%);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 4px 12px 4px 4px;
+    min-width: 0;
+    box-shadow: var(--shadow-card);
+    transition: all 220ms ease;
+  }
+  .film-bar:hover { border-color: var(--border-hi); }
+  .film-bar.empty { opacity: 0.7; }
+  .film-poster {
+    width: 40px; height: 60px;
+    border-radius: 6px;
     object-fit: cover;
-    border-radius: 8px;
-    border: 1px solid var(--border);
-    box-shadow: 0 4px 12px -4px rgba(0,0,0,0.5);
+    background: #2a1f3a;
+    flex-shrink: 0;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
   }
-  .tmdb-preview-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-  .tmdb-preview-title {
-    font-size: 16px; font-weight: 700; color: var(--text); line-height: 1.2;
+  .film-poster.placeholder {
+    background: linear-gradient(135deg, var(--accent), var(--red));
+    position: relative;
+    overflow: hidden;
+  }
+  .film-poster.placeholder::after {
+    content: "🎬"; position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; opacity: 0.55;
+  }
+  .film-info { min-width: 0; flex: 1; }
+  .film-title {
+    font-size: 13px; font-weight: 700;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    letter-spacing: -0.1px;
   }
-  .tmdb-preview-vo {
-    font-size: 12px; color: var(--text2); font-style: italic;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  .film-meta {
+    font-size: 11px; color: var(--text2);
+    display: flex; gap: 8px; align-items: center;
+    flex-wrap: wrap;
   }
-  .tmdb-preview-meta {
-    display: flex; gap: 12px; flex-wrap: wrap; margin-top: 4px;
-    font-size: 12px; color: var(--text2);
+  .film-id {
+    background: rgba(124, 92, 255, 0.18);
+    color: var(--accent-hot);
+    padding: 1px 7px; border-radius: 4px;
+    font-size: 10px; font-weight: 600;
+    border: 1px solid rgba(124, 92, 255, 0.25);
   }
-  .tmdb-preview-link {
-    align-self: flex-start; margin-top: 6px;
-    font-size: 11px;
-  }
-  .tmdb-preview-override {
-    display: flex; flex-direction: row; gap: 6px; align-items: center;
-    margin-top: 8px; padding-top: 8px;
-    border-top: 1px dashed var(--border);
-    font-size: 11px;
-  }
-  .tmdb-preview-override-label { color: var(--text3); white-space: nowrap; }
-  .tmdb-preview-override-input {
-    flex: 1; max-width: 130px;
-    padding: 4px 8px; font-size: 12px;
-    background: rgba(0,0,0,0.3);
-    border: 1px solid var(--border);
-    border-radius: 5px;
-    color: var(--text);
-    font-family: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
-  }
-  .tmdb-preview-override-input:focus {
-    outline: none; border-color: var(--red-hot);
-    background: rgba(0,0,0,0.4);
-  }
-  .tmdb-preview-override-btn {
-    padding: 4px 10px; font-size: 11px;
-    background: rgba(108, 99, 255, 0.15);
-    border: 1px solid rgba(108, 99, 255, 0.4);
-    color: var(--text);
-    border-radius: 5px;
+  button.film-id-link {
+    font: inherit;
     cursor: pointer;
     transition: all 150ms;
   }
-  .tmdb-preview-override-btn:hover:not(:disabled) {
-    background: rgba(108, 99, 255, 0.25);
-    border-color: rgba(108, 99, 255, 0.6);
+  button.film-id-link:hover {
+    background: rgba(124, 92, 255, 0.32);
+    border-color: rgba(124, 92, 255, 0.5);
+    color: #fff;
+    box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.1);
   }
-  .tmdb-preview-override-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-  /* Bandeau persistant statut MUX AUTO */
-  .mux-status-banner.success {
-    border: 1px solid rgba(81, 207, 102, 0.4);
-    background: linear-gradient(180deg, rgba(81, 207, 102, 0.08), rgba(47, 158, 68, 0.05));
+  /* Header actions */
+  .header-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+
+  .btn {
+    border: 1px solid var(--border);
+    background: rgba(40, 33, 54, 0.5);
+    backdrop-filter: blur(14px) saturate(160%);
+    -webkit-backdrop-filter: blur(14px) saturate(160%);
+    color: var(--text);
+    font: inherit; font-size: 12px; font-weight: 500;
+    padding: 7px 13px; border-radius: 8px;
+    cursor: pointer;
+    display: inline-flex; align-items: center; gap: 5px;
+    transition: all 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    white-space: nowrap;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 1px 2px rgba(0, 0, 0, 0.2);
   }
-  .mux-status-banner.error {
-    border: 1px solid rgba(255, 107, 107, 0.4);
-    background: linear-gradient(180deg, rgba(255, 107, 107, 0.08), rgba(201, 42, 42, 0.05));
+  .btn:hover:not(:disabled) {
+    background: rgba(60, 50, 80, 0.6);
+    border-color: var(--border-hi);
+    transform: translateY(-1px);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 4px 14px rgba(0, 0, 0, 0.3);
+  }
+  .btn:active:not(:disabled) { transform: translateY(0); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-ghost {
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border-color: transparent;
+    color: var(--text2);
+    box-shadow: none;
+  }
+  .btn-ghost:hover:not(:disabled) {
+    background: rgba(255,255,255,0.06);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    color: var(--text);
+    border-color: var(--border);
+  }
+  .btn-accent {
+    background: linear-gradient(135deg, var(--accent) 0%, #6845e8 100%);
+    border-color: rgba(124, 92, 255, 0.6);
+    color: #fff; font-weight: 600;
+    box-shadow:
+      0 4px 14px rgba(124, 92, 255, 0.4),
+      inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  }
+  .btn-accent:hover:not(:disabled) {
+    background: linear-gradient(135deg, var(--accent-hot) 0%, #7c5cff 100%);
+    border-color: rgba(155, 128, 255, 0.7);
+    box-shadow:
+      0 6px 20px rgba(124, 92, 255, 0.55),
+      inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  }
+  .btn-danger {
+    background: linear-gradient(135deg, var(--red) 0%, #e02744 100%);
+    border-color: rgba(255, 61, 94, 0.6);
+    color: #fff; font-weight: 700;
+    box-shadow:
+      0 4px 14px rgba(255, 61, 94, 0.4),
+      inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  }
+  .btn-danger:hover:not(:disabled) {
+    background: linear-gradient(135deg, var(--red-hot) 0%, var(--red) 100%);
+    border-color: rgba(255, 102, 128, 0.7);
+    box-shadow:
+      0 6px 20px rgba(255, 61, 94, 0.55),
+      inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  }
+  .btn-tiny { font-size: 11px; padding: 4px 10px; border-radius: 6px; }
+  .btn-icon { padding: 4px 9px; }
+  .btn-stop-small { padding: 5px 11px; font-size: 11px; }
+
+  .update-pill {
+    font-size: 11px; padding: 6px 11px;
+  }
+  .update-pill.available {
+    background: linear-gradient(135deg, rgba(92, 201, 153, 0.22), rgba(92, 201, 153, 0.10));
+    border-color: rgba(92, 201, 153, 0.45);
+    color: var(--green); font-weight: 700;
+    box-shadow: 0 0 14px rgba(92, 201, 153, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  }
+  .spin { animation: spin-icon 1s linear infinite; display: inline-block; }
+  @keyframes spin-icon { to { transform: rotate(360deg); } }
+
+  /* Subnav (visible si screen != source) */
+  .subnav {
+    display: flex; gap: 6px; align-items: center;
+    padding: 8px 16px;
+    background: rgba(17, 13, 24, 0.55);
+    backdrop-filter: blur(20px) saturate(170%);
+    -webkit-backdrop-filter: blur(20px) saturate(170%);
+    border-bottom: 1px solid var(--border);
+    position: relative;
+    z-index: 9;
+  }
+  .subnav-btn {
+    background: transparent; border: 1px solid transparent;
+    color: var(--text2);
+    font: inherit; font-size: 12px; font-weight: 500;
+    padding: 6px 12px; border-radius: 7px; cursor: pointer;
+    transition: all 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .subnav-btn:hover { color: var(--text); background: rgba(255,255,255,0.06); }
+  .subnav-btn.active {
+    color: #fff;
+    background: linear-gradient(135deg, var(--accent), #6845e8);
+    border-color: rgba(124, 92, 255, 0.5);
+    box-shadow: 0 3px 10px rgba(124, 92, 255, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  }
+
+  /* Mux progress bar (top floating, glass) */
+  .mux-progress-bar {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 16px;
+    background: linear-gradient(90deg, rgba(124,92,255,0.18), rgba(255,61,94,0.12));
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border-bottom: 1px solid rgba(124, 92, 255, 0.25);
+    box-shadow: 0 2px 12px rgba(124, 92, 255, 0.2);
+    position: relative;
+    z-index: 9;
+  }
+  .progress-bar {
+    flex: 1; height: 9px; border-radius: 5px;
+    background: rgba(0, 0, 0, 0.4);
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3);
+  }
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--red));
+    transition: width 200ms ease-out;
+    box-shadow: 0 0 12px rgba(124, 92, 255, 0.5);
+    position: relative;
+  }
+  .progress-fill::after {
+    content: "";
+    position: absolute; inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+    animation: progress-shine 1.6s linear infinite;
+  }
+  @keyframes progress-shine {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(100%); }
+  }
+  .progress-bar.done .progress-fill { background: linear-gradient(90deg, #2f9e44, var(--green)); }
+  .progress-bar.error .progress-fill { background: linear-gradient(90deg, #c92a2a, var(--red)); }
+
+  /* ─── MAIN ─── */
+  .main {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    padding: 12px;
+    overflow: hidden;
+    min-height: 0;
+    position: relative;
+    z-index: 1;
+  }
+  /* Quand pas de source : on masque la colonne gauche (Sources redondant avec le bouton du hero),
+     et la colonne droite (empty-hero) est parfaitement centrée au milieu de la fenêtre. */
+  .app.no-source .main {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr;
+    place-items: center;
+    overflow: hidden;
+  }
+  .app.no-source .col:first-child { display: none; }
+  .app.no-source .col:last-child {
+    grid-column: 1; grid-row: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: min(900px, 92%);
+    height: 100%;
+    overflow: visible;
+    gap: 0;
+  }
+  .app.no-source .empty-hero {
+    margin: 0;
+    width: 100%;
+    flex: 0 0 auto;
+  }
+
+  /* TMDB pending : on a une source + une fiche TMDB mais pas encore validée → on affiche
+     "Source chargée" (empty-hero compact) PUIS la card de validation TMDB en dessous. */
+  .app.tmdb-pending .main {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr;
+    overflow: hidden;
+  }
+  .app.tmdb-pending .col:first-child { display: none; }
+  .app.tmdb-pending .col:last-child {
+    grid-column: 1; grid-row: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: center;
+    width: min(1040px, 96%);
+    margin: 0 auto;
+    height: 100%;
+    overflow: hidden;
+    padding: 8px 0;
+    gap: 10px;
+  }
+  /* Cache toutes les cards de la col droite SAUF empty-hero et tmdb-validate-card */
+  .app.tmdb-pending .col:last-child > .card:not(.tmdb-validate-card):not(.empty-hero) { display: none; }
+  .app.tmdb-pending .tmdb-validate-card { flex: 1 1 auto; min-height: 0; }
+  .app.tmdb-pending .empty-hero { flex: 0 0 auto; }
+
+  /* Empty-hero "compact" : un mini-bandeau horizontal au lieu d'un hero plein écran */
+  .empty-hero.compact {
+    padding: 10px 18px;
+    text-align: left;
+  }
+  .empty-hero.compact .empty-hero-aurora { display: none; }
+  .empty-hero.compact .empty-hero-content {
+    flex-direction: row;
+    align-items: center;
+    gap: 14px;
+    text-align: left;
+  }
+  .empty-hero.compact .empty-hero-badge { display: none; }
+  .empty-hero.compact .empty-hero-icon {
+    width: 44px; height: 44px;
+    flex-shrink: 0;
+  }
+  .empty-hero.compact .empty-hero-icon-glyph { font-size: 22px; }
+  .empty-hero.compact .empty-hero-title {
+    font-size: 16px;
+    margin: 0;
+    line-height: 1.1;
+  }
+  .empty-hero.compact .empty-hero-sub {
+    font-size: 11.5px;
+    line-height: 1.35;
+    margin: 0;
+    color: var(--text2);
+  }
+  .empty-hero.compact .empty-hero-sub b { color: var(--text); }
+
+  /* Card TMDB : densifie pour tout faire tenir sans scroll */
+  .app.tmdb-pending .tmdb-validate-card {
+    padding: 18px 22px 16px;
+    gap: 12px;
+    display: flex;
+    flex-direction: column;
+  }
+  .app.tmdb-pending .tmdb-validate-body {
+    grid-template-columns: 200px 1fr;
+    gap: 18px;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  .app.tmdb-pending .tmdb-validate-poster {
+    width: 200px; height: 300px;
+  }
+  .app.tmdb-pending .tmdb-validate-info {
+    height: 100%;
+    overflow: hidden;
+    gap: 10px;
+  }
+  .app.tmdb-pending .tmdb-validate-desc {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+  }
+  .app.tmdb-pending .tmdb-validate-actions { padding-top: 2px; }
+
+  /* Card validation TMDB */
+  .tmdb-validate-card {
+    width: 100%;
+    padding: 26px 28px 22px;
+    display: flex; flex-direction: column; gap: 18px;
+    background: linear-gradient(180deg, rgba(26, 22, 34, 0.72), rgba(20, 16, 28, 0.65));
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    box-shadow:
+      0 24px 60px rgba(0, 0, 0, 0.55),
+      0 0 0 1px rgba(124, 92, 255, 0.18) inset,
+      0 0 0 4px rgba(124, 92, 255, 0.04);
+    border-radius: 18px;
+    backdrop-filter: blur(28px) saturate(180%);
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
+    position: relative;
+    overflow: hidden;
+  }
+  .tmdb-validate-card::before {
+    content: "";
+    position: absolute; top: 0; left: 0; right: 0; height: 3px;
+    background: linear-gradient(90deg, var(--accent), var(--red), var(--orange));
+    opacity: 0.85;
+  }
+  .tmdb-validate-header {
+    display: flex; align-items: center; justify-content: center;
+    position: relative;
+    gap: 8px;
+  }
+
+  /* Mini-input "Forcer l'ID TMDB" : discret en coin top-right de la card validation. */
+  .tmdb-validate-force-mini {
+    position: absolute;
+    top: 50%; right: 0;
+    transform: translateY(-50%);
+    display: inline-flex; align-items: center;
+    background: rgba(0, 0, 0, 0.28);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 999px;
+    padding: 2px 4px 2px 10px;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    transition: all 200ms ease;
+    opacity: 0.55;
+  }
+  .tmdb-validate-force-mini:hover,
+  .tmdb-validate-force-mini:focus-within {
+    opacity: 1;
+    border-color: rgba(124, 92, 255, 0.4);
+    background: rgba(124, 92, 255, 0.08);
+    box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.10);
+  }
+  .tmdb-validate-force-mini-hash {
+    font-size: 11px; font-weight: 700;
+    color: var(--text3);
+    margin-right: 2px;
+    font-family: "SF Mono", "Consolas", monospace;
+  }
+  .tmdb-validate-force-mini:focus-within .tmdb-validate-force-mini-hash { color: var(--accent-hot, #9b80ff); }
+  .tmdb-validate-force-mini-input {
+    width: 80px;
+    background: transparent;
+    border: none;
+    color: var(--text);
+    font-size: 11.5px;
+    font-family: "SF Mono", "Consolas", monospace;
+    padding: 4px 2px;
+    outline: none;
+  }
+  .tmdb-validate-force-mini-input::placeholder { color: var(--text3); font-family: inherit; }
+  .tmdb-validate-force-mini-btn {
+    background: transparent;
+    border: none;
+    color: var(--text2);
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 12px;
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: all 150ms;
+  }
+  .tmdb-validate-force-mini-btn:hover:not(:disabled) {
+    background: var(--accent);
+    color: #fff;
+  }
+  .tmdb-validate-force-mini-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+  .tmdb-validate-badge {
+    font-size: 10.5px; font-weight: 700; letter-spacing: 1.2px;
+    color: var(--accent-hot, #9b80ff);
+    background: rgba(124, 92, 255, 0.10);
+    border: 1px solid rgba(124, 92, 255, 0.25);
+    padding: 5px 12px; border-radius: 999px;
+    text-transform: uppercase;
+  }
+  .tmdb-validate-body {
+    display: grid;
+    grid-template-columns: 180px 1fr;
+    gap: 22px;
+    align-items: start;
+  }
+  .tmdb-validate-poster {
+    width: 180px; height: 270px;
+    border-radius: 12px;
+    object-fit: cover;
+    background: #2a1f3a;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 14px 40px rgba(0, 0, 0, 0.5);
+  }
+  .tmdb-validate-poster.placeholder {
+    display: flex; align-items: center; justify-content: center;
+    font-size: 56px;
+    background: linear-gradient(135deg, var(--accent), var(--red));
+    color: #fff;
+  }
+  .tmdb-validate-info { min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+  .tmdb-validate-title {
+    font-size: 22px; font-weight: 800; line-height: 1.2;
+    background: linear-gradient(135deg, #fff, var(--accent-hot, #9b80ff));
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .tmdb-validate-original { font-size: 12px; color: var(--text2); font-style: italic; }
+  .tmdb-validate-meta { display: flex; flex-wrap: wrap; gap: 6px; }
+  .tmdb-validate-pill {
+    font-size: 11px; font-weight: 600;
+    padding: 4px 10px; border-radius: 999px;
+    background: rgba(124, 92, 255, 0.12);
+    color: var(--accent-hot, #9b80ff);
+    border: 1px solid rgba(124, 92, 255, 0.25);
+    backdrop-filter: blur(8px);
+  }
+  .tmdb-validate-pill.rating {
+    background: rgba(255, 181, 71, 0.12);
+    color: var(--orange);
+    border-color: rgba(255, 181, 71, 0.25);
+  }
+  .tmdb-validate-desc {
+    font-size: 13px; line-height: 1.55;
+    color: var(--text);
+    background: rgba(0, 0, 0, 0.18);
+    padding: 12px 14px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    max-height: 180px;
+    overflow-y: auto;
+  }
+  .tmdb-validate-force {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 8px 12px;
+    background: rgba(0, 0, 0, 0.22);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 10px;
+  }
+  .tmdb-validate-force-label {
+    font-size: 11px; color: var(--text2); font-weight: 500;
+  }
+  .tmdb-validate-force-input {
+    flex: 1 1 100px;
+    min-width: 90px;
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 7px;
+    padding: 6px 10px;
+    color: var(--text);
+    font-size: 12px;
+    font-family: "SF Mono", "Consolas", monospace;
+    backdrop-filter: blur(8px);
+    transition: border-color 150ms;
+  }
+  .tmdb-validate-force-input:focus {
+    outline: none; border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.18);
+  }
+  .tmdb-validate-actions {
+    display: flex; gap: 10px; justify-content: flex-end; align-items: center;
+    padding-top: 4px;
+    flex-wrap: wrap;
+  }
+  .tmdb-validate-cta {
+    padding: 10px 22px;
+    font-size: 13px; font-weight: 700;
+    box-shadow: 0 8px 24px rgba(124, 92, 255, 0.4);
+  }
+  @media (max-width: 760px) {
+    .tmdb-validate-body { grid-template-columns: 1fr; }
+    .tmdb-validate-poster { width: 140px; height: 210px; margin: 0 auto; }
+  }
+
+  /* Fiche TMDB persistante (après validation) */
+  .tmdb-fiche-card {
+    position: relative;
+    overflow: hidden;
+    padding: 24px 26px;
+    border-radius: 18px;
+    background:
+      radial-gradient(1200px 200px at 0% 0%, rgba(124, 92, 255, 0.18), transparent 60%),
+      linear-gradient(180deg, rgba(28, 22, 40, 0.85), rgba(18, 14, 26, 0.92));
+    border: 1px solid rgba(124, 92, 255, 0.18);
+    box-shadow:
+      0 28px 70px rgba(0, 0, 0, 0.55),
+      0 0 0 1px rgba(124, 92, 255, 0.10) inset;
+    backdrop-filter: blur(28px) saturate(180%);
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
+  }
+  .tmdb-fiche-card::before {
+    content: "";
+    position: absolute; top: 0; left: 0; right: 0; height: 3px;
+    background: linear-gradient(90deg, var(--accent), var(--red), var(--orange));
+    opacity: 0.9;
+  }
+  .tmdb-fiche-glow {
+    position: absolute;
+    top: -80px; right: -100px;
+    width: 360px; height: 360px;
+    background: radial-gradient(closest-side, rgba(255, 100, 130, 0.18), transparent 70%);
+    filter: blur(20px);
+    pointer-events: none;
+  }
+  .tmdb-fiche-body {
+    position: relative;
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 24px;
+    align-items: start;
+  }
+  .tmdb-fiche-poster {
+    width: 200px; height: 300px;
+    border-radius: 14px;
+    object-fit: cover;
+    background: #2a1f3a;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    box-shadow:
+      0 22px 50px rgba(0, 0, 0, 0.6),
+      0 0 0 1px rgba(124, 92, 255, 0.12);
+    transition: transform 0.3s ease;
+  }
+  .tmdb-fiche-poster:hover { transform: scale(1.02); }
+  .tmdb-fiche-poster.placeholder {
+    display: flex; align-items: center; justify-content: center;
+    font-size: 64px;
+    background: linear-gradient(135deg, var(--accent), var(--red));
+    color: #fff;
+  }
+  .tmdb-fiche-info {
+    min-width: 0;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  .tmdb-fiche-badge {
+    align-self: flex-start;
+    font-size: 10.5px; font-weight: 700; letter-spacing: 1.2px;
+    color: var(--accent-hot, #9b80ff);
+    background: rgba(124, 92, 255, 0.12);
+    border: 1px solid rgba(124, 92, 255, 0.30);
+    padding: 5px 12px; border-radius: 999px;
+    text-transform: uppercase;
+  }
+  .tmdb-fiche-title {
+    margin: 0;
+    font-size: 26px; font-weight: 800; line-height: 1.15;
+    background: linear-gradient(135deg, #fff, var(--accent-hot, #9b80ff));
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .tmdb-fiche-year {
+    font-weight: 600;
+    color: var(--text2);
+    -webkit-text-fill-color: var(--text2);
+    margin-left: 6px;
+  }
+  .tmdb-fiche-original {
+    font-size: 13px; color: var(--text2);
+  }
+  .tmdb-fiche-pills {
+    display: flex; flex-wrap: wrap; gap: 7px;
+  }
+  .tmdb-fiche-pill {
+    font-size: 11.5px; font-weight: 600;
+    padding: 5px 11px; border-radius: 999px;
+    background: rgba(124, 92, 255, 0.12);
+    color: var(--accent-hot, #9b80ff);
+    border: 1px solid rgba(124, 92, 255, 0.30);
+    text-decoration: none;
+    transition: all 0.18s ease;
+  }
+  .tmdb-pill-link {
+    cursor: pointer;
+  }
+  .tmdb-pill-link:hover {
+    background: rgba(124, 92, 255, 0.22);
+    transform: translateY(-1px);
+  }
+  .tmdb-fiche-pill.rating {
+    background: rgba(255, 181, 71, 0.13);
+    color: var(--orange);
+    border-color: rgba(255, 181, 71, 0.30);
+  }
+  .tmdb-fiche-overview {
+    margin: 0;
+    font-size: 13.5px; line-height: 1.6;
+    color: var(--text);
+    background: rgba(0, 0, 0, 0.22);
+    padding: 13px 15px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    max-height: 200px;
+    overflow-y: auto;
+  }
+  .tmdb-fiche-actions {
+    display: flex; justify-content: flex-end;
+    margin-top: 4px;
+  }
+  @media (max-width: 760px) {
+    .tmdb-fiche-body { grid-template-columns: 1fr; }
+    .tmdb-fiche-poster { width: 160px; height: 240px; margin: 0 auto; }
+  }
+
+  /* Sur petit écran, 1 colonne */
+  @media (max-width: 1100px) {
+    .main { grid-template-columns: 1fr; overflow: auto; }
+  }
+
+  .col {
+    display: flex; flex-direction: column; gap: 12px;
+    min-height: 0; overflow: auto;
+    animation: fade-up 280ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  @keyframes fade-up {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Fullscreen view (cible/sync/reglages prennent toute la largeur) */
+  .fullscreen {
+    grid-column: 1 / -1;
+    display: flex; flex-direction: column; gap: 12px;
+    overflow: auto;
+    min-height: 0;
+    padding-right: 4px;
+    animation: fade-up 280ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+
+  /* ─── CARDS (liquid glass) ─── */
+  .card {
+    background: var(--card);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 14px 16px;
+    box-shadow: var(--shadow-card);
+    position: relative;
+    transition: border-color 220ms ease, transform 220ms ease;
+  }
+  .card::before {
+    content: "";
+    position: absolute; inset: 0;
+    border-radius: 14px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, transparent 30%);
+    pointer-events: none;
+  }
+  .card:hover { border-color: var(--border-hi); }
+  .card-grow { flex: 1; min-height: 0; overflow: auto; }
+
+  /* ─── EMPTY HERO (premium fullscreen invite) ─── */
+  .empty-hero {
+    flex: 1;
+    display: flex; align-items: center; justify-content: center;
+    text-align: center;
+    padding: 0;
+    background: linear-gradient(135deg, rgba(124, 92, 255, 0.08), rgba(255, 61, 94, 0.05));
+    border: 1px solid rgba(124, 92, 255, 0.25);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    overflow: hidden;
+    min-height: 380px;
+    position: relative;
+  }
+  .empty-hero-aurora {
+    position: absolute; inset: -40%;
+    background:
+      radial-gradient(circle at 20% 30%, rgba(124, 92, 255, 0.35), transparent 35%),
+      radial-gradient(circle at 80% 70%, rgba(255, 61, 94, 0.25), transparent 35%),
+      radial-gradient(circle at 60% 20%, rgba(255, 181, 71, 0.15), transparent 30%);
+    filter: blur(60px);
+    animation: aurora-pulse 12s ease-in-out infinite;
+    pointer-events: none;
+  }
+  @keyframes aurora-pulse {
+    0%, 100% { transform: rotate(0deg) scale(1); opacity: 0.8; }
+    50% { transform: rotate(180deg) scale(1.2); opacity: 1; }
+  }
+  .empty-hero-content {
+    position: relative; z-index: 1;
+    display: flex; flex-direction: column; align-items: center;
+    gap: 14px;
+    padding: 48px 32px;
+    max-width: 540px;
+  }
+  .empty-hero-badge {
+    font-size: 10px; font-weight: 700;
+    color: var(--accent-hot);
+    background: rgba(124, 92, 255, 0.12);
+    border: 1px solid rgba(124, 92, 255, 0.3);
+    padding: 5px 11px; border-radius: 999px;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    box-shadow: 0 0 14px rgba(124, 92, 255, 0.2);
+  }
+  .empty-hero-icon {
+    position: relative;
+    width: 110px; height: 110px;
+    display: flex; align-items: center; justify-content: center;
+    margin: 8px 0;
+  }
+  .empty-hero-icon-bg {
+    position: absolute; inset: 0;
+    background: linear-gradient(135deg, var(--accent) 0%, var(--red) 100%);
+    border-radius: 28px;
+    box-shadow:
+      0 12px 40px rgba(124, 92, 255, 0.5),
+      0 0 60px rgba(255, 61, 94, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    animation: hero-pulse 3s ease-in-out infinite;
+  }
+  .empty-hero-icon-glyph {
+    position: relative; z-index: 1;
+    font-size: 44px; color: #fff;
+    line-height: 1;
+    text-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+    transform: translateX(2px);
+  }
+  @keyframes hero-pulse {
+    0%, 100% { transform: scale(1); box-shadow: 0 12px 40px rgba(124, 92, 255, 0.5), 0 0 60px rgba(255, 61, 94, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.25); }
+    50% { transform: scale(1.04); box-shadow: 0 16px 50px rgba(124, 92, 255, 0.65), 0 0 80px rgba(255, 61, 94, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.3); }
+  }
+  .empty-hero-title {
+    font-size: 28px; font-weight: 700;
+    background: linear-gradient(135deg, #fff 0%, #c8b5ff 100%);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+    letter-spacing: -0.4px;
+    margin: 4px 0 0;
+  }
+  .empty-hero-sub {
+    font-size: 13px; color: var(--text2); line-height: 1.6;
+    max-width: 420px;
+  }
+  .empty-hero-cta {
+    margin-top: 8px;
+    padding: 12px 24px;
+    font-size: 13px; font-weight: 600;
+  }
+  .empty-hero-cta-row {
+    display: flex; gap: 10px; flex-wrap: wrap; justify-content: center;
+    margin-top: 8px;
+  }
+  .empty-hero-cta-row .empty-hero-cta { margin-top: 0; }
+  .empty-hero-cta-secondary {
+    padding: 12px 22px;
+    font-size: 13px; font-weight: 600;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(124, 92, 255, 0.3);
+    color: var(--accent-hot, #9b80ff);
+    backdrop-filter: blur(10px);
+  }
+  .empty-hero-cta-secondary:hover:not(:disabled) {
+    background: rgba(124, 92, 255, 0.15);
+    border-color: rgba(124, 92, 255, 0.55);
+    color: #fff;
+  }
+  .empty-hero-droptip {
+    margin-top: 14px;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.4px;
+    color: var(--text3);
+    padding: 8px 16px;
+    border: 1.5px dashed rgba(124, 92, 255, 0.28);
+    border-radius: 999px;
+    background: rgba(124, 92, 255, 0.04);
+    text-transform: uppercase;
+  }
+  .empty-hero-hints {
+    display: flex; align-items: center; gap: 10px;
+    margin-top: 12px;
+    flex-wrap: wrap; justify-content: center;
+  }
+  .empty-hero-hint {
+    font-size: 11px; color: var(--text2);
+    font-weight: 500;
+  }
+  .empty-hero-hint-dot { color: var(--text3); font-size: 11px; }
+
+  .card-title {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 10.5px; font-weight: 600; color: var(--text2);
+    text-transform: uppercase; letter-spacing: 0.7px;
+    margin-bottom: 10px;
+  }
+  .card-title-row {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; margin-bottom: 10px;
+  }
+  .card-title-row .card-title { margin-bottom: 0; }
+  .card-title-actions { display: flex; gap: 4px; }
+
+  /* Drop target visual hint */
+  .drop-target { position: relative; }
+  .drop-target::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 10px;
+    border: 1px dashed transparent;
+    pointer-events: none;
+    transition: border-color 150ms;
+  }
+
+  /* Source rows — glass tiles */
+  .source-list { display: flex; flex-direction: column; gap: 6px; position: relative; z-index: 1; }
+  .source-row {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.03);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid var(--border);
+    transition: all 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .source-row:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: var(--border-hi);
+  }
+  .source-row.filled {
+    background: linear-gradient(135deg, rgba(92, 201, 153, 0.10), rgba(92, 201, 153, 0.04));
+    border-color: rgba(92, 201, 153, 0.35);
+    box-shadow: 0 0 0 1px rgba(92, 201, 153, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  }
+  .source-row-stacked { grid-template-columns: auto 1fr auto; align-items: start; }
+  .source-row-stacked > .source-num { margin-top: 1px; }
+  .source-row-placeholder {
+    width: 100%;
+    text-align: center;
+    background: transparent;
+    border: 1px dashed rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
+    padding: 11px 12px;
+    color: var(--text3);
+    font: inherit; font-size: 12px;
+    cursor: pointer;
+    transition: all 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .source-row-placeholder:hover {
+    color: var(--accent-hot); border-color: rgba(124, 92, 255, 0.5);
+    background: rgba(124, 92, 255, 0.06);
+    box-shadow: 0 0 18px rgba(124, 92, 255, 0.15);
+  }
+  .source-num {
+    width: 26px; height: 26px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(124, 92, 255, 0.18);
+    color: var(--accent-hot);
+    font-size: 11px; font-weight: 700;
+    flex-shrink: 0;
+    border: 1px solid rgba(124, 92, 255, 0.3);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  }
+  .source-row.filled .source-num {
+    background: linear-gradient(135deg, var(--green), #4ab685);
+    color: #0a0712;
+    border-color: rgba(92, 201, 153, 0.5);
+    box-shadow: 0 0 12px rgba(92, 201, 153, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  }
+  .source-info { min-width: 0; }
+  .source-label {
+    font-size: 11px; font-weight: 600; color: var(--text2);
+  }
+  .source-value {
+    font-size: 12px; color: var(--text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-family: "SF Mono", "Consolas", monospace;
+    margin-top: 1px;
+  }
+  .source-value.empty { color: var(--text3); font-style: italic; font-family: inherit; }
+
+  .source-row-actions { display: flex; gap: 4px; align-items: center; flex-shrink: 0; }
+
+  /* Compat grid (durée/FPS/VFQ) */
+  .compat-grid {
+    display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 5px;
+    font-size: 11px; color: var(--text2);
+  }
+  .compat-ok { color: var(--green); font-weight: 600; }
+  .compat-bad { color: var(--red); font-weight: 600; }
+
+  /* FR audio options (toggle row) */
+  .fr-audio-options {
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+    margin-top: 6px;
+  }
+
+  /* Extract progress bars */
+  .extract-progress {
+    display: flex; flex-direction: column; gap: 4px;
+    margin-top: 6px;
+  }
+  .extract-progress-label { font-size: 11px; color: var(--text2); }
+  .extract-progress progress {
+    width: 100%; height: 5px; border: none; border-radius: 3px;
+    background: rgba(0,0,0,0.4); overflow: hidden;
+    appearance: none; -webkit-appearance: none;
+  }
+  .extract-progress progress::-webkit-progress-bar { background: rgba(0,0,0,0.4); border-radius: 3px; }
+  .extract-progress progress::-webkit-progress-value {
+    background: linear-gradient(90deg, var(--accent), var(--accent-hot));
+    border-radius: 3px;
+  }
+  .extract-progress progress:not([value]) {
+    background:
+      linear-gradient(90deg, transparent 0%, var(--accent-hot) 50%, transparent 100%) 0/40% 100% no-repeat,
+      rgba(0,0,0,0.4);
+    animation: ind-slide 1.4s linear infinite;
+  }
+  @keyframes ind-slide { 0% { background-position: -40% 0; } 100% { background-position: 140% 0; } }
+  .extract-progress.done .extract-progress-label { color: var(--green); font-weight: 600; }
+  .extract-progress.done progress[value]::-webkit-progress-value {
+    background: linear-gradient(90deg, #2f9e44, var(--green));
+  }
+  .extract-progress.err .extract-progress-label { color: var(--red); font-weight: 600; }
+  .extract-progress.err progress[value]::-webkit-progress-value {
+    background: linear-gradient(90deg, #c92a2a, var(--red));
   }
 
   /* Module sync subs externes */
   .sub-sync-module {
-    margin-top: 8px;
-    padding: 8px 10px;
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.03);
+    margin-top: 7px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.025);
     border: 1px solid var(--border);
   }
-  .sub-sync-module .btn-tiny { font-size: 11px; padding: 4px 10px; }
   .sync-results-header {
-    font-size: 11px; font-weight: 600; color: var(--text2);
-    text-transform: uppercase; letter-spacing: 0.5px;
+    font-size: 10px; font-weight: 600; color: var(--text2);
+    text-transform: uppercase; letter-spacing: 0.6px;
     margin-bottom: 4px;
   }
   .sync-results-list {
     list-style: none; padding: 0; margin: 0;
-    display: flex; flex-direction: column; gap: 3px;
-    font-size: 12px;
-  }
-  .sync-results-list li {
-    display: flex; gap: 12px; justify-content: space-between; align-items: center;
-    padding: 3px 6px; border-radius: 4px;
-  }
-  .sync-results-list li.has-offset { background: rgba(252, 196, 25, 0.10); }
-  .sync-results-list li.has-offset .sync-result-status { color: #fcc419; font-weight: 600; }
-  .sync-results-list li.no-offset .sync-result-status { color: #51cf66; }
-  .sync-results-list li.err .sync-result-status { color: #ff6b6b; }
-  .sync-result-name { color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .sync-actions { display: flex; gap: 6px; margin-top: 6px; }
-
-  .source-row-actions {
-    display: flex; flex-direction: row; gap: 6px; flex-shrink: 0;
-    align-items: center; justify-content: flex-end;
-  }
-  .source-row-actions .btn-primary {
-    flex: 1; min-width: 0; max-width: 170px; white-space: nowrap;
-    padding: 9px 12px; font-size: 12px;
-  }
-  .source-row-actions .btn-icon {
-    width: 36px; height: 36px; flex-shrink: 0;
-    display: flex; align-items: center; justify-content: center;
-    background: rgba(0,0,0,0.3); border: 1px solid var(--border);
-    border-radius: 6px; color: var(--text3);
-    font-size: 14px; cursor: pointer; transition: all 150ms;
-  }
-  .source-row-actions .btn-icon:hover {
-    color: rgb(255,150,150); border-color: rgba(239,68,68,0.5); background: rgba(239,68,68,0.12);
-  }
-
-  .compat-ok { color: rgb(80,220,120); font-weight: 700; margin-left: 4px; }
-  .compat-bad { color: rgb(255,120,120); font-weight: 700; margin-left: 4px; }
-
-  /* Bouton "+ Ajouter source de référence" placeholder, taille d'une source-row */
-  .source-row-placeholder {
-    display: flex; align-items: center; justify-content: center;
-    height: 56px; padding: 0;
-    background: transparent;
-    border: 1px dashed var(--border); border-radius: 10px;
-    color: var(--text3); font-size: 12px; cursor: pointer;
-    transition: all 150ms; width: 100%;
-  }
-  .source-row-placeholder:hover { color: var(--text); border-color: var(--border-hover); background: rgba(255,255,255,0.02); }
-  .automate-bar { padding: 14px 16px; border-color: rgba(230,57,70,0.4); background: linear-gradient(180deg, rgba(230,57,70,0.06), rgba(0,0,0,0.2)); position: relative; }
-  .btn-reset-corner {
-    position: absolute; top: 10px; right: 10px;
-    width: 28px; height: 28px; border-radius: 50%;
-    background: rgba(0,0,0,0.35); border: 1px solid var(--border);
-    color: var(--text3); font-size: 14px; cursor: pointer;
-    display: flex; align-items: center; justify-content: center;
-    transition: all 150ms;
-  }
-  .btn-reset-corner:hover:not(:disabled) {
-    background: rgba(239,68,68,0.18);
-    border-color: rgba(239,68,68,0.5);
-    color: rgb(255,150,150);
-    transform: rotate(-90deg);
-  }
-  .btn-reset-corner:disabled { opacity: 0.4; cursor: not-allowed; }
-  .btn-auto {
-    background: linear-gradient(180deg, rgb(180,140,40), rgb(140,100,20));
-    border-color: rgb(220,180,80);
-    color: white;
-  }
-  .btn-auto:hover:not(:disabled) { background: linear-gradient(180deg, rgb(220,180,80), rgb(180,140,40)); }
-  .auto-progress { margin-top: 12px; }
-  .auto-progress-row { display: flex; align-items: center; gap: 10px; }
-  .auto-progress .progress-bar { flex: 1; }
-  .progress-bar.done { background: rgba(40,180,80,0.15); border-color: rgba(40,180,80,0.4); }
-  .progress-bar.error { background: rgba(220,60,60,0.15); border-color: rgba(220,60,60,0.4); }
-  .progress-fill.done-fill { background: linear-gradient(90deg, rgb(40,180,80), rgb(60,220,120)); }
-  .progress-fill.error-fill { background: linear-gradient(90deg, rgb(220,60,60), rgb(255,100,100)); }
-  .auto-status { font-size: 12px; color: var(--text2); margin-top: 6px; text-align: center; }
-  .auto-status.done { color: rgb(80,220,120); font-weight: 600; }
-  .auto-status.error { color: rgb(255,120,120); font-weight: 600; }
-
-  .track-row {
-    padding: 10px 0;
-    border-top: 1px dashed var(--border);
-    transition: opacity 150ms;
-  }
-  .track-row.dropped { opacity: 0.38; }
-  .track-row.dropped .track-meta { text-decoration: line-through; }
-  .track-row:first-child { border-top: none; }
-  .track-row.video .video-dropdowns {
-    display: grid; grid-template-columns: repeat(4, 1fr);
-    gap: 10px; margin-top: 8px;
-  }
-  .video-dropdowns label { font-size: 11px; color: var(--text3); display: flex; flex-direction: column; gap: 4px; }
-  .video-dropdowns select, .video-dropdowns input[type="text"] {
-    width: 100%; box-sizing: border-box;
-    height: 34px; line-height: 1.2;
-    padding: 0 11px;
-    margin: 0;
-    appearance: none; -webkit-appearance: none;
-  }
-  .track-preview { font-size: 12px; color: var(--green); margin-top: 8px; }
-
-  .track-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .track-current { color: var(--text3); font-size: 11px; font-style: italic; }
-  .badge {
-    padding: 2px 7px; border-radius: 4px; font-size: 10px; font-weight: 700;
-    letter-spacing: 1px;
-  }
-  .badge.audio { background: rgba(0,180,216,0.15); color: var(--blue-hot); }
-  .badge.subs  { background: rgba(255,214,10,0.15); color: var(--yellow); }
-  .badge.subs-ext { background: rgba(255,149,133,0.18); color: #ff9585; }
-
-  .section-title-row {
-    display: flex; justify-content: space-between; align-items: center;
-    margin-bottom: 12px;
-  }
-  .section-title-row .section-title { margin-bottom: 0; }
-
-  .btn-tiny {
-    padding: 5px 10px; border-radius: 6px;
-    border: 1px solid var(--border); background: rgba(255,255,255,0.03);
-    color: var(--text2); font: inherit; font-size: 11px; font-weight: 600;
-    cursor: pointer; transition: all 150ms;
-  }
-  .btn-tiny:hover { background: rgba(255,255,255,0.08); color: var(--text); border-color: var(--border-strong); }
-
-  .order-ctrls {
-    display: flex; gap: 4px; margin-left: auto;
-  }
-  .btn-arrow {
-    width: 24px; height: 24px; border-radius: 5px;
-    border: 1px solid var(--border); background: rgba(255,255,255,0.03);
-    color: var(--text2); font: inherit; font-size: 12px; cursor: pointer;
-    display: inline-flex; align-items: center; justify-content: center;
-    transition: all 120ms;
-  }
-  .btn-arrow:hover { background: rgba(255,255,255,0.1); color: var(--text); }
-  .btn-arrow.danger:hover { background: rgba(239,68,68,0.15); color: #ff9585; border-color: rgba(239,68,68,0.4); }
-
-  .sub-size {
-    padding: 2px 6px; border-radius: 4px; font-size: 10px;
-    background: rgba(255,255,255,0.04); color: var(--text3);
-    border: 1px solid var(--border);
-  }
-
-  .empty-hint {
-    padding: 16px; text-align: center;
-    font-size: 12px; color: var(--text3); font-style: italic;
-    border: 1px dashed var(--border); border-radius: 8px;
-  }
-  .badge.video { background: rgba(126,240,192,0.15); color: var(--green); }
-
-  .track-controls {
-    display: flex; gap: 10px; align-items: center; margin-top: 8px; flex-wrap: wrap;
-  }
-  .chk {
-    display: flex; align-items: center; gap: 5px;
-    font-size: 11px; color: var(--text2); cursor: pointer;
-  }
-
-  select, input[type="text"], input[type="password"] {
-    padding: 8px 11px;
-    border-radius: 8px;
-    border: 1px solid var(--border);
-    background: rgba(0,0,0,0.3);
-    color: var(--text);
-    font: inherit; font-size: 12px;
-    transition: all 150ms;
-  }
-  select:hover, input:hover { border-color: var(--border-strong); }
-  select:focus, input:focus { outline: none; border-color: rgba(230,57,70,0.5); box-shadow: 0 0 0 3px rgba(230,57,70,0.15); }
-
-  .field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; }
-  .field label { font-size: 11px; color: var(--text2); font-weight: 600; }
-  .field-hint { font-size: 11px; color: var(--text3); margin-top: 4px; }
-  .field-hint b { color: var(--text); }
-  .field-row { display: flex; gap: 8px; }
-  .field-row input, .field-row select { flex: 1; }
-
-  .actions-row {
-    display: flex; gap: 10px; align-items: center;
-    padding: 14px 0 0; justify-content: flex-end;
-  }
-  .btn-primary {
-    padding: 10px 18px; border-radius: 8px; border: 1px solid rgba(230,57,70,0.5);
-    background: linear-gradient(180deg, rgba(230,57,70,0.25), rgba(230,57,70,0.18));
-    color: #fff; font: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
-    transition: all 150ms;
-  }
-  .btn-primary:hover:not(:disabled) { background: rgba(230,57,70,0.35); border-color: var(--red); }
-  .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
-  .btn-ghost {
-    padding: 8px 14px; border-radius: 8px; border: 1px solid var(--border);
-    background: transparent; color: var(--text2);
-    font: inherit; font-size: 12px; cursor: pointer;
-  }
-  .btn-ghost:hover { color: var(--text); border-color: var(--border-strong); }
-  .btn-test {
-    padding: 9px 14px; border-radius: 8px; border: 1px solid var(--border);
-    background: rgba(0, 180, 216, 0.08); color: var(--blue-hot);
-    font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
-    white-space: nowrap;
-  }
-  .btn-test:hover { background: rgba(0,180,216,0.18); border-color: rgba(0,180,216,0.5); }
-  .btn-cancel {
-    padding: 8px 14px; border-radius: 8px; border: 1px solid rgba(239,68,68,0.4);
-    background: rgba(239,68,68,0.12); color: #ff9585;
-    font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
-  }
-  .btn-cancel:hover { background: rgba(239,68,68,0.22); border-color: rgba(239,68,68,0.7); }
-  .btn-stop {
-    font-weight: 700; padding: 10px 18px; font-size: 14px;
-    border-width: 2px; border-color: rgba(239,68,68,0.7);
-    background: rgba(239,68,68,0.18); color: rgb(255,180,180);
-  }
-  .btn-stop:hover { background: rgba(239,68,68,0.32); color: white; }
-
-  .progress-bar {
-    flex: 1; height: 8px; background: rgba(255,255,255,0.06);
-    border-radius: 4px; overflow: hidden;
-  }
-  .progress-fill {
-    height: 100%; background: linear-gradient(90deg, var(--red), var(--red-hot));
-    transition: width 200ms ease-out;
-  }
-
-  .tmdb-preview {
-    padding: 8px 12px; margin: 6px 0 12px;
-    background: rgba(126, 240, 192, 0.06);
-    border: 1px solid rgba(126, 240, 192, 0.2);
-    border-radius: 8px; font-size: 13px; color: var(--green);
-  }
-
-  .lang-toggle {
-    display: inline-flex; gap: 2px; margin: 0 0 12px;
-    padding: 3px; border-radius: 8px; border: 1px solid var(--border);
-    background: rgba(0,0,0,0.25);
-  }
-  .lang-toggle button {
-    padding: 5px 12px; border: none; border-radius: 6px;
-    background: transparent; color: var(--text2);
-    font: inherit; font-size: 11px; font-weight: 700; letter-spacing: 0.5px;
-    cursor: pointer; transition: all 120ms;
-  }
-  .lang-toggle button:hover { color: var(--text); }
-  .lang-toggle button.active {
-    background: rgba(230, 57, 70, 0.2);
-    color: var(--red-hot);
-  }
-
-  .result-badge {
-    margin-top: 6px; padding: 6px 10px; border-radius: 6px;
+    display: flex; flex-direction: column; gap: 2px;
     font-size: 11px;
   }
-  .result-badge.ok  { background: rgba(126,240,192,0.1); color: var(--green); border: 1px solid rgba(126,240,192,0.3); }
-  .result-badge.err { background: rgba(255,149,133,0.1); color: #ff9585; border: 1px solid rgba(255,149,133,0.3); }
+  .sync-results-list li {
+    display: flex; gap: 10px; justify-content: space-between; align-items: center;
+    padding: 2px 5px; border-radius: 4px;
+  }
+  .sync-results-list li.has-offset { background: rgba(255, 181, 71, 0.10); }
+  .sync-results-list li.has-offset .sync-result-status { color: var(--orange); font-weight: 600; }
+  .sync-results-list li.err .sync-result-status { color: var(--red); }
+  .sync-result-name { color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sync-actions { display: flex; gap: 5px; margin-top: 5px; }
 
-  .preview-box {
-    margin-top: 10px; padding: 12px 14px;
-    background: rgba(0,0,0,0.35); border: 1px solid var(--border);
+  /* Réglages (field-grid 4 cols) */
+  .field-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+  }
+  @media (max-width: 800px) { .field-grid { grid-template-columns: repeat(2, 1fr); } }
+  .field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .field-label, .field label {
+    font-size: 10px; color: var(--text2); font-weight: 500;
+    text-transform: uppercase; letter-spacing: 0.4px;
+  }
+  .field input, .field select, .field-row input, .field-row select {
+    background: rgba(0, 0, 0, 0.35);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 6px 9px;
+    color: var(--text);
+    font-size: 11.5px; font-family: inherit;
+    min-width: 0;
+    transition: border-color 180ms ease, box-shadow 180ms ease;
+  }
+  .field input:focus, .field select:focus, .field-row input:focus, .field-row select:focus {
+    outline: none;
+    border-color: var(--accent-soft);
+    box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.15);
+  }
+  .field input[readonly] { color: var(--text2); background: rgba(0,0,0,0.45); }
+  .field-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .field-row > input, .field-row > select { flex: 1; min-width: 0; }
+  .field-hint { font-size: 11px; color: var(--text3); margin-top: 4px; line-height: 1.5; }
+
+  /* Tracks — glass rows */
+  .track {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 10px;
     border-radius: 8px;
+    background: rgba(255, 255, 255, 0.03);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid var(--border);
+    font-size: 11.5px;
+    margin-bottom: 4px;
+    transition: all 180ms ease;
   }
-  .preview-label {
-    font-size: 10px; color: var(--text3); text-transform: uppercase;
-    letter-spacing: 1px; margin-bottom: 6px;
+  .track:hover { background: rgba(255, 255, 255, 0.05); border-color: var(--border-hi); }
+  .track.track-editable { align-items: flex-start; grid-template-columns: auto 1fr 84px; }
+  .track.dropped { opacity: 0.45; }
+  .track-icon {
+    width: 20px; height: 20px; border-radius: 5px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700;
+    flex-shrink: 0;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
   }
-  .preview-value { color: var(--green); font-size: 13px; word-break: break-all; flex: 1; }
-  .preview-filename-row { display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap; }
+  .track-icon.video { background: rgba(124, 92, 255, 0.22); color: var(--accent-hot); border: 1px solid rgba(124, 92, 255, 0.3); }
+  .track-icon.audio { background: rgba(255, 181, 71, 0.22); color: var(--orange); border: 1px solid rgba(255, 181, 71, 0.3); }
+  .track-icon.sub { background: rgba(255, 92, 179, 0.22); color: var(--pink); border: 1px solid rgba(255, 92, 179, 0.3); }
+  .track-label {
+    color: var(--text); font-weight: 500;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .track-body { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+  .track-controls {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 78px 90px 82px 28px 28px 28px;
+    gap: 5px; align-items: center;
+    font-size: 11px;
+  }
+  .track-controls select {
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 3px 7px;
+    color: var(--text);
+    font-size: 11px; font-family: inherit;
+    width: 100%;
+    min-width: 0;
+    transition: border-color 180ms ease, box-shadow 180ms ease;
+  }
+  .track-controls .chk { justify-content: center; width: 100%; }
+  .track-controls .btn-arrow { width: 100%; padding-left: 0; padding-right: 0; }
+  @media (max-width: 1280px) {
+    .track-controls { grid-template-columns: minmax(0, 1fr) 66px 78px 70px 26px 26px 26px; }
+  }
+  .track-controls select:hover { border-color: var(--border-hi); }
+  .track-controls select:focus {
+    outline: none;
+    border-color: var(--accent-soft);
+    box-shadow: 0 0 0 2px rgba(124, 92, 255, 0.15);
+  }
+  .track-controls .chk {
+    display: inline-flex; align-items: center; gap: 4px;
+    color: var(--text2); cursor: pointer; user-select: none;
+    padding: 2px 7px; border-radius: 5px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid transparent;
+    transition: all 150ms ease;
+  }
+  .track-controls .chk:hover {
+    color: var(--text); background: rgba(255, 255, 255, 0.06);
+    border-color: var(--border);
+  }
+  .track-controls .chk input { margin: 0; accent-color: var(--accent); }
+  .track-flag {
+    font-size: 9.5px; padding: 2px 8px; border-radius: 5px;
+    background: rgba(124, 92, 255, 0.18); color: var(--accent-hot);
+    font-weight: 700; letter-spacing: 0.3px;
+    text-transform: uppercase;
+    flex-shrink: 0;
+    border: 1px solid rgba(124, 92, 255, 0.25);
+    text-align: center;
+    min-width: 64px;
+    justify-self: end;
+  }
+  .track-flag.success { background: rgba(92, 201, 153, 0.18); color: var(--green); border-color: rgba(92, 201, 153, 0.3); }
+  .track-flag.warn { background: rgba(255, 181, 71, 0.18); color: var(--orange); border-color: rgba(255, 181, 71, 0.3); }
+  .track-flag.err { background: rgba(255, 61, 94, 0.18); color: var(--red); border-color: rgba(255, 61, 94, 0.3); }
+
+  .btn-arrow {
+    background: transparent; border: 1px solid var(--border);
+    color: var(--text2); cursor: pointer;
+    padding: 1px 5px; border-radius: 4px;
+    font: inherit; font-size: 10px;
+    transition: all 120ms;
+  }
+  .btn-arrow:hover { color: var(--text); background: rgba(255,255,255,0.04); border-color: var(--border-hi); }
+  .btn-arrow.danger:hover { color: var(--red-hot); border-color: rgba(255,61,94,0.4); background: rgba(255,61,94,0.05); }
+
+  .empty-hint { font-size: 11px; color: var(--text3); padding: 8px 4px; font-style: italic; }
+
+  /* Filename preview — premium gradient pill */
+  .filename {
+    background: linear-gradient(135deg, rgba(124, 92, 255, 0.14), rgba(255, 61, 94, 0.08));
+    border: 1px solid rgba(124, 92, 255, 0.35);
+    border-radius: 10px;
+    padding: 11px 14px;
+    font-family: "SF Mono", "Consolas", monospace;
+    font-size: 12px;
+    word-break: break-all;
+    line-height: 1.55;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 0 18px rgba(124, 92, 255, 0.08);
+  }
   .filename-input {
-    flex: 1; min-width: 280px; font-size: 13px;
-    padding: 6px 8px; background: rgba(0,0,0,0.5);
-    color: var(--green); border: 1px solid var(--border); border-radius: 6px;
+    width: 100%;
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 9px 12px;
+    color: var(--text);
+    font-family: "SF Mono", "Consolas", monospace;
+    font-size: 12px;
+    transition: border-color 180ms ease, box-shadow 180ms ease;
   }
-  .btn-copy {
-    flex-shrink: 0; padding: 4px 10px; font-size: 11px;
-    background: var(--panel2); color: var(--text); border: 1px solid var(--border);
-    border-radius: 6px; cursor: pointer; white-space: nowrap;
+  .filename-input:focus {
+    outline: none; border-color: var(--accent-soft);
+    box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.18);
   }
-  .btn-copy:hover { background: var(--panel3); }
+  .filename-actions { display: flex; gap: 5px; margin-top: 8px; flex-wrap: wrap; }
 
-  .queue-list { list-style: none; padding: 0; margin: 8px 0 0; display: flex; flex-direction: column; gap: 4px; }
-  .queue-row {
-    display: flex; align-items: center; gap: 8px;
-    padding: 6px 10px; background: rgba(0,0,0,0.25); border: 1px solid var(--border); border-radius: 6px;
+  /* Validation pills */
+  .validation { display: flex; flex-wrap: wrap; gap: 6px; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 4px 10px; border-radius: 999px;
+    font-size: 10.5px; font-weight: 700;
+    border: 1px solid;
+    letter-spacing: 0.3px;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
   }
-  .queue-idx { color: var(--text3); font-size: 11px; min-width: 16px; }
-  .queue-name { flex: 1; font-size: 12px; color: var(--text); word-break: break-all; }
-  .btn-xs { padding: 2px 8px; font-size: 11px; }
+  .pill.ok { background: rgba(92, 201, 153, 0.14); color: var(--green); border-color: rgba(92, 201, 153, 0.35); box-shadow: 0 0 12px rgba(92, 201, 153, 0.12); }
+  .pill.warn { background: rgba(255, 181, 71, 0.14); color: var(--orange); border-color: rgba(255, 181, 71, 0.35); box-shadow: 0 0 12px rgba(255, 181, 71, 0.12); }
+  .pill.err { background: rgba(255, 61, 94, 0.14); color: var(--red); border-color: rgba(255, 61, 94, 0.35); box-shadow: 0 0 12px rgba(255, 61, 94, 0.12); }
 
-  .tmdb-list { list-style: none; padding: 0; margin: 10px 0 0; display: flex; flex-direction: column; gap: 6px; }
-  .tmdb-alts { margin-top: 8px; }
-  .tmdb-alts summary { cursor: pointer; font-size: 11px; color: var(--text3); padding: 4px 0; }
-  .tmdb-alts summary:hover { color: var(--text); }
+  /* TMDB preview */
+  .tmdb-preview {
+    display: flex; gap: 12px;
+    margin-bottom: 6px;
+  }
+  .tmdb-preview-poster {
+    width: 78px; height: 117px; flex-shrink: 0;
+    object-fit: cover; border-radius: 8px;
+    border: 1px solid var(--border-hi);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+  }
+  .tmdb-preview-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+  .tmdb-preview-title {
+    font-size: 13px; font-weight: 700; color: var(--text); line-height: 1.2;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  .tmdb-preview-vo { font-size: 11px; color: var(--text2); font-style: italic; }
+  .tmdb-preview-meta { display: flex; flex-wrap: wrap; gap: 8px; font-size: 11px; color: var(--text2); }
+  .tmdb-preview-override {
+    display: flex; align-items: center; gap: 5px;
+    margin-top: 6px; padding-top: 6px;
+    border-top: 1px dashed var(--border);
+    font-size: 11px; flex-wrap: wrap;
+  }
+  .tmdb-preview-override-label { color: var(--text3); }
+  .tmdb-preview-override-input {
+    flex: 1; max-width: 130px; min-width: 80px;
+    padding: 4px 8px; font-size: 11px;
+    background: rgba(0,0,0,0.3); border: 1px solid var(--border); border-radius: 5px;
+    color: var(--text);
+    font-family: "SF Mono", monospace;
+  }
+  .tmdb-preview-override-input:focus { outline: none; border-color: var(--accent); }
+
+  /* TMDB list (recherche inline) */
+  .tmdb-list {
+    list-style: none; padding: 0; margin: 6px 0 0;
+    display: flex; flex-direction: column; gap: 4px;
+  }
   .tmdb-item {
-    display: flex; gap: 10px; align-items: flex-start; width: 100%; text-align: left;
-    padding: 8px; background: rgba(0,0,0,0.25); border: 1px solid var(--border);
-    border-radius: 8px; cursor: pointer; font: inherit; color: inherit;
+    display: flex; gap: 8px; align-items: flex-start;
+    padding: 6px;
+    background: rgba(255,255,255,0.025);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer; width: 100%;
+    color: var(--text); font: inherit;
+    text-align: left;
+    transition: all 120ms;
   }
-  .tmdb-item:hover { border-color: rgba(230,57,70,0.5); background: rgba(230,57,70,0.06); }
-  .tmdb-poster { width: 40px; height: 60px; object-fit: cover; border-radius: 4px; }
-  .tmdb-body { flex: 1; min-width: 0; }
-  .tmdb-title { font-weight: 600; font-size: 13px; }
-  .tmdb-year { color: var(--text3); font-weight: 400; }
+  .tmdb-item:hover { background: rgba(124,92,255,0.08); border-color: rgba(124,92,255,0.3); }
+  .tmdb-poster { width: 36px; height: 54px; object-fit: cover; border-radius: 4px; flex-shrink: 0; }
+  .tmdb-body { min-width: 0; flex: 1; }
+  .tmdb-title { font-size: 12px; font-weight: 600; }
+  .tmdb-year { color: var(--text3); font-weight: 500; }
   .tmdb-meta { font-size: 11px; color: var(--text2); margin-top: 2px; }
 
+  /* TMDB picked (pour cible) */
   .tmdb-picked {
-    display: flex; gap: 14px; align-items: flex-start;
-    margin-top: 12px; padding: 12px;
-    background: linear-gradient(180deg, rgba(230,57,70,0.08), rgba(230,57,70,0.02));
-    border: 1px solid rgba(230,57,70,0.4); border-radius: 10px;
+    display: flex; gap: 12px;
+    padding: 10px;
+    background: rgba(124,92,255,0.05);
+    border: 1px solid rgba(124,92,255,0.25);
+    border-radius: 8px;
+    margin-top: 8px;
   }
   .tmdb-picked-poster { width: 90px; height: 135px; object-fit: cover; border-radius: 6px; flex-shrink: 0; }
-  .tmdb-picked-body { flex: 1; min-width: 0; }
-  .tmdb-picked-title { font-weight: 700; font-size: 15px; color: var(--text); }
-  .tmdb-picked-vo { font-size: 12px; color: var(--text2); margin-top: 2px; font-style: italic; }
-  .tmdb-picked-meta { font-size: 11px; color: var(--text3); margin-top: 4px; }
-  .tmdb-picked-overview { font-size: 12px; color: var(--text2); margin-top: 8px; line-height: 1.5; }
+  .tmdb-picked-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+  .tmdb-picked-title { font-size: 14px; font-weight: 700; }
+  .tmdb-picked-vo { font-size: 11px; color: var(--text2); font-style: italic; }
+  .tmdb-picked-meta { font-size: 11px; color: var(--text2); }
+  .tmdb-picked-overview { font-size: 11px; color: var(--text2); margin-top: 4px; line-height: 1.4; }
+  .tmdb-alts { margin-top: 8px; }
+  .tmdb-alts summary { font-size: 11px; color: var(--text2); cursor: pointer; padding: 4px 0; }
+
+  /* Lang toggle — glass pill */
+  .lang-toggle {
+    display: inline-flex; gap: 0;
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 2px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  }
+  .lang-toggle button {
+    background: transparent; border: none; color: var(--text2);
+    font: inherit; font-size: 11px; font-weight: 500;
+    padding: 5px 11px; border-radius: 6px; cursor: pointer;
+    transition: all 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .lang-toggle button.active {
+    background: linear-gradient(135deg, var(--accent), #6845e8);
+    color: #fff; font-weight: 600;
+    box-shadow: 0 2px 8px rgba(124, 92, 255, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  }
+  .lang-toggle button:not(.active):hover { color: var(--text); background: rgba(255, 255, 255, 0.04); }
+
+  /* VFi toggle (label) */
   .vfq-toggle {
-    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
-    margin-top: 6px; font-size: 11px; cursor: pointer;
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; flex-wrap: wrap;
   }
-  .vfq-toggle input[type="checkbox"] { cursor: pointer; }
-  .vfq-toggle .vfq-yes { color: rgb(80,220,120); font-weight: 600; }
-  .vfq-toggle .vfq-no { color: rgb(255,200,100); font-weight: 600; }
+  .vfq-toggle input[type="checkbox"] { margin: 0; }
+  .vfq-yes { color: var(--green); font-weight: 600; }
+  .vfq-no  { color: var(--text3); }
   .vfq-link {
-    color: var(--text3); text-decoration: underline; font-size: 10px;
-    background: none; border: none; padding: 0; cursor: pointer; font-family: inherit;
+    background: rgba(124, 92, 255, 0.14);
+    border: 1px solid rgba(124, 92, 255, 0.35);
+    color: var(--accent-hot);
+    font: inherit; font-size: 10.5px; font-weight: 600;
+    padding: 3px 9px; border-radius: 5px;
+    cursor: pointer;
+    transition: all 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
   }
-  .vfq-link:hover { color: var(--text); }
-
-  .mono { font-family: "JetBrains Mono", "SF Mono", ui-monospace, monospace; font-size: 11px; }
-
-  .log-panel {
-    height: 170px; overflow-y: auto; padding: 10px 14px;
-    background: rgba(0,0,0,0.35); border-top: 1px solid var(--border);
-    font-family: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
-    font-size: 11px; line-height: 1.6; color: var(--text2);
+  .vfq-link:hover {
+    background: rgba(124, 92, 255, 0.28);
+    border-color: rgba(124, 92, 255, 0.55);
+    box-shadow: 0 0 12px rgba(124, 92, 255, 0.25);
   }
-  .log-line { display: flex; gap: 10px; padding: 1px 0; }
-  .log-time { color: rgba(245,239,231,0.25); font-variant-numeric: tabular-nums; }
+  .srt-label { color: var(--text2); font-weight: 600; }
+
+  /* Mux status banner */
+  .mux-status-banner.success {
+    border-color: rgba(92, 201, 153, 0.45);
+    background: linear-gradient(135deg, rgba(92, 201, 153, 0.16), rgba(47, 158, 68, 0.08));
+    box-shadow: 0 0 22px rgba(92, 201, 153, 0.18), var(--shadow-card);
+  }
+  .mux-status-banner.error {
+    border-color: rgba(255, 61, 94, 0.45);
+    background: linear-gradient(135deg, rgba(255, 61, 94, 0.16), rgba(201, 42, 42, 0.08));
+    box-shadow: 0 0 22px rgba(255, 61, 94, 0.18), var(--shadow-card);
+  }
+  .auto-status { font-size: 13px; padding: 2px 0; font-weight: 600; }
+  .auto-status.done { color: var(--green); }
+  .auto-status.error { color: var(--red); }
+
+  /* Queue */
+  .queue-list {
+    list-style: none; padding: 0; margin: 0;
+    display: flex; flex-direction: column; gap: 4px;
+    max-height: 200px; overflow: auto;
+  }
+  .queue-row {
+    display: grid;
+    grid-template-columns: auto 1fr auto auto;
+    align-items: center; gap: 8px;
+    padding: 6px 10px;
+    background: rgba(255, 255, 255, 0.03);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 11.5px;
+    transition: all 180ms ease;
+  }
+  .queue-row:hover { background: rgba(255, 255, 255, 0.06); border-color: var(--border-hi); }
+  .queue-idx {
+    width: 20px; height: 20px; border-radius: 50%;
+    background: rgba(124,92,255,0.15); color: var(--accent-hot);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700;
+  }
+  .queue-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .queue-actions { display: flex; gap: 4px; margin-top: 6px; }
+
+  /* Tools row */
+  .tools-row { display: flex; gap: 6px; flex-wrap: wrap; }
+
+  /* Sync (audio sync) tracks-table */
+  .tracks-table {
+    width: 100%; border-collapse: collapse;
+    font-size: 11.5px;
+  }
+  .tracks-table th {
+    text-align: left; padding: 6px 8px;
+    font-size: 10px; font-weight: 600; color: var(--text2);
+    text-transform: uppercase; letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--border);
+  }
+  .tracks-table td {
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+  }
+  .tracks-table tr.ref td { background: rgba(124,92,255,0.06); }
+  .tracks-table input[type="number"] {
+    background: rgba(0,0,0,0.3); border: 1px solid var(--border);
+    border-radius: 5px; padding: 3px 6px; color: var(--text);
+    font: inherit; font-size: 11px;
+  }
+
+  /* Result badge */
+  .result-badge {
+    display: inline-block;
+    padding: 3px 8px; border-radius: 5px;
+    font-size: 11px; font-weight: 600;
+    margin-top: 4px;
+  }
+  .result-badge.ok { background: rgba(92,201,153,0.12); color: var(--green); }
+  .result-badge.err { background: rgba(255,61,94,0.12); color: var(--red); }
+
+  /* Hint paragraph */
+  .hint { font-size: 12px; color: var(--text2); line-height: 1.5; }
+  .hint code { background: rgba(0,0,0,0.4); padding: 1px 5px; border-radius: 3px; font-family: "SF Mono", monospace; }
+
+  /* Actions row */
+  .actions-row {
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+    margin-top: 6px;
+  }
+
+  /* Btn-test, btn-secondary, btn-primary, btn-copy (legacy classes) */
+  .btn-test, .btn-secondary, .btn-primary, .btn-copy {
+    border: 1px solid var(--border);
+    background: rgba(40, 33, 54, 0.5);
+    backdrop-filter: blur(12px) saturate(160%);
+    -webkit-backdrop-filter: blur(12px) saturate(160%);
+    color: var(--text);
+    font: inherit; font-size: 11.5px; font-weight: 500;
+    padding: 6px 12px; border-radius: 7px;
+    cursor: pointer;
+    transition: all 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  }
+  .btn-test:hover:not(:disabled),
+  .btn-secondary:hover:not(:disabled),
+  .btn-copy:hover:not(:disabled) {
+    background: rgba(60, 50, 80, 0.6);
+    border-color: var(--border-hi);
+    transform: translateY(-1px);
+  }
+  .btn-primary {
+    background: linear-gradient(135deg, var(--accent), #6845e8);
+    border-color: rgba(124, 92, 255, 0.55);
+    color: #fff; font-weight: 600;
+    box-shadow: 0 4px 14px rgba(124, 92, 255, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: linear-gradient(135deg, var(--accent-hot), var(--accent));
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(124, 92, 255, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  }
+  .btn-test:disabled, .btn-secondary:disabled, .btn-primary:disabled, .btn-copy:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-auto { /* used as alias near "+ Extraire + sync" */
+    padding: 4px 10px; font-size: 11px;
+  }
+
+  /* ─── FOOTER (Journal) — glass ─── */
+  .journal {
+    background: rgba(10, 7, 18, 0.55);
+    backdrop-filter: blur(20px) saturate(170%);
+    -webkit-backdrop-filter: blur(20px) saturate(170%);
+    border-top: 1px solid var(--border);
+    padding: 8px 16px 10px;
+    max-height: 120px; overflow-y: auto;
+    font-family: "SF Mono", "Consolas", monospace;
+    font-size: 10.5px;
+    position: relative;
+    z-index: 9;
+    box-shadow: 0 -4px 18px rgba(0, 0, 0, 0.3);
+  }
+  .journal::before {
+    content: "";
+    position: absolute; left: 0; right: 0; top: -1px; height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(124, 92, 255, 0.35), rgba(255, 61, 94, 0.25), transparent);
+    pointer-events: none;
+  }
+  .journal-line { display: flex; gap: 8px; padding: 1px 0; }
+  .log-time { color: var(--text3); flex-shrink: 0; font-variant-numeric: tabular-nums; }
   .log-msg { word-break: break-word; white-space: pre-wrap; }
-  :global(.log-msg.lvl-default)  { color: #d7d0c8 !important; }
-  :global(.log-msg.lvl-progress) { color: #ffd60a !important; }
-  :global(.log-msg.lvl-ok)       { color: #7ef0c0 !important; }
-  :global(.log-msg.lvl-error)    { color: #ff9585 !important; }
+  :global(.log-msg.lvl-default)  { color: var(--text); }
+  :global(.log-msg.lvl-progress) { color: var(--orange); }
+  :global(.log-msg.lvl-ok)       { color: var(--green); }
+  :global(.log-msg.lvl-error)    { color: var(--red); }
+  .log-msg.ok   { color: var(--green); }
+  .log-msg.info { color: var(--text2); }
+  .log-msg.warn { color: var(--orange); }
+  .log-msg.err  { color: var(--red); }
+
+  :global(::-webkit-scrollbar) { width: 8px; height: 8px; }
+  :global(::-webkit-scrollbar-track) { background: transparent; }
+  :global(::-webkit-scrollbar-thumb) {
+    background: rgba(255, 255, 255, 0.10);
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.04);
+  }
+  :global(::-webkit-scrollbar-thumb:hover) { background: rgba(124, 92, 255, 0.35); }
+
+  /* Modes / responsive : when no source loaded we want full width hero */
+  @media (max-width: 1100px) {
+    .app.no-source .main {
+      grid-template-rows: auto 1fr;
+    }
+  }
+  /* When tracks-table appears in fullscreen, glass-style it too */
+  .tracks-table {
+    border-radius: 8px; overflow: hidden;
+    background: rgba(255, 255, 255, 0.02);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid var(--border);
+  }
+  .tracks-table th {
+    background: rgba(255, 255, 255, 0.04);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+  }
+  .tracks-table tbody tr {
+    transition: background-color 150ms ease;
+  }
+  .tracks-table tbody tr:hover td {
+    background: rgba(255, 255, 255, 0.03);
+  }
+  .tracks-table tr.ref td {
+    background: linear-gradient(90deg, rgba(124, 92, 255, 0.12), rgba(124, 92, 255, 0.04));
+  }
+  .tracks-table input[type="number"]:focus {
+    outline: none;
+    border-color: var(--accent-soft);
+    box-shadow: 0 0 0 2px rgba(124, 92, 255, 0.18);
+  }
+
+  /* Preview box (cible screen) — glass premium pill comme la card filename */
+  .preview-box {
+    margin-top: 10px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, rgba(124, 92, 255, 0.10), rgba(255, 61, 94, 0.06));
+    backdrop-filter: blur(14px) saturate(160%);
+    -webkit-backdrop-filter: blur(14px) saturate(160%);
+    border: 1px solid rgba(124, 92, 255, 0.30);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.06),
+      0 0 22px rgba(124, 92, 255, 0.10);
+  }
+  .preview-label {
+    font-size: 10px; font-weight: 700; color: var(--accent-hot);
+    text-transform: uppercase; letter-spacing: 0.7px;
+    margin-bottom: 6px;
+  }
+  .preview-value {
+    background: rgba(0, 0, 0, 0.35);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 12px;
+    color: var(--text);
+    word-break: break-all;
+    line-height: 1.55;
+    flex: 1;
+    min-width: 0;
+  }
+  .preview-filename-row {
+    display: flex; align-items: center; gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 6px;
+  }
+
+  /* Section title (sync screen, etc.) */
+  .section-title {
+    font-size: 11px; font-weight: 700; color: var(--text2);
+    text-transform: uppercase; letter-spacing: 0.6px;
+    margin: 4px 0 6px;
+  }
+
+  /* TMDB inline poster (recherche list) — shadow subtile glass */
+  .tmdb-poster { box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35); }
+
+  /* TMDB picked poster — shadow + bordure glass */
+  .tmdb-picked-poster {
+    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
+    border: 1px solid var(--border-hi);
+  }
+
+  /* Validation pills container — petit espacement quand placé hors d'une card */
+  .validation { margin-top: 2px; }
+
+  /* Filename mono — coloration accent sur extension/segments connus via segments dans le markup
+     (ici juste un léger highlight glass pour la couleur de fond) */
+  .filename:hover {
+    border-color: rgba(124, 92, 255, 0.5);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 0 26px rgba(124, 92, 255, 0.16);
+  }
+
+  /* Drop-target : feedback visuel quand on hover (Wails drop zone) */
+  .drop-target:hover::before {
+    border-color: rgba(124, 92, 255, 0.25);
+  }
+
+  /* Actions-row dans .fullscreen : glass container subtil pour Mux button + progress */
+  .fullscreen .actions-row {
+    padding: 10px 12px;
+    background: rgba(26, 22, 34, 0.45);
+    backdrop-filter: blur(14px) saturate(160%);
+    -webkit-backdrop-filter: blur(14px) saturate(160%);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: var(--shadow-card);
+  }
+
+  /* Result badge — backdrop blur cohérent */
+  .result-badge {
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid transparent;
+  }
+  .result-badge.ok { border-color: rgba(92, 201, 153, 0.30); }
+  .result-badge.err { border-color: rgba(255, 61, 94, 0.30); }
+
+  /* Hint paragraph — subtle glass when used inside cards */
+  .hint code {
+    background: rgba(0,0,0,0.45);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid var(--border);
+  }
+
+  /* Sync screen : table inline-style cells (drift_linear / drift_unstable / low_confidence)
+     gardent leurs fonds inline mais on les harmonise via :global() pour le rounded glass feel */
+  :global(.tracks-table td > div[style*="background:#5a3a00"]) {
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 209, 102, 0.25);
+  }
+  :global(.tracks-table td > div[style*="background:#5a1f1f"]) {
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 179, 179, 0.25);
+  }
+
+  /* TMDB override input : focus glow accent */
+  .tmdb-preview-override-input {
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    transition: border-color 180ms ease, box-shadow 180ms ease;
+  }
+  .tmdb-preview-override-input:focus {
+    outline: none;
+    border-color: var(--accent-soft);
+    box-shadow: 0 0 0 2px rgba(124, 92, 255, 0.15);
+  }
+
+  /* Filename input focus shadow déjà OK, mais on ajoute une transition douce */
+  .filename-input { transition: all 200ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+
+  /* btn-arrow danger refined */
+  .btn-arrow {
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    background: rgba(255, 255, 255, 0.025);
+  }
+
+  /* ╔════════════════════════════════════════════════════════════╗
+     ║  POST-SOURCE POLISH  v4.2.0                                ║
+     ║  Refonte premium liquid glass de la vue source-loaded      ║
+     ╚════════════════════════════════════════════════════════════╝ */
+
+  /* ── 1. CARDS ─ hiérarchie visuelle (Pistes = primary, autres = secondary) ── */
+  .col > .card {
+    /* gradient top-border subtile pour différencier les cards */
+    position: relative;
+  }
+  .col > .card::after {
+    content: "";
+    position: absolute;
+    left: 14px; right: 14px; top: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(124, 92, 255, 0.32), transparent);
+    pointer-events: none;
+    opacity: 0.7;
+  }
+
+  /* Card primary: Pistes (card-grow) — accent plus marqué + glow violet */
+  .card.card-grow {
+    background:
+      linear-gradient(180deg, rgba(124, 92, 255, 0.045) 0%, transparent 14%),
+      var(--card);
+    border-color: rgba(124, 92, 255, 0.18);
+    box-shadow:
+      0 12px 36px rgba(0, 0, 0, 0.4),
+      0 0 0 1px rgba(124, 92, 255, 0.08),
+      inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  }
+  .card.card-grow::after {
+    background: linear-gradient(90deg, transparent 5%, rgba(124, 92, 255, 0.55) 50%, transparent 95%);
+    opacity: 1;
+    height: 1.5px;
+  }
+  .card.card-grow .card-title {
+    font-size: 11.5px;
+    color: var(--text);
+    font-weight: 700;
+  }
+  .card.card-grow .card-title::before {
+    content: "";
+    display: inline-block;
+    width: 4px; height: 14px;
+    background: linear-gradient(180deg, var(--accent), var(--red));
+    border-radius: 2px;
+    margin-right: 2px;
+    box-shadow: 0 0 8px rgba(124, 92, 255, 0.5);
+  }
+
+  /* ── 2. TRACK ROWS ─ hiérarchie audio/video/sub ── */
+  .card.card-grow .track {
+    padding: 9px 12px;
+    border-radius: 10px;
+    margin-bottom: 5px;
+    background: rgba(255, 255, 255, 0.025);
+    border-left: 3px solid transparent;
+    transition: all 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .card.card-grow .track:hover {
+    background: rgba(255, 255, 255, 0.055);
+    transform: translateX(2px);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  }
+  /* Color-code by type via icon child */
+  .track:has(.track-icon.video) { border-left-color: rgba(124, 92, 255, 0.55); }
+  .track:has(.track-icon.audio) { border-left-color: rgba(255, 181, 71, 0.50); }
+  .track:has(.track-icon.sub)   { border-left-color: rgba(255, 92, 179, 0.50); }
+  .track:has(.track-icon.video):hover { box-shadow: 0 4px 14px rgba(124, 92, 255, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.05); }
+  .track:has(.track-icon.audio):hover { box-shadow: 0 4px 14px rgba(255, 181, 71, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.05); }
+  .track:has(.track-icon.sub):hover   { box-shadow: 0 4px 14px rgba(255, 92, 179, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.05); }
+
+  /* Bigger track icons inside card-grow for premium look */
+  .card.card-grow .track-icon {
+    width: 26px; height: 26px;
+    border-radius: 7px;
+    font-size: 12px;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.12),
+      0 2px 6px rgba(0, 0, 0, 0.3);
+  }
+  .card.card-grow .track-icon.video {
+    background: linear-gradient(135deg, rgba(124, 92, 255, 0.35), rgba(124, 92, 255, 0.18));
+    color: #fff;
+    text-shadow: 0 0 6px rgba(124, 92, 255, 0.6);
+  }
+  .card.card-grow .track-icon.audio {
+    background: linear-gradient(135deg, rgba(255, 181, 71, 0.35), rgba(255, 181, 71, 0.18));
+    color: #fff;
+    text-shadow: 0 0 6px rgba(255, 181, 71, 0.6);
+  }
+  .card.card-grow .track-icon.sub {
+    background: linear-gradient(135deg, rgba(255, 92, 179, 0.35), rgba(255, 92, 179, 0.18));
+    color: #fff;
+    text-shadow: 0 0 6px rgba(255, 92, 179, 0.6);
+  }
+
+  /* track-label : label en bold, meta en text2 (séparateurs · plus discrets) */
+  .card.card-grow .track-label {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: -0.1px;
+  }
+
+  /* Track flag : pill pleinement arrondie + glow */
+  .card.card-grow .track-flag {
+    border-radius: 999px;
+    padding: 3px 10px;
+    font-size: 9.5px;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+
+  /* track-controls : selects + checks plus glass */
+  .track-controls .chk {
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: 0.2px;
+  }
+  .track-controls .chk:has(input:checked) {
+    background: rgba(124, 92, 255, 0.18);
+    border-color: rgba(124, 92, 255, 0.4);
+    color: var(--accent-hot);
+    box-shadow: 0 0 10px rgba(124, 92, 255, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  }
+
+  /* ── 3. CUSTOM SELECT ARROW (premium, partout) ── */
+  .field select,
+  .field-row select,
+  .track-controls select {
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    background-image:
+      linear-gradient(45deg, transparent 50%, var(--text2) 50%),
+      linear-gradient(135deg, var(--text2) 50%, transparent 50%);
+    background-position:
+      calc(100% - 14px) 50%,
+      calc(100% - 9px) 50%;
+    background-size: 5px 5px, 5px 5px;
+    background-repeat: no-repeat;
+    padding-right: 26px;
+    cursor: pointer;
+  }
+  .field select:hover,
+  .field-row select:hover,
+  .track-controls select:hover {
+    background-image:
+      linear-gradient(45deg, transparent 50%, var(--accent-hot) 50%),
+      linear-gradient(135deg, var(--accent-hot) 50%, transparent 50%);
+    background-position:
+      calc(100% - 14px) 50%,
+      calc(100% - 9px) 50%;
+    background-size: 5px 5px, 5px 5px;
+    background-repeat: no-repeat;
+    border-color: var(--border-hi);
+  }
+  .field select:focus,
+  .field-row select:focus,
+  .track-controls select:focus {
+    background-image:
+      linear-gradient(45deg, transparent 50%, var(--accent) 50%),
+      linear-gradient(135deg, var(--accent) 50%, transparent 50%);
+  }
+  .field select option, .field-row select option, .track-controls select option {
+    background: #1a1622;
+    color: var(--text);
+  }
+
+  /* ── 4. RÉGLAGES CARD ─ inputs & selects glass premium ── */
+  .field-grid { gap: 10px 12px; }
+  .field-label, .field label {
+    font-size: 9.5px;
+    letter-spacing: 0.7px;
+    color: var(--text3);
+    font-weight: 600;
+  }
+  .field input, .field select, .field-row input, .field-row select {
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 8px;
+    padding: 7px 10px;
+    font-size: 12px;
+    transition: all 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .field input:hover, .field select:hover,
+  .field-row input:hover, .field-row select:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.13);
+  }
+  .field input:focus, .field select:focus,
+  .field-row input:focus, .field-row select:focus {
+    background: rgba(124, 92, 255, 0.06);
+    border-color: var(--accent-soft);
+    box-shadow:
+      0 0 0 3px rgba(124, 92, 255, 0.18),
+      0 0 14px rgba(124, 92, 255, 0.10);
+  }
+  .field input[readonly] {
+    background: rgba(255, 255, 255, 0.015);
+    color: var(--text2);
+    font-style: italic;
+  }
+  .field input[readonly]:hover {
+    background: rgba(255, 255, 255, 0.02);
+    border-color: rgba(255, 255, 255, 0.07);
+  }
+
+  /* ── 5. FILENAME ─ premium gradient pill avec accent extension ── */
+  .filename {
+    background:
+      radial-gradient(ellipse at top left, rgba(124, 92, 255, 0.18), transparent 60%),
+      linear-gradient(135deg, rgba(124, 92, 255, 0.10), rgba(255, 61, 94, 0.06));
+    border: 1px solid rgba(124, 92, 255, 0.30);
+    border-radius: 11px;
+    padding: 13px 16px;
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: var(--text);
+    font-weight: 500;
+    letter-spacing: -0.1px;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.06),
+      0 4px 16px rgba(124, 92, 255, 0.08),
+      0 0 22px rgba(124, 92, 255, 0.08);
+    transition: all 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    position: relative;
+    overflow: hidden;
+  }
+  .filename::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(120deg, transparent 30%, rgba(255, 255, 255, 0.04) 50%, transparent 70%);
+    pointer-events: none;
+  }
+  .filename:hover {
+    border-color: rgba(124, 92, 255, 0.55);
+    transform: translateY(-1px);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.10),
+      0 8px 26px rgba(124, 92, 255, 0.20),
+      0 0 32px rgba(124, 92, 255, 0.15);
+  }
+
+  /* ── 6. TMDB POSTER ─ shadow profond + bord accent + lift ── */
+  .tmdb-preview-poster {
+    width: 84px; height: 126px;
+    border-radius: 10px;
+    border: 1px solid rgba(124, 92, 255, 0.35);
+    box-shadow:
+      0 10px 28px rgba(0, 0, 0, 0.55),
+      0 0 0 1px rgba(255, 255, 255, 0.04),
+      0 0 22px rgba(124, 92, 255, 0.18);
+    transition: all 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    cursor: pointer;
+  }
+  .tmdb-preview-poster:hover {
+    transform: translateY(-2px) scale(1.02);
+    border-color: rgba(124, 92, 255, 0.6);
+    box-shadow:
+      0 14px 36px rgba(0, 0, 0, 0.6),
+      0 0 0 1px rgba(255, 255, 255, 0.08),
+      0 0 32px rgba(124, 92, 255, 0.30);
+  }
+
+  .tmdb-preview-title {
+    font-size: 14px;
+    background: linear-gradient(135deg, #fff 0%, #c8b5ff 100%);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+    letter-spacing: -0.2px;
+  }
+
+  /* ── 7. OUTPUT DIR & TOOLS ─ cards plus discrètes ── */
+  /* Output card : fond plus subtil pour qu'elle ne dispute pas Pistes */
+  .col > .card:has(> .card-title:first-child:has(+ .track:only-child)) {
+    background: rgba(20, 17, 27, 0.45);
+    padding: 10px 12px;
+  }
+  /* Output dir track : icône bleue glow */
+  .track .track-icon[style*="background:rgba(94,197,255"] {
+    background: linear-gradient(135deg, rgba(94, 197, 255, 0.35), rgba(94, 197, 255, 0.15)) !important;
+    color: #fff !important;
+    text-shadow: 0 0 6px rgba(94, 197, 255, 0.6);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 2px 6px rgba(0, 0, 0, 0.3);
+  }
+
+  /* Tools row : boutons plus mis en avant */
+  .tools-row { gap: 8px; }
+  .tools-row .btn {
+    padding: 7px 12px;
+    font-size: 11.5px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 8px;
+    color: var(--text);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+  }
+  .tools-row .btn:hover:not(:disabled) {
+    background: rgba(124, 92, 255, 0.10);
+    border-color: rgba(124, 92, 255, 0.35);
+    color: var(--accent-hot);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 14px rgba(124, 92, 255, 0.18);
+  }
+
+  /* ── 8. VALIDATION PILLS ─ taille + glow ── */
+  .pill {
+    padding: 5px 12px;
+    font-size: 10.5px;
+    letter-spacing: 0.4px;
+  }
+  .pill.ok    { box-shadow: 0 0 16px rgba(92, 201, 153, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.05); }
+  .pill.warn  { box-shadow: 0 0 16px rgba(255, 181, 71, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.05); }
+  .pill.err   { box-shadow: 0 0 16px rgba(255, 61, 94, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.05); }
+
+  /* ── 9. CARD-TITLE ICON glow subtil ── */
+  .card-title { gap: 8px; }
+  .card-title-row .card-title-actions .btn {
+    background: rgba(124, 92, 255, 0.10);
+    border: 1px solid rgba(124, 92, 255, 0.25);
+    color: var(--accent-hot);
+    padding: 4px 11px;
+    border-radius: 999px;
+    font-size: 10.5px;
+    font-weight: 600;
+  }
+  .card-title-row .card-title-actions .btn:hover:not(:disabled) {
+    background: rgba(124, 92, 255, 0.20);
+    border-color: rgba(124, 92, 255, 0.45);
+    color: #fff;
+    box-shadow: 0 0 14px rgba(124, 92, 255, 0.30);
+  }
+
+  /* ── 10. SCROLLBAR interne du card-grow plus discrète ── */
+  .card-grow::-webkit-scrollbar { width: 6px; }
+  .card-grow::-webkit-scrollbar-thumb {
+    background: rgba(124, 92, 255, 0.22);
+    border-radius: 3px;
+    border: none;
+  }
+  .card-grow::-webkit-scrollbar-thumb:hover {
+    background: rgba(124, 92, 255, 0.5);
+  }
+
+  /* ── 11. TMDB PREVIEW INFO ─ meta plus structurée ── */
+  .tmdb-preview-meta span {
+    background: rgba(255, 255, 255, 0.04);
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    font-size: 10.5px;
+    font-weight: 500;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+  }
+
+  /* ── 12. TMDB OVERRIDE ROW ─ glass subtil ── */
+  .tmdb-preview-override {
+    background: rgba(0, 0, 0, 0.18);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px dashed rgba(255, 255, 255, 0.08);
+    border-top: 1px dashed rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 8px 10px;
+    margin-top: 10px;
+    padding-top: 8px;
+  }
+
+  /* ── 13. FILENAME ACTIONS ─ boutons un peu plus visibles ── */
+  .filename-actions .btn-tiny {
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--text2);
+    padding: 5px 11px;
+    border-radius: 999px;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+  .filename-actions .btn-tiny:hover:not(:disabled) {
+    background: rgba(124, 92, 255, 0.14);
+    border-color: rgba(124, 92, 255, 0.32);
+    color: var(--accent-hot);
+    transform: translateY(-1px);
+  }
+
+  /* ── 14. LANG TOGGLE ─ déjà bon mais petit refinement ── */
+  .lang-toggle {
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 2px 8px rgba(0, 0, 0, 0.18);
+  }
+
+  /* ── 15. EQUILIBRAGE COLONNES ─ donner du minimum à la colonne droite ── */
+  @media (min-width: 1101px) {
+    .main { grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr); }
+  }
+
+  /* ── 16. Header card-titles avec emoji glow ── */
+  .card .card-title {
+    color: var(--text);
+    font-weight: 700;
+    font-size: 11px;
+  }
+
+  /* ── 17. Mux-status-banner taille augmentée ── */
+  .mux-status-banner {
+    padding: 14px 18px;
+  }
+  .mux-status-banner.success { animation: success-glow 2.4s ease-in-out infinite; }
+  @keyframes success-glow {
+    0%, 100% { box-shadow: 0 0 22px rgba(92, 201, 153, 0.18), var(--shadow-card); }
+    50%      { box-shadow: 0 0 38px rgba(92, 201, 153, 0.32), var(--shadow-card); }
+  }
+
+  /* ── 18. btn-arrow plus glass et alignés ── */
+  .btn-arrow {
+    padding: 3px 7px;
+    border-radius: 6px;
+    font-size: 11px;
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.06);
+  }
+  .btn-arrow:hover {
+    background: rgba(124, 92, 255, 0.14);
+    border-color: rgba(124, 92, 255, 0.30);
+    color: var(--accent-hot);
+  }
+  .btn-arrow.danger:hover {
+    background: rgba(255, 61, 94, 0.12);
+    border-color: rgba(255, 61, 94, 0.35);
+    color: var(--red-hot);
+  }
 </style>

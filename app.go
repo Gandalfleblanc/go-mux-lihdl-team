@@ -46,9 +46,10 @@ func NewApp() *App {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 
-	// Adapte la taille de fenêtre à la résolution de l'écran principal :
-	// ~85 % de la taille de l'écran (max 1600×1000), centrée. Empêche aussi
-	// la fenêtre de dépasser sur les petits laptops.
+	// Ouverture en plein écran adapté à la résolution courante : on définit
+	// d'abord la taille de la fenêtre à celle de l'écran principal, puis on
+	// la maximise pour qu'elle occupe toute la zone utilisable (hors menu bar
+	// macOS et dock). S'adapte automatiquement à n'importe quelle résolution.
 	if screens, err := wr.ScreenGetAll(ctx); err == nil && len(screens) > 0 {
 		var primary wr.Screen
 		for _, s := range screens {
@@ -60,23 +61,9 @@ func (a *App) startup(ctx context.Context) {
 		if primary.Size.Width == 0 {
 			primary = screens[0]
 		}
-		w := int(float64(primary.Size.Width) * 0.85)
-		h := int(float64(primary.Size.Height) * 0.85)
-		if w > 1600 {
-			w = 1600
-		}
-		if h > 1000 {
-			h = 1000
-		}
-		if w < 900 {
-			w = 900
-		}
-		if h < 650 {
-			h = 650
-		}
-		wr.WindowSetSize(ctx, w, h)
-		wr.WindowCenter(ctx)
+		wr.WindowSetSize(ctx, primary.Size.Width, primary.Size.Height)
 	}
+	wr.WindowMaximise(ctx)
 
 	// Drop-zone : .mkv → "file:dropped" (1er) ou "files:dropped" (batch N≥2) ;
 	// subs externes → "subs:dropped" ; audios externes → "audios:dropped".
@@ -124,7 +111,7 @@ func (a *App) startup(ctx context.Context) {
 
 // AppVersion est lue par le frontend (pill dans le header) et utilisée pour
 // comparer avec la dernière release GitHub lors du check de mise à jour.
-const AppVersion = "v4.1.2"
+const AppVersion = "v5.0.0"
 
 func (a *App) GetVersion() string { return AppVersion }
 
@@ -181,6 +168,16 @@ func (a *App) SelectMkvFile() (string, error) {
 		return "", err
 	}
 	return path, nil
+}
+
+// SelectMkvFiles ouvre un dialog multi-sélection pour les MKV (page d'accueil → queue).
+func (a *App) SelectMkvFiles() ([]string, error) {
+	return wr.OpenMultipleFilesDialog(a.ctx, wr.OpenDialogOptions{
+		Title: "Choisir un ou plusieurs fichiers .mkv",
+		Filters: []wr.FileFilter{
+			{DisplayName: "Matroska (*.mkv)", Pattern: "*.mkv"},
+		},
+	})
 }
 
 // SelectSubFiles ouvre un dialog multi-sélection pour les subs externes.

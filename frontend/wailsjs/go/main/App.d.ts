@@ -68,6 +68,8 @@ export function SelectAudioFiles():Promise<Array<string>>;
 
 export function SelectMkvFile():Promise<string>;
 
+export function SelectMkvFiles():Promise<Array<string>>;
+
 export function SelectOutputDir():Promise<string>;
 
 export function SelectSubFiles():Promise<Array<string>>;

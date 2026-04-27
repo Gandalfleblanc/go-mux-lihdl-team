@@ -126,6 +126,10 @@ export function SelectMkvFile() {
   return window['go']['main']['App']['SelectMkvFile']();
 }
 
+export function SelectMkvFiles() {
+  return window['go']['main']['App']['SelectMkvFiles']();
+}
+
 export function SelectOutputDir() {
   return window['go']['main']['App']['SelectOutputDir']();
 }
