@@ -58,7 +58,9 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          cache: true
+          # Cache désactivé : lent à restaurer pour ce binaire ultra-léger,
+          # et provoquait une erreur tar sur les runners avec Node.js 24.
+          cache: false
 
       - name: Build CLI discord-indexer
         if: steps.check-secrets.outputs.skip != 'true'
