@@ -74,14 +74,20 @@ jobs:
       - name: Commit & push si l'index a changé
         if: steps.check-secrets.outputs.skip != 'true'
         run: |
-          # On ne touche QUE discord_index.json — pas d'autre fichier.
-          if git diff --quiet -- discord_index.json; then
+          # Détecte aussi les nouveaux fichiers untracked (1er run du workflow).
+          if [ ! -f discord_index.json ]; then
+            echo "→ Aucun discord_index.json généré (le binaire l'a-t-il bien écrit ?), rien à committer."
+            exit 0
+          fi
+          git add discord_index.json
+          # `git diff --cached --quiet` retourne non-zero s'il y a quoi que ce soit
+          # de staged (nouveau fichier OU modification d'un fichier existant).
+          if git diff --cached --quiet -- discord_index.json; then
             echo "→ Aucun changement dans discord_index.json, rien à committer."
             exit 0
           fi
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add discord_index.json
           git commit -m "chore(discord-index): auto-update [skip ci]"
           git push
           echo "✓ discord_index.json committé et pushé."
