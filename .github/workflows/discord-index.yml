@@ -91,5 +91,14 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "chore(discord-index): auto-update [skip ci]"
-          git push
-          echo "✓ discord_index.json committé et pushé."
+          # Retry avec rebase si quelqu'un d'autre a pushé pendant le scan.
+          for i in 1 2 3; do
+            if git push; then
+              echo "✓ discord_index.json committé et pushé (essai $i)."
+              exit 0
+            fi
+            echo "⚠ push rejeté (essai $i), pull --rebase et retry…"
+            git fetch origin main
+            git rebase origin/main || { git rebase --abort; echo "✗ rebase impossible"; exit 1; }
+          done
+          echo "✗ Échec du push après 3 essais"; exit 1
