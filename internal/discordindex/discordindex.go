@@ -178,16 +178,9 @@ func ScanForumIncremental(ctx context.Context, botToken, forumChannelID string, 
 		return nil, fmt.Errorf("threads actifs: %w", err)
 	}
 
-	progressFn(0, len(active), fmt.Sprintf("%d threads actifs — récupération des archives…", len(active)))
-	archived, err := listAllArchivedThreads(ctx, client, botToken, forumChannelID, progressFn)
-	if err != nil {
-		return nil, fmt.Errorf("threads archivés: %w", err)
-	}
-
-	all := append([]discordChannel{}, active...)
-	all = append(all, archived...)
+	all := active
 	total := len(all)
-	progressFn(0, total, fmt.Sprintf("%d threads à scanner (%d actifs + %d archivés)", total, len(active), len(archived)))
+	progressFn(0, total, fmt.Sprintf("%d threads actifs à scanner (archives ignorées)", total))
 
 	idx := &Index{
 		Version:     1,
@@ -222,6 +215,15 @@ func ScanForumIncremental(ctx context.Context, botToken, forumChannelID string, 
 				reused++
 			}
 			progressFn(scanned, total, fmt.Sprintf("🔒 %s (verrouillé, ignoré)", t.Name))
+			continue
+		}
+
+		// Skip les "anciens" : posts marqués 🍿 par l'admin (= films plus dispo).
+		// On NE préserve PAS l'entry — le lien Discord doit disparaître de GO MUX.
+		// L'orphan-preservation en fin de fonction ne les re-ajoute pas non plus
+		// car seenThreads[t.ID] est true (le thread est vu, juste skippé).
+		if strings.Contains(t.Name, "🍿") {
+			progressFn(scanned, total, fmt.Sprintf("🍿 %s (ancien, ignoré)", t.Name))
 			continue
 		}
 
