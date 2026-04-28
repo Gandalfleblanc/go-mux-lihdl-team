@@ -30,7 +30,7 @@ concurrency:
 jobs:
   scan-and-commit:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 5
     # Opt-in Node.js 24 pour les actions JS (checkout, setup-go) — évite le
     # warning de dépréciation Node.js 20 (forcé par défaut en juin 2026).
     env:
