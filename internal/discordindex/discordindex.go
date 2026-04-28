@@ -80,7 +80,8 @@ type discordChannel struct {
 }
 
 type discordThreadMetadata struct {
-	Archived     bool   `json:"archived"`
+	Archived         bool   `json:"archived"`
+	Locked           bool   `json:"locked"`
 	ArchiveTimestamp string `json:"archive_timestamp"`
 }
 
@@ -211,6 +212,18 @@ func ScanForumIncremental(ctx context.Context, botToken, forumChannelID string, 
 			return nil, err
 		}
 		scanned++
+
+		// Skip les threads "fermés" (locked) : releases mortes / verrouillées.
+		// On garde l'entry existante si on en a une (évite de la perdre), sinon
+		// on les ignore complètement.
+		if t.ThreadMetadata != nil && t.ThreadMetadata.Locked {
+			if prev, ok := byThread[t.ID]; ok && prev.TmdbID != "" {
+				idx.Entries[prev.TmdbID] = prev
+				reused++
+			}
+			progressFn(scanned, total, fmt.Sprintf("🔒 %s (verrouillé, ignoré)", t.Name))
+			continue
+		}
 
 		// Skip incrémental : si on connaît ce thread et que son last_message_id
 		// est inchangé depuis le dernier scan → réutilise l'entry telle quelle.
