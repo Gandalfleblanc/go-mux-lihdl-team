@@ -352,6 +352,7 @@ export namespace main {
 	}
 	export class SubSyncRequest {
 	    path: string;
+	    from_reference: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new SubSyncRequest(source);
@@ -360,6 +361,7 @@ export namespace main {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.path = source["path"];
+	        this.from_reference = source["from_reference"];
 	    }
 	}
 	export class SyncAudioTrack {

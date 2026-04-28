@@ -18,7 +18,7 @@ export function BuildFilename(arg1:naming.FilenameParams):Promise<string>;
 
 export function CancelMux():Promise<void>;
 
-export function CheckSubsSync(arg1:Array<main.SubSyncRequest>,arg2:string,arg3:string):Promise<Array<main.SubSyncCheck>>;
+export function CheckSubsSync(arg1:Array<main.SubSyncRequest>,arg2:string,arg3:string,arg4:string):Promise<Array<main.SubSyncCheck>>;
 
 export function CheckUpdate():Promise<main.UpdateInfo>;
 
@@ -38,7 +38,7 @@ export function DiscordIndexScan():Promise<string>;
 
 export function DownloadOpenSubtitle(arg1:string,arg2:string):Promise<string>;
 
-export function ExtractFRAudios(arg1:string,arg2:boolean,arg3:boolean,arg4:boolean,arg5:string):Promise<Array<main.FRAudioExtraction>>;
+export function ExtractFRAudios(arg1:string,arg2:boolean,arg3:boolean,arg4:boolean,arg5:string,arg6:string):Promise<Array<main.FRAudioExtraction>>;
 
 export function ExtractRefSubs(arg1:string,arg2:string):Promise<Array<main.RefSubResult>>;
 

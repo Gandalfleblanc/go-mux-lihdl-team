@@ -117,7 +117,7 @@ func (a *App) startup(ctx context.Context) {
 
 // AppVersion est lue par le frontend (pill dans le header) et utilisée pour
 // comparer avec la dernière release GitHub lors du check de mise à jour.
-const AppVersion = "v5.2.0"
+const AppVersion = "v5.3.0"
 
 func (a *App) GetVersion() string { return AppVersion }
 
@@ -797,8 +797,21 @@ func (a *App) ExtractRefSubs(refPath, lihdlSourcePath string) ([]RefSubResult, e
 		}
 		isSDH := false
 		if isFR {
-			content, _ := os.ReadFile(tmpPath)
-			isSDH, _ = mkvtool.DetectSubSDHFromContent(string(content))
+			// 1. Override explicite via track_name : si l'auteur a marqué la piste
+			//    SDH/HI/malentendants, on lui fait confiance immédiatement.
+			tnLow := strings.ToLower(t.Properties.TrackName)
+			if strings.Contains(tnLow, "sdh") ||
+				strings.Contains(tnLow, "hearing impaired") ||
+				strings.Contains(tnLow, "malentendant") ||
+				strings.Contains(tnLow, "deaf") ||
+				strings.Contains(tnLow, "sourd") {
+				isSDH = true
+			} else {
+				// 2. Sinon analyse contenu : crochets/parenthèses descriptives,
+				//    notes de musique, locuteurs en MAJUSCULES.
+				content, _ := os.ReadFile(tmpPath)
+				isSDH, _ = mkvtool.DetectSubSDHFromContent(string(content))
+			}
 		}
 		var langPrefix string
 		if isFR {
@@ -934,16 +947,30 @@ func codecIDToLabel(codecID string) string {
 // pickFirstFRAudioID retourne l'ID de la 1ère piste audio FR dans info, ou -1.
 // Utilisé pour la détection de sync (référence sur la source LiHDL).
 func pickFirstFRAudioID(info *mkvtool.Info) int {
+	return pickFirstAudioIDByLang(info, "fr")
+}
+
+// pickFirstAudioIDByLang retourne l'ID de la 1ère piste audio dans la langue
+// spécifiée ("fr" ou "eng") ; fallback sur la 1ère audio si aucune match.
+func pickFirstAudioIDByLang(info *mkvtool.Info, lang string) int {
+	lang = strings.ToLower(lang)
 	for _, t := range info.Tracks {
 		if t.Type != "audio" {
 			continue
 		}
-		lang := strings.ToLower(t.Properties.Language)
-		if lang == "fre" || lang == "fra" || lang == "fr" || strings.HasPrefix(lang, "fr-") {
-			return t.ID
+		l := strings.ToLower(t.Properties.Language)
+		switch lang {
+		case "fr", "fre", "fra":
+			if l == "fre" || l == "fra" || l == "fr" || strings.HasPrefix(l, "fr-") {
+				return t.ID
+			}
+		case "eng", "en":
+			if l == "eng" || l == "en" || strings.HasPrefix(l, "en-") {
+				return t.ID
+			}
 		}
 	}
-	// Pas de FR trouvé : fallback sur la 1ère audio (mieux que rien).
+	// Pas de match : fallback sur la 1ère audio.
 	for _, t := range info.Tracks {
 		if t.Type == "audio" {
 			return t.ID
@@ -1037,7 +1064,7 @@ func classifyFRAudio(t mkvtool.Track) string {
 //   - 2.0 → AC3 2.0 (192k)
 //   - 5.1 → AC3 5.1 (384k)
 //   - 7.1 → AC3 5.1 (384k, downmix)
-func (a *App) ExtractFRAudios(srcPath string, wantVFF, wantVFQ, wantENG bool, lihdlSourcePath string) ([]FRAudioExtraction, error) {
+func (a *App) ExtractFRAudios(srcPath string, wantVFF, wantVFQ, wantENG bool, lihdlSourcePath, syncRefLang string) ([]FRAudioExtraction, error) {
 	if srcPath == "" {
 		return nil, errors.New("chemin source FR vide")
 	}
@@ -1088,7 +1115,7 @@ func (a *App) ExtractFRAudios(srcPath string, wantVFF, wantVFQ, wantENG bool, li
 	var lihdlDuration float64
 	if lihdlSourcePath != "" {
 		if lihdlInfo, err := mkvtool.Identify(a.ctx, binary, lihdlSourcePath); err == nil {
-			lihdlFRID = pickFirstFRAudioID(lihdlInfo)
+			lihdlFRID = pickFirstAudioIDByLang(lihdlInfo, syncRefLang)
 		}
 		// Durée pour détection de drift.
 		if mibin, err := mediainfo.Locate(""); err == nil {
@@ -1335,8 +1362,14 @@ func (a *App) ExtractFRAudios(srcPath string, wantVFF, wantVFQ, wantENG bool, li
 }
 
 // SubSyncRequest : un SRT à synchroniser via alass-cli.
+//
+// FromReference : true si ce SRT a été extrait de la référence (timeline =
+// FPS de la ref, donc faut alass FPS guessing pour drift si FPS différents).
+// false si SRT externe ajouté manuellement par le user (typiquement déjà
+// adapté à la source LiHDL, donc faut JUSTE l'offset, PAS de FPS guessing).
 type SubSyncRequest struct {
-	Path string `json:"path"`
+	Path          string `json:"path"`
+	FromReference bool   `json:"from_reference"`
 }
 
 // SubSyncCheck décrit le résultat d'une synchronisation alass entre un SRT et
@@ -1353,7 +1386,7 @@ type SubSyncCheck struct {
 // source LiHDL (VAD + alignment local). Produit un SRT corrigé par entrée. Le
 // frontend remplace ensuite le path du SRT par le chemin SyncedPath pour le mux.
 // Émet des events `subsync:progress {percent, current}` pendant le traitement.
-func (a *App) CheckSubsSync(reqs []SubSyncRequest, sourceMkvPath, referenceMkvPath string) ([]SubSyncCheck, error) {
+func (a *App) CheckSubsSync(reqs []SubSyncRequest, sourceMkvPath, referenceMkvPath, syncRefLang string) ([]SubSyncCheck, error) {
 	emitProg := func(pct int, current string) {
 		wr.EventsEmit(a.ctx, "subsync:progress", map[string]any{"percent": pct, "current": current})
 	}
@@ -1377,11 +1410,14 @@ func (a *App) CheckSubsSync(reqs []SubSyncRequest, sourceMkvPath, referenceMkvPa
 		return nil, fmt.Errorf("ffprobe : %w", ferr)
 	}
 
-	// Détection FPS : pour décider si on active --disable-fps-guessing d'alass.
-	// Si source et ref ont les MÊMES FPS → guessing désactivé (sinon alass
-	// invente un faux ratio). Si DIFFÉRENTS FPS → guessing activé (alass
-	// détecte et applique le drift naturellement).
-	disableFPSGuess := false
+	// Détection FPS : décide PAR SRT si alass doit corriger un drift FPS.
+	// - FPS source/ref identiques → guessing désactivé (sinon alass invente)
+	// - FPS différents :
+	//     - SRT extrait de la référence (FromReference=true) → guessing actif
+	//       (timecodes au FPS de la ref, faut le tempo pour matcher la source)
+	//     - SRT externe manuel (FromReference=false) → guessing désactivé
+	//       (typiquement déjà adapté à la source LiHDL → juste l'offset)
+	fpsSame := true
 	if referenceMkvPath != "" {
 		mibin, _ := mediainfo.Locate("")
 		if mibin != "" {
@@ -1389,13 +1425,20 @@ func (a *App) CheckSubsSync(reqs []SubSyncRequest, sourceMkvPath, referenceMkvPa
 			refFps := getMediaFPS(a.ctx, mibin, referenceMkvPath)
 			if srcFps > 0 && refFps > 0 {
 				if math.Abs(srcFps-refFps) < 0.05 {
-					disableFPSGuess = true
-					wr.EventsEmit(a.ctx, "log", fmt.Sprintf("📐 FPS identiques (%.3f) → alass FPS guessing désactivé", srcFps))
+					wr.EventsEmit(a.ctx, "log", fmt.Sprintf("📐 FPS identiques (%.3f) → offset uniquement, pas de tempo SRT", srcFps))
 				} else {
-					wr.EventsEmit(a.ctx, "log", fmt.Sprintf("📐 FPS différents (réf %.3f vs source %.3f) → alass FPS guessing activé pour corriger le drift", refFps, srcFps))
+					fpsSame = false
+					wr.EventsEmit(a.ctx, "log", fmt.Sprintf("📐 FPS différents (réf %.3f vs source %.3f) → tempo + offset sur SRT extraits, offset seul sur SRT externes", refFps, srcFps))
 				}
 			}
 		}
+	}
+	// Helper : doit-on désactiver le FPS guessing alass pour ce SRT ?
+	fpsGuessDisabledForReq := func(req SubSyncRequest) bool {
+		if fpsSame {
+			return true
+		}
+		return !req.FromReference // SRT externe → pas de tempo, juste offset
 	}
 
 	// Identifie le SRT le plus long = "principal" (typiquement le Full). alass
@@ -1438,7 +1481,7 @@ func (a *App) CheckSubsSync(reqs []SubSyncRequest, sourceMkvPath, referenceMkvPa
 	} else {
 		wr.EventsEmit(a.ctx, "log", fmt.Sprintf("🔎 alass sync principal (%d lignes) : %s", entries[mainIdx].count, filepath.Base(mainReq.Path)))
 		outputPath := strings.TrimSuffix(mainReq.Path, filepath.Ext(mainReq.Path)) + ".alass" + filepath.Ext(mainReq.Path)
-		res, err := alass.Sync(a.ctx, alassPath, sourceMkvPath, entries[mainIdx].inputPath, outputPath, true, disableFPSGuess, binDir)
+		res, err := alass.Sync(a.ctx, alassPath, sourceMkvPath, entries[mainIdx].inputPath, outputPath, true, fpsGuessDisabledForReq(mainReq), binDir)
 		if err != nil {
 			results[mainIdx] = SubSyncCheck{Path: mainReq.Path, Error: err.Error()}
 			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ alass %s : %s", filepath.Base(mainReq.Path), err.Error()))
@@ -1482,7 +1525,7 @@ func (a *App) CheckSubsSync(reqs []SubSyncRequest, sourceMkvPath, referenceMkvPa
 		}
 		// Sinon : alass standard.
 		wr.EventsEmit(a.ctx, "log", fmt.Sprintf("🔎 alass sync (%d lignes) : %s", e.count, filepath.Base(e.req.Path)))
-		res, err := alass.Sync(a.ctx, alassPath, sourceMkvPath, e.inputPath, outputPath, true, disableFPSGuess, binDir)
+		res, err := alass.Sync(a.ctx, alassPath, sourceMkvPath, e.inputPath, outputPath, true, fpsGuessDisabledForReq(e.req), binDir)
 		if err != nil {
 			results[i] = SubSyncCheck{Path: e.req.Path, Error: err.Error()}
 			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ alass %s : %s", filepath.Base(e.req.Path), err.Error()))

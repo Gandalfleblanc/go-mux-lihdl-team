@@ -323,6 +323,60 @@
     appendLog(useVFi ? '↻ FR VFF → FR VFi' : '↻ FR VFi → FR VFF');
   }
 
+  // Re-label les sous-titres FR Forced/Full/SDH selon la présence d'une piste
+  // audio FR VFQ. Norme LiHDL : sans VFQ, les SRT FR sont nommés "FR Forced",
+  // "FR Full". Dès qu'une VFQ est ajoutée, ils deviennent "FR VFF Forced",
+  // "FR VFF Full" pour disambiguïser. Si la VFQ est retirée, on revert.
+  // Ne touche PAS aux "FR VFQ Forced/Full" (déjà préfixés VFQ) ni aux ENG/etc.
+  function applyFRSubVFFLabels() {
+    const hasVFQ = tracks.some(t => t.type === 'audio' && /^FR VFQ/.test(t.label || ''))
+      || externalAudios.some(a => /^FR VFQ/.test(a.label || ''))
+      || secondarySelected.some(t => t.type === 'audio' && /^FR VFQ/.test(t.label || ''));
+    const swap = (lbl) => {
+      if (!lbl) return lbl;
+      if (hasVFQ) {
+        const m = lbl.match(/^FR (Forced|Full|SDH)\b(.*)$/);
+        if (m) return `FR VFF ${m[1]}${m[2]}`;
+      } else {
+        const m = lbl.match(/^FR VFF (Forced|Full|SDH)\b(.*)$/);
+        if (m) return `FR ${m[1]}${m[2]}`;
+      }
+      return lbl;
+    };
+    // Guard idempotent : ne déclenche pas de reactive update si rien ne change.
+    let needsUpdate = false;
+    const checkSub = (lbl) => { if (swap(lbl) !== lbl) needsUpdate = true; };
+    for (const t of tracks) if (t.type === 'subtitles' && !needsUpdate) checkSub(t.label);
+    for (const s of externalSubs) if (!needsUpdate) checkSub(s.label);
+    for (const t of secondarySelected) if (t.type === 'subtitles' && !needsUpdate) checkSub(t.label);
+    if (!needsUpdate) return;
+    tracks = tracks.map(t => t.type === 'subtitles' ? { ...t, label: swap(t.label) } : t);
+    externalSubs = externalSubs.map(s => ({ ...s, label: swap(s.label) }));
+    secondarySelected = secondarySelected.map(t => t.type === 'subtitles' ? { ...t, label: swap(t.label) } : t);
+  }
+
+  // Réactif Svelte : à chaque changement audio (interne, externe, secondary),
+  // recalcule les labels SRT FR ↔ FR VFF selon la présence VFQ. Le guard
+  // dans applyFRSubVFFLabels évite les boucles infinies.
+  $: {
+    void tracks; void externalAudios; void secondarySelected;
+    applyFRSubVFFLabels();
+  }
+
+  // Réactif Svelte : si une VFQ apparaît dans les pistes audio, l'autre piste
+  // FR (typiquement VFi) doit devenir FR VFF (norme LiHDL — quand y'a 2 pistes
+  // FR, l'une est VFF/internationale, l'autre est VFQ québécoise).
+  $: {
+    void tracks; void externalAudios; void secondarySelected;
+    const hasVFQ = tracks.some(t => t.type === 'audio' && /^FR VFQ/.test(t.label || ''))
+      || externalAudios.some(a => /^FR VFQ/.test(a.label || ''))
+      || secondarySelected.some(t => t.type === 'audio' && /^FR VFQ/.test(t.label || ''));
+    if (hasVFQ && useVFi) {
+      useVFi = false;
+      applyVFiSwap(); // FR VFi → FR VFF (useVFi=false)
+    }
+  }
+
   // URL fiche Hydracker (résolue via API à partir de l'ID TMDB ; vide si pas de clé)
   let hydrackerURL = '';
 
@@ -361,35 +415,36 @@
       appendLog('⏳ Extraction des sous-titres FR/ENG compatibles…');
       const subs = await ExtractRefSubs(referencePath, sourcePath || '');
       if (subs && subs.length > 0) {
-        // Anti-doublon : pour chaque sub extrait avec un label LiHDL donné, on
-        // marque keep:false les pistes internes du même label ET on supprime
-        // les externalSubs du même label déjà ajoutés. Comparaison normalisée
-        // (trim + collapse spaces + lowercase) pour tolérer les diffs cosmétiques.
+        // Anti-doublon INVERSE : on garde les pistes existantes (internes ou
+        // externes) et on SKIP l'extraction des labels déjà présents. Idée :
+        // les pistes internes (FR Full, FR Forced) du source LiHDL sont déjà
+        // parfaitement synchros — pas la peine de les remplacer par les
+        // extracts de la ref qui nécessitent un resync. On n'ajoute que ce
+        // qui MANQUE.
         const norm = (s) => (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
-        const newLabels = new Set(subs.map(s => norm(s.label)).filter(Boolean));
-        appendLog(`🔍 Dédup labels recherchés : ${[...newLabels].join(' | ')}`);
-        const internalSubLabels = tracks.filter(t => t.type === 'subtitles' && t.keep).map(t => norm(t.label));
-        const extSubLabels = externalSubs.map(s => norm(s.label));
-        appendLog(`🔍 Internes existants : ${internalSubLabels.join(' | ') || '(aucun)'}`);
-        appendLog(`🔍 Externes existants : ${extSubLabels.join(' | ') || '(aucun)'}`);
-        if (newLabels.size > 0) {
-          let droppedTracks = 0, droppedExt = 0;
-          tracks = tracks.map(t => {
-            if (t.type === 'subtitles' && t.keep && newLabels.has(norm(t.label))) {
-              droppedTracks++;
-              return { ...t, keep: false };
-            }
-            return t;
-          });
-          const beforeExt = externalSubs.length;
-          externalSubs = externalSubs.filter(s => !newLabels.has(norm(s.label)));
-          droppedExt = beforeExt - externalSubs.length;
-          if (droppedTracks || droppedExt) {
-            appendLog(`↻ Doublons remplacés : ${droppedTracks} piste(s) interne(s) décochée(s), ${droppedExt} externe(s) supprimé(s)`);
-          } else {
-            appendLog('ℹ Aucun doublon détecté (pas de match label).');
+        const existingLabels = new Set([
+          ...tracks.filter(t => t.type === 'subtitles' && t.keep).map(t => norm(t.label)),
+          ...externalSubs.map(s => norm(s.label)),
+        ].filter(Boolean));
+        const initialCount = subs.length;
+        const filteredSubs = subs.filter(s => {
+          const lbl = norm(s.label);
+          if (lbl && existingLabels.has(lbl)) {
+            appendLog(`↳ ${s.label} déjà présent → skip extraction (on garde l'existant)`);
+            return false;
           }
+          return true;
+        });
+        if (filteredSubs.length === 0) {
+          appendLog(`ℹ Tous les sous-titres extraits étaient déjà présents (${initialCount} skippés) — rien à ajouter`);
+          srtExtractionResult = 'success';
+          srtExtracting = false;
+          srtPhase = '';
+          srtPercent = 0;
+          return;
         }
+        subs.length = 0;
+        subs.push(...filteredSubs);
         let maxOrder = 0;
         for (const t of tracks) maxOrder = Math.max(maxOrder, t.order ?? 0);
         for (const s of externalSubs) maxOrder = Math.max(maxOrder, s.order ?? 0);
@@ -411,6 +466,7 @@
             delayMs: s.delay_ms || 0,
             tempoFactor: s.tempo_factor || 1.0,
             order: maxOrder,
+            fromReference: true, // extrait de la ref → tempo+offset si FPS différents
           }];
         }
         const tempoInfo = subs[0] && subs[0].tempo_factor && subs[0].tempo_factor !== 1.0 ? ` + tempo ${subs[0].tempo_factor.toFixed(6)}` : '';
@@ -450,6 +506,11 @@
   // ---- Extraction FR Audio (VFF/VFQ depuis la source de référence) ----
   // Utilise referencePath comme unique source — pas de fichier séparé.
   let extractFRVFF = false;
+  // Référence audio pour la sync (Chromaprint + cross-corr) : "fr" (default,
+  // matche la VFF/VFi de la source LiHDL) ou "eng" (pour les cas où la VFF
+  // de la source n'est pas fiable, ex: source LiHDL re-encodée avec un drift
+  // sur l'audio FR mais ENG VO préservée).
+  let syncRefLang = 'fr';
   let extractFRVFQ = false;
   let extractENG = false;
   let frAudioExtracting = false;
@@ -473,6 +534,9 @@
   // Hash des paths SRT externes — pour éviter de relancer alass plusieurs fois
   // sur le même état après auto-trigger.
   let lastSyncedSrtPathsHash = '';
+  // Set des paths SRT déjà syncés (un alass terminé = path mémorisé). Évite
+  // de re-syncer un SRT qui n'a pas changé quand on en ajoute un nouveau.
+  let alreadySyncedPaths = new Set();
 
   // Déclenchement auto : appelé quand source LiHDL ET au moins un SRT externe
   // sont chargés. Ne refait pas l'analyse si elle a déjà été faite pour les
@@ -493,15 +557,30 @@
     if (!sourcePath) { appendLog('⚠ Charge la source LiHDL d\'abord'); return; }
     const srtSubs = externalSubs.filter(s => s.path && /\.(srt|ass|ssa)$/i.test(s.path));
     if (srtSubs.length === 0) { appendLog('ℹ Aucun SRT/ASS/SSA externe à vérifier'); return; }
+    // Filtre les SRT déjà syncés (cache des paths déjà passés par alass).
+    const newSubs = srtSubs.filter(s => !alreadySyncedPaths.has(s.path));
+    const skippedCount = srtSubs.length - newSubs.length;
+    if (newSubs.length === 0) {
+      appendLog(`ℹ Tous les sous-titres (${srtSubs.length}) ont déjà été vérifiés — skip`);
+      return;
+    }
+    if (skippedCount > 0) {
+      appendLog(`↳ ${skippedCount} sous-titre(s) déjà syncé(s) → skip`);
+    }
     subSyncChecking = true;
     subSyncResults = [];
     subSyncPercent = 0;
     subSyncCurrentName = '';
     subSyncAppliedMsg = '';
     try {
-      appendLog(`🔎 Sync alass de ${srtSubs.length} sous-titre(s) vs source…`);
-      const reqs = srtSubs.map(s => ({ path: s.path }));
-      subSyncResults = await CheckSubsSync(reqs, sourcePath, referencePath || '');
+      appendLog(`🔎 Sync alass de ${newSubs.length} sous-titre(s) vs source…`);
+      const reqs = newSubs.map(s => ({ path: s.path, from_reference: !!s.fromReference }));
+      subSyncResults = await CheckSubsSync(reqs, sourcePath, referencePath || '', syncRefLang);
+      // Marque les paths comme syncés (succès ou échec : on ne re-tentera pas).
+      for (const r of (subSyncResults || [])) {
+        if (r && r.path) alreadySyncedPaths.add(r.path);
+        if (r && r.synced_path) alreadySyncedPaths.add(r.synced_path);
+      }
     } catch (e) {
       appendLog('❌ alass sync : ' + String(e));
     } finally {
@@ -549,7 +628,7 @@
     try {
       const variants = [extractFRVFF && 'VFF', extractFRVFQ && 'VFQ', extractENG && 'ENG'].filter(Boolean).join(' + ');
       appendLog(`⏳ Extraction ${variants} + détection sync…`);
-      const extractionsRaw = await ExtractFRAudios(referencePath, !!extractFRVFF, !!extractFRVFQ, !!extractENG, sourcePath);
+      const extractionsRaw = await ExtractFRAudios(referencePath, !!extractFRVFF, !!extractFRVFQ, !!extractENG, sourcePath, syncRefLang);
       if (!extractionsRaw || extractionsRaw.length === 0) {
         appendLog('ℹ Aucune piste correspondante trouvée dans la source FR audio.');
         return;
@@ -3441,6 +3520,17 @@
                       </button>
                     {/if}
                   </div>
+                  <div class="fr-audio-options" style="margin-top:6px;">
+                    <span style="opacity:0.7;font-size:12px;">🎯 Référence sync :</span>
+                    <label class="vfq-toggle">
+                      <input type="radio" name="syncRefLang" bind:group={syncRefLang} value="fr" disabled={frAudioExtracting} />
+                      <span>FR (VFF/VFi)</span>
+                    </label>
+                    <label class="vfq-toggle">
+                      <input type="radio" name="syncRefLang" bind:group={syncRefLang} value="eng" disabled={frAudioExtracting} />
+                      <span>ENG VO</span>
+                    </label>
+                  </div>
                   {#if frAudioExtracting || frAudioExtractionResult}
                     <div class="extract-progress" class:done={frAudioExtractionResult === 'success' && !frAudioExtracting} class:err={frAudioExtractionResult === 'error' && !frAudioExtracting}>
                       <span class="extract-progress-label">
@@ -4463,17 +4553,13 @@
             Sans clé, fallback sur l'index ci-dessous (films seulement).
           </div>
         </div>
-        <div class="field"><label>Index TMDB primaire (proxy uklm)</label>
-          <input type="text" bind:value={config.serveurperso_url} placeholder="https://tmdb.uklm.xyz/search.php" />
-          <div class="field-hint">
-            Index principal — par défaut <b>tmdb.uklm.xyz</b> (réécrit, plus complet).
-          </div>
+        <div class="field"><label>Index de recherche</label>
+          <input type="password" value={config.serveurperso_url} disabled readonly style="opacity:0.6;cursor:not-allowed;" />
+          <div class="field-hint">Verrouillé (configuration interne LiHDL).</div>
         </div>
-        <div class="field"><label>Index TMDB fallback (serveurperso query)</label>
-          <input type="text" bind:value={config.fallback_index} placeholder="https://www.serveurperso.com/stats/search.php" />
-          <div class="field-hint">
-            Endpoint <b>?query=</b> de serveurperso. Interrogé automatiquement si le primaire renvoie 0 résultat.
-          </div>
+        <div class="field"><label>Index de recherche fallback</label>
+          <input type="password" value={config.fallback_index} disabled readonly style="opacity:0.6;cursor:not-allowed;" />
+          <div class="field-hint">Verrouillé (configuration interne LiHDL).</div>
         </div>
       </div>
 
@@ -4603,43 +4689,35 @@
           Seul l'admin renseigne le bot et lance le scan ; les users récupèrent l'index public via l'URL JSON.
         </div>
         <div class="field"><label>Token bot Discord</label>
-          <input type="password" bind:value={config.discord_bot_token} placeholder="ex: MTA…" autocomplete="off" />
-          <div class="field-hint">
-            Crée un bot sur <b>discord.com/developers/applications</b> → New App → Bot → Reset Token.
-            Permissions requises : <b>View Channels</b>, <b>Read Message History</b>, <b>Manage Threads</b>.
-            Ajoute le bot au serveur via <b>OAuth2 → URL Generator</b>.
-          </div>
+          <input type="password" value={config.discord_bot_token} disabled readonly style="opacity:0.6;cursor:not-allowed;" autocomplete="off" />
+          <div class="field-hint">Verrouillé (configuration interne LiHDL).</div>
         </div>
         <div class="field"><label>ID(s) forum channel(s) Discord</label>
-          <textarea bind:value={config.discord_forum_id} placeholder="ex: 1234567890123456789, 9876543210987654321&#10;ou un par ligne" autocomplete="off" rows="3" style="font-family: 'SF Mono', monospace; resize: vertical;"></textarea>
-          <div class="field-hint">
-            Active le <b>Mode Développeur</b> dans Discord (Réglages utilisateur → Avancés), puis clic droit sur chaque forum channel → <b>Copier l'identifiant</b>.
-            <br>Plusieurs IDs supportés : sépare par virgule, espace ou retour à la ligne. L'index merge tous les forums.
-          </div>
+          <input type="password" value={config.discord_forum_id} disabled readonly style="opacity:0.6;cursor:not-allowed;" autocomplete="off" />
+          <div class="field-hint">Verrouillé (configuration interne LiHDL).</div>
         </div>
         <div class="field"><label>URL JSON remote (pour les users)</label>
-          <input type="text" bind:value={config.discord_index_url} placeholder="https://raw.githubusercontent.com/&lt;owner&gt;/&lt;repo&gt;/&lt;branch&gt;/discord_index.json" />
-          <div class="field-hint">
-            URL publique d'où les users télécharge l'index (cache 24 h). Laisse vide pour ne pas activer le fetch remote.
-          </div>
+          <input type="password" value={config.discord_index_url} disabled readonly style="opacity:0.6;cursor:not-allowed;" />
+          <div class="field-hint">Verrouillé (configuration interne LiHDL).</div>
         </div>
 
-        <!-- Push GitHub direct (admin) — évite d'aller sur le site GitHub -->
+        <!-- Push GitHub direct (admin) — verrouillé : config interne LiHDL -->
         <div style="margin-top:14px;padding:12px;border:1px solid rgba(255,255,255,0.06);border-radius:10px;background:rgba(255,255,255,0.02);">
-          <div style="font-size:11.5px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">📤 Push GitHub direct (admin)</div>
-          <div class="field"><label>Token GitHub (PAT scope <code>repo</code>)</label>
-            <input type="password" bind:value={config.github_token} placeholder="ghp_..." autocomplete="off" />
-            <div class="field-hint">Crée un Fine-grained PAT sur github.com/settings/tokens → permission <b>Contents (Read+Write)</b> sur ton repo cible.</div>
+          <div style="font-size:11.5px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">📤 Push GitHub direct (admin) — verrouillé</div>
+          <div class="field"><label>Token GitHub</label>
+            <input type="password" value={config.github_token} disabled readonly style="opacity:0.6;cursor:not-allowed;" autocomplete="off" />
+            <div class="field-hint">Verrouillé (configuration interne LiHDL).</div>
           </div>
           <div class="field"><label>Repo (owner/name)</label>
-            <input type="text" bind:value={config.github_repo} placeholder="ex: Gandalfleblanc/go-mux-lihdl-team" autocomplete="off" />
+            <input type="password" value={config.github_repo} disabled readonly style="opacity:0.6;cursor:not-allowed;" autocomplete="off" />
+            <div class="field-hint">Verrouillé.</div>
           </div>
           <div style="display:grid;grid-template-columns:1fr 2fr;gap:8px;">
             <div class="field"><label>Branche</label>
-              <input type="text" bind:value={config.github_branch} placeholder="main" autocomplete="off" />
+              <input type="password" value={config.github_branch} disabled readonly style="opacity:0.6;cursor:not-allowed;" autocomplete="off" />
             </div>
             <div class="field"><label>Path du fichier dans le repo</label>
-              <input type="text" bind:value={config.github_index_file_path} placeholder="discord_index.json" autocomplete="off" />
+              <input type="password" value={config.github_index_file_path} disabled readonly style="opacity:0.6;cursor:not-allowed;" autocomplete="off" />
             </div>
           </div>
         </div>
@@ -4674,10 +4752,9 @@
 
       <div class="card">
         <div class="card-title">MKVToolNix</div>
-        <div class="field"><label>Chemin mkvmerge (optionnel — auto-détecté sinon)</label>
-          <input type="text" bind:value={config.mkvmerge_path} placeholder="/opt/homebrew/bin/mkvmerge" />
+        <div class="field-hint">
+          <b>mkvmerge</b> et <b>mkvextract</b> sont embarqués dans l'app — aucune installation requise.
         </div>
-        <div class="field-hint">Détecté actuellement : <b class="mono">{mkvmergePath || 'introuvable'}</b></div>
       </div>
 
       <div class="actions-row">
