@@ -208,6 +208,28 @@
   ];
   const VIDEO_CODEC_OPTIONS = ['H264', 'x264', 'H265', 'x265', 'AV1'];
   let tmdbResults = [];
+  let tmdbResultIndex = 0; // index du résultat actuel dans tmdbResults (cycle via "Autre résultat")
+
+  // Cycle vers le prochain résultat TMDB (utile en cas d'ambiguïté).
+  async function cycleNextTmdbResult() {
+    if (!tmdbResults || tmdbResults.length < 2) return;
+    tmdbResultIndex = (tmdbResultIndex + 1) % tmdbResults.length;
+    let picked = tmdbResults[tmdbResultIndex];
+    // Si la fiche n'a pas d'overview, fetch détaillé via la clé TMDB.
+    if (config.tmdb_key && picked.tmdb_id && !picked.overview) {
+      try {
+        let detail;
+        if (muxMode === 'lihdl') detail = await SearchTmdbMovie(picked.tmdb_id);
+        else detail = await SearchTmdb(picked.tmdb_id);
+        if (detail && detail.length > 0) picked = detail[0];
+      } catch {}
+    }
+    lastTmdbResult = picked;
+    target.title = composeTmdbTitle(picked);
+    target.year = picked.annee_fr || '';
+    appendLog(`↻ TMDB : passage au résultat ${tmdbResultIndex + 1}/${tmdbResults.length} — ${target.title}`);
+    if (muxMode === 'lihdl' && picked && picked.original_language === 'fr') applyVOFSwap();
+  }
   let tmdbQuery = '';
   let tmdbIdQuery = ''; // recherche par ID TMDB (séparée du nom)
   let tmdbMode = 'movie'; // 'movie' | 'tv'
@@ -2160,7 +2182,7 @@
         // Pas de clé : index générique (films + séries mélangés)
         r = await SearchTmdb(cleanedDotted);
       }
-      tmdbResults = r || [];
+      tmdbResults = r || []; tmdbResultIndex = 0;
       if (r && r.length >= 1) {
         // Auto-pick TOUJOURS le 1er résultat (top match TMDB).
         // L'utilisateur stoppe le mux via Stop si le match est faux.
@@ -2225,7 +2247,7 @@
         : (muxMode === 'lihdl' && config.tmdb_key)
           ? await SearchTmdbMovie(id)
           : await SearchTmdb(id);
-      tmdbResults = r || [];
+      tmdbResults = r || []; tmdbResultIndex = 0;
       if (r && r.length >= 1) {
         lastTmdbResult = r[0];
         target.title = composeTmdbTitle(r[0]);
@@ -2253,7 +2275,7 @@
       const r = tmdbMode === 'tv'
         ? await SearchTmdbTV(tmdbQuery)
         : await SearchTmdb(tmdbQuery);
-      tmdbResults = r || [];
+      tmdbResults = r || []; tmdbResultIndex = 0;
     } catch (e) {
       appendLog('❌ TMDB : ' + String(e));
     } finally {
@@ -3710,6 +3732,11 @@
             </div>
           </div>
           <div class="tmdb-validate-actions">
+            {#if tmdbResults && tmdbResults.length > 1}
+              <button class="btn btn-ghost" on:click={cycleNextTmdbResult} title="Cycler vers le résultat suivant si la fiche affichée n'est pas la bonne">
+                ↻ Autre résultat ({tmdbResultIndex + 1}/{tmdbResults.length})
+              </button>
+            {/if}
             <button class="btn btn-accent tmdb-validate-cta" on:click={() => { tmdbValidated = true; }}>✓ C'est bien ce film — continuer</button>
           </div>
         </div>
