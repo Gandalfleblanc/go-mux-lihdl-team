@@ -525,8 +525,31 @@ func listAllArchivedThreads(ctx context.Context, client *http.Client, botToken, 
 			progressFn(0, 0, fmt.Sprintf("Archives : page %d (%d threads récupérés)…", page, len(out)))
 		}
 		var resp discordThreadList
-		if err := discordGet(ctx, client, botToken, path, &resp); err != nil {
-			return out, err
+		// Retry transitoire (5xx, network) avec backoff. En cas d'échec total,
+		// on continue avec les threads déjà accumulés au lieu de tout perdre.
+		var lastErr error
+		for attempt := 1; attempt <= 3; attempt++ {
+			if err := discordGet(ctx, client, botToken, path, &resp); err != nil {
+				lastErr = err
+				if progressFn != nil {
+					progressFn(0, 0, fmt.Sprintf("⚠ Page %d échec essai %d/3 : %v", page, attempt, err))
+				}
+				select {
+				case <-ctx.Done():
+					return out, ctx.Err()
+				case <-time.After(time.Duration(attempt*2) * time.Second):
+				}
+				continue
+			}
+			lastErr = nil
+			break
+		}
+		if lastErr != nil {
+			// On loggue mais on retourne les threads déjà récupérés (best-effort).
+			if progressFn != nil {
+				progressFn(0, 0, fmt.Sprintf("⚠ Page %d abandonnée après 3 essais — on continue avec %d threads", page, len(out)))
+			}
+			return out, nil
 		}
 		out = append(out, resp.Threads...)
 		if progressFn != nil {
