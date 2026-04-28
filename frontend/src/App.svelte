@@ -348,8 +348,10 @@
     referencePath = p;
     referenceMkvInfo = await GetMkvBasicInfo(p).catch(() => null);
     appendLog('🔍 Référence : ' + p.split('/').pop() + (referenceMkvInfo ? ` (${formatDuration(referenceMkvInfo.duration_seconds)}, ${referenceMkvInfo.framerate} fps)` : ''));
-    // Auto-extraction des sous-titres FR/ENG en SRT (texte uniquement, exclut PGS/VobSub).
-    // Si la source LiHDL est chargée, détecte aussi le décalage et l'applique au mux.
+  }
+
+  async function runRefSubsExtraction() {
+    if (!referencePath) { appendLog('⚠ Choisis d\'abord une source de référence'); return; }
     srtExtracting = true;
     srtExtractionResult = '';
     srtPhase = '';
@@ -357,8 +359,37 @@
     srtPercent = 0;
     try {
       appendLog('⏳ Extraction des sous-titres FR/ENG compatibles…');
-      const subs = await ExtractRefSubs(p, sourcePath || '');
+      const subs = await ExtractRefSubs(referencePath, sourcePath || '');
       if (subs && subs.length > 0) {
+        // Anti-doublon : pour chaque sub extrait avec un label LiHDL donné, on
+        // marque keep:false les pistes internes du même label ET on supprime
+        // les externalSubs du même label déjà ajoutés. Comparaison normalisée
+        // (trim + collapse spaces + lowercase) pour tolérer les diffs cosmétiques.
+        const norm = (s) => (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+        const newLabels = new Set(subs.map(s => norm(s.label)).filter(Boolean));
+        appendLog(`🔍 Dédup labels recherchés : ${[...newLabels].join(' | ')}`);
+        const internalSubLabels = tracks.filter(t => t.type === 'subtitles' && t.keep).map(t => norm(t.label));
+        const extSubLabels = externalSubs.map(s => norm(s.label));
+        appendLog(`🔍 Internes existants : ${internalSubLabels.join(' | ') || '(aucun)'}`);
+        appendLog(`🔍 Externes existants : ${extSubLabels.join(' | ') || '(aucun)'}`);
+        if (newLabels.size > 0) {
+          let droppedTracks = 0, droppedExt = 0;
+          tracks = tracks.map(t => {
+            if (t.type === 'subtitles' && t.keep && newLabels.has(norm(t.label))) {
+              droppedTracks++;
+              return { ...t, keep: false };
+            }
+            return t;
+          });
+          const beforeExt = externalSubs.length;
+          externalSubs = externalSubs.filter(s => !newLabels.has(norm(s.label)));
+          droppedExt = beforeExt - externalSubs.length;
+          if (droppedTracks || droppedExt) {
+            appendLog(`↻ Doublons remplacés : ${droppedTracks} piste(s) interne(s) décochée(s), ${droppedExt} externe(s) supprimé(s)`);
+          } else {
+            appendLog('ℹ Aucun doublon détecté (pas de match label).');
+          }
+        }
         let maxOrder = 0;
         for (const t of tracks) maxOrder = Math.max(maxOrder, t.order ?? 0);
         for (const s of externalSubs) maxOrder = Math.max(maxOrder, s.order ?? 0);
@@ -470,7 +501,7 @@
     try {
       appendLog(`🔎 Sync alass de ${srtSubs.length} sous-titre(s) vs source…`);
       const reqs = srtSubs.map(s => ({ path: s.path }));
-      subSyncResults = await CheckSubsSync(reqs, sourcePath);
+      subSyncResults = await CheckSubsSync(reqs, sourcePath, referencePath || '');
     } catch (e) {
       appendLog('❌ alass sync : ' + String(e));
     } finally {
@@ -696,11 +727,11 @@
     } catch (e) {
       appendLog('⚠ vidage "LiHDL en cours" : ' + String(e));
     }
-    const savedStatus = autoMuxStatus;
-    resetAll();
-    if (preserveAutoMuxStatus) {
-      autoMuxStatus = savedStatus;
-    }
+    // Reset UI désactivé après mux : on garde l'état + le log visibles pour
+    // que l'utilisateur puisse copier les logs et inspecter le résultat.
+    // Il cliquera ↻ RESET manuellement quand il aura fini.
+    appendLog('ℹ État conservé après mux — clique ↻ RESET en haut quand tu veux continuer');
+    void preserveAutoMuxStatus; // arg gardé pour compat caller
   }
   let filenameCopied = false;
   let filenameCopiedTimer = null;
@@ -1848,9 +1879,12 @@
       if (t.type === 'video')     base.label = '';
       return base;
     });
-    // Norme LiHDL : si une piste FR VFQ est présente parmi les audios, la 2e piste
-    // FR doit rester FR VFF (pas FR VFi). On désactive donc le toggle VFi auto.
-    const hasVFQ = tracks.some(t => t.type === 'audio' && /^FR VFQ/.test(t.label || ''));
+    // Norme LiHDL : si une piste FR VFQ est présente parmi les audios (internes,
+    // externes ou secondary), la 2e piste FR doit rester FR VFF (pas FR VFi).
+    // On désactive donc le toggle VFi auto.
+    const hasVFQ = tracks.some(t => t.type === 'audio' && /^FR VFQ/.test(t.label || ''))
+      || externalAudios.some(a => /^FR VFQ/.test(a.label || ''))
+      || secondarySelected.some(t => t.type === 'audio' && /^FR VFQ/.test(t.label || ''));
     if (hasVFQ && useVFi) {
       useVFi = false;
       appendLog('🇫🇷 FR VFQ détecté → l\'autre piste FR reste FR VFF (norme LiHDL)');
@@ -2133,16 +2167,16 @@
   //   In.the.Name.of.Ben.Hur.2016... → "In.the.Name.of.Ben.Hur"
   function cleanQueryFromFilename(filename) {
     let name = String(filename || '').replace(/\.[^.]+$/, '');
-    // Série : tout avant SxxExx
-    const ms = /^(.+?)\.S\d{1,2}E\d{1,3}\b/i.exec(name);
+    // Série : tout avant SxxExx (séparateur point OU espace).
+    const ms = /^(.+?)[\s.]S\d{1,2}E\d{1,3}\b/i.exec(name);
     if (ms) name = ms[1];
     else {
-      // Film : tout avant l'année (4 chiffres 19xx ou 20xx)
-      const my = /^(.+?)\.(?:19|20)\d{2}\b/.exec(name);
+      // Film : tout avant l'année 4 chiffres 19xx/20xx (séparateur point OU espace).
+      const my = /^(.+?)[\s.](?:19|20)\d{2}\b/.exec(name);
       if (my) name = my[1];
     }
-    // Strip un éventuel ".2024" en suffixe (cas: Title.2024.S01E15...)
-    name = name.replace(/\.(?:19|20)\d{2}$/, '');
+    // Strip un éventuel suffixe " 2024" / ".2024" (cas: Title.2024.S01E15...)
+    name = name.replace(/[\s.](?:19|20)\d{2}$/, '');
     return name.trim();
   }
 
@@ -2152,7 +2186,7 @@
     const cleanedSpaces = cleanedDotted.replace(/\./g, ' ').trim();  // "The Boys" — pour l'API TMDB
     const isSeries = /\bS\d{1,2}E\d{1,3}\b/i.test(filename);
     const forceTV = isSeries || muxMode === 'psa';
-    tmdbQuery = cleanedDotted;
+    tmdbQuery = cleanedSpaces;
     if (forceTV) tmdbMode = 'tv';
     try {
       tmdbSearching = true;
@@ -2276,6 +2310,42 @@
         ? await SearchTmdbTV(tmdbQuery)
         : await SearchTmdb(tmdbQuery);
       tmdbResults = r || []; tmdbResultIndex = 0;
+    } catch (e) {
+      appendLog('❌ TMDB : ' + String(e));
+    } finally {
+      tmdbSearching = false;
+    }
+  }
+
+  // Recherche TMDB manuelle depuis la card "Aucune fiche trouvée" sur l'accueil.
+  // Set lastTmdbResult comme la recherche auto, pour que le user reste sur l'accueil
+  // et puisse continuer le workflow normalement.
+  async function manualTmdbSearchFromCard() {
+    if (!tmdbQuery.trim()) return;
+    tmdbSearching = true;
+    try {
+      let r;
+      if (tmdbMode === 'tv') r = await SearchTmdbTV(tmdbQuery);
+      else if (muxMode === 'lihdl' && config.tmdb_key) r = await SearchTmdbMovie(tmdbQuery);
+      else r = await SearchTmdb(tmdbQuery);
+      if (r && r.length > 0) {
+        let picked = r[0];
+        if (muxMode === 'lihdl' && picked && picked.tmdb_id) {
+          try {
+            const detail = await SearchTmdbMovie(picked.tmdb_id);
+            if (detail && detail.length > 0) picked = detail[0];
+          } catch (_) {}
+        }
+        lastTmdbResult = picked;
+        target.title = composeTmdbTitle(picked);
+        target.year = picked.annee_fr || '';
+        tmdbResults = r;
+        tmdbResultIndex = 0;
+        const suffix = r.length > 1 ? ` (${r.length} résultats)` : '';
+        appendLog('✓ TMDB : ' + target.title + suffix);
+      } else {
+        appendLog('ℹ Aucun résultat pour « ' + tmdbQuery + ' »');
+      }
     } catch (e) {
       appendLog('❌ TMDB : ' + String(e));
     } finally {
@@ -2830,6 +2900,16 @@
       });
       appendLog('🇫🇷 Film français (TMDB) → labels FR VOF');
     } else {
+      // Norme LiHDL : si une FR VFQ existe (interne, externe ou secondary), la
+      // 2e piste FR doit rester FR VFF (pas FR VFi). Désactive le toggle avant
+      // le swap pour éviter le rename FR VFF → FR VFi.
+      const hasVFQ = tracks.some(t => t.type === 'audio' && /^FR VFQ/.test(t.label || ''))
+        || externalAudios.some(a => /^FR VFQ/.test(a.label || ''))
+        || secondarySelected.some(t => t.type === 'audio' && /^FR VFQ/.test(t.label || ''));
+      if (hasVFQ && useVFi) {
+        useVFi = false;
+        appendLog('🇫🇷 FR VFQ détecté → l\'autre piste FR reste FR VFF (norme LiHDL)');
+      }
       // Toggle VFi : applique le swap FR VFF ↔ FR VFi selon le state useVFi.
       applyVFiSwap();
     }
@@ -3070,7 +3150,7 @@
   });
 </script>
 
-<div class="app" class:no-source={!sourcePath && tracks.length === 0 && screen === 'source'} class:tmdb-pending={sourcePath && !tmdbValidated && lastTmdbResult && screen === 'source'} style:--banner-url="url({banner})">
+<div class="app" class:no-source={!sourcePath && tracks.length === 0 && screen === 'source'} class:tmdb-pending={sourcePath && !tmdbValidated && screen === 'source'} style:--banner-url="url({banner})">
   <!-- Liquid glass background layers : banner + dark overlay + accent glow -->
   <div class="bg-banner" aria-hidden="true"></div>
   <div class="bg-overlay" aria-hidden="true"></div>
@@ -3182,7 +3262,9 @@
         </div>
       {/if}
 
-      <!-- Card unifiée : PSA + SUPPLY/FW (en mode PSA) ou seul (en mode LiHDL) -->
+      <!-- Card unifiée : PSA + SUPPLY/FW (en mode PSA) ou seul (en mode LiHDL).
+           Cachée tant que TMDB pas validé pour ne pas polluer la page d'accueil. -->
+      {#if tmdbValidated || !sourcePath}
       <div class="card drop-target" style:--wails-drop-target="drop">
         <div class="card-title">📁 Sources</div>
 
@@ -3330,7 +3412,7 @@
             <div class="source-row source-row-stacked" class:filled={referencePath}>
               <div class="source-num">3</div>
               <div class="source-info">
-                <div class="source-label">Source de référence (extraction auto SRT + FR audio)</div>
+                <div class="source-label">Source de référence (extraction sous-titres + FR audio sur demande)</div>
                 {#if referencePath}
                   <div class="source-value">{basename(referencePath)}</div>
                   {#if referenceMkvInfo && sourceMkvInfo}
@@ -3397,17 +3479,20 @@
                 {/if}
               </div>
               <div class="source-row-actions">
-                <button class="btn btn-ghost" on:click={pickReferenceDialog} disabled={frAudioExtracting}>
+                <button class="btn-primary btn-tiny" on:click={runRefSubsExtraction} disabled={!referencePath || srtExtracting || frAudioExtracting} title="Extraire les sous-titres FR/ENG (texte) de la référence et les ajouter au mux (les doublons sont remplacés)">
+                  {srtExtracting ? '…' : 'Extraire sous-titres'}
+                </button>
+                <button class="btn btn-ghost" on:click={pickReferenceDialog} disabled={frAudioExtracting || srtExtracting}>
                   {referencePath ? 'Changer' : 'Choisir'}
                 </button>
-                <button class="btn btn-ghost btn-icon" on:click={() => { clearReference(); showReferenceBar = false; }} title="Retirer la source de référence" disabled={frAudioExtracting}>✕</button>
+                <button class="btn btn-ghost btn-icon" on:click={() => { clearReference(); showReferenceBar = false; }} title="Retirer la source de référence" disabled={frAudioExtracting || srtExtracting}>✕</button>
               </div>
             </div>
           {:else}
             <div class="source-row">
               <div class="source-num">3</div>
               <div class="source-info">
-                <div class="source-label">Source de référence (extraction auto SRT + FR audio)</div>
+                <div class="source-label">Source de référence (extraction sous-titres + FR audio sur demande)</div>
                 <div class="source-value empty">— Aucun fichier de référence —</div>
               </div>
               <button class="btn btn-ghost" on:click={() => { showReferenceBar = true; pickReferenceDialog(); }}>Choisir</button>
@@ -3417,12 +3502,13 @@
         {/if}
         </div><!-- /source-list -->
       </div><!-- /card sources -->
+      {/if}
 
       <!-- Queue déplacée dans la card secondaire en bas droite (tab "Queue"). -->
 
 
-      <!-- Tracks (vidéo + audio + subs) — vue compacte mockup -->
-      {#if tracks.length > 0}
+      <!-- Tracks (vidéo + audio + subs) — vue compacte mockup. Cachées tant que TMDB pas validé pour qu'on reste visuellement sur l'accueil. -->
+      {#if tracks.length > 0 && tmdbValidated}
         {@const audioCount = tracks.filter(t=>t.type==='audio').length + externalAudios.length + secondarySelected.filter(t=>t.type==='audio').length}
         {@const subCount   = tracks.filter(t=>t.type==='subtitles').length + externalSubs.length + secondarySelected.filter(t=>t.type==='subtitles').length}
         {@const videoCount = tracks.filter(t=>t.type==='video').length}
@@ -3612,9 +3698,9 @@
     <!-- COLONNE DROITE -->
     <div class="col">
 
-      <!-- Empty state : visible quand aucune source OU quand source chargée mais TMDB pas encore validé -->
-      {#if (!sourcePath && tracks.length === 0) || (sourcePath && !tmdbValidated && lastTmdbResult)}
-        <div class="card empty-hero" class:compact={sourcePath && lastTmdbResult}>
+      <!-- Empty state : visible quand aucune source OU quand source chargée mais TMDB pas encore validé (trouvé OU pas trouvé) -->
+      {#if (!sourcePath && tracks.length === 0) || (sourcePath && !tmdbValidated)}
+        <div class="card empty-hero" class:compact={sourcePath}>
           <div class="empty-hero-aurora" aria-hidden="true"></div>
           <div class="empty-hero-content">
             <div class="empty-hero-badge">{muxMode === 'psa' ? 'CUSTOM PSA · SUPPLY/FW MUX' : 'LiHDL · FILM MUX PIPELINE'}</div>
@@ -3688,6 +3774,55 @@
         </div>
       {/if}
 
+      <!-- Card "aucune fiche TMDB" : même layout que la card validation, mais avec
+           une input de recherche au lieu de la fiche identifiée. -->
+      {#if sourcePath && !tmdbValidated && !lastTmdbResult && tmdbQuery}
+        <div class="card tmdb-validate-card">
+          <div class="tmdb-validate-header">
+            <div class="tmdb-validate-badge">⚠ AUCUNE FICHE TMDB — RECHERCHE MANUELLE</div>
+            <div class="tmdb-validate-force-mini" title="Forcer un ID TMDB">
+              <span class="tmdb-validate-force-mini-hash">#</span>
+              <input
+                type="text"
+                class="tmdb-validate-force-mini-input"
+                bind:value={tmdbIdQuery}
+                placeholder="ID TMDB"
+                inputmode="numeric"
+                pattern="[0-9]*"
+                on:keydown={(e) => e.key === 'Enter' && searchTmdbById()}
+              />
+              <button class="tmdb-validate-force-mini-btn" on:click={searchTmdbById} disabled={tmdbSearching || !tmdbIdQuery} title="Forcer cet ID">
+                {tmdbSearching ? '⏳' : '↻'}
+              </button>
+            </div>
+          </div>
+          <div class="tmdb-validate-body">
+            <div class="tmdb-validate-poster placeholder">🎞️</div>
+            <div class="tmdb-validate-info">
+              <div class="tmdb-validate-title" style="opacity:0.7;font-style:italic;">Aucun film identifié automatiquement</div>
+              <div class="tmdb-validate-desc" style="margin-top:8px;">
+                Édite le titre ci-dessous puis Entrée (ou clique 🔍 Rechercher).<br>
+                Ou colle un ID TMDB dans le champ <b class="mono">#</b> en haut à droite.
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;margin-top:14px;">
+                <input
+                  type="text"
+                  bind:value={tmdbQuery}
+                  placeholder="Titre du film…"
+                  style="flex:1;padding:10px 14px;font-size:14px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:#fff;"
+                  on:keydown={(e) => e.key === 'Enter' && manualTmdbSearchFromCard()}
+                />
+              </div>
+            </div>
+          </div>
+          <div class="tmdb-validate-actions">
+            <button class="btn btn-accent tmdb-validate-cta" on:click={manualTmdbSearchFromCard} disabled={tmdbSearching || !tmdbQuery.trim()}>
+              {tmdbSearching ? '⏳ Recherche…' : '🔍 Rechercher sur TMDB'}
+            </button>
+          </div>
+        </div>
+      {/if}
+
       <!-- Card validation TMDB : confirmation visuelle du film identifié avant de passer à l'étape pistes/réglages -->
       {#if sourcePath && !tmdbValidated && lastTmdbResult}
         <div class="card tmdb-validate-card">
@@ -3745,7 +3880,7 @@
       <!-- Card FICHE FILM supprimée — infos déjà visibles dans la card validation et le header film-bar. -->
 
       <!-- Réglages piste vidéo -->
-      {#if tracks.length > 0 && tracks.some(t => t.type === 'video')}
+      {#if tracks.length > 0 && tracks.some(t => t.type === 'video') && tmdbValidated}
         <div class="card">
           <div class="card-title">🎛️ Réglages piste vidéo</div>
           <div class="field-grid">
@@ -3824,7 +3959,7 @@
       {/if}
 
       <!-- Filename preview -->
-      {#if tracks.length > 0}
+      {#if tracks.length > 0 && tmdbValidated}
         <div class="card">
           <div class="card-title">📝 Nom de fichier final</div>
           {#if lastTmdbResult}
@@ -3882,38 +4017,6 @@
             </div>
           {/if}
         </div>
-      {:else if sourcePath}
-        <!-- Recherche TMDB inline si pas encore picked -->
-        <div class="card">
-          <div class="card-title">🎬 Recherche TMDB</div>
-          <div class="lang-toggle" style:margin-bottom="6px">
-            <button class:active={tmdbMode === 'movie'} on:click={() => tmdbMode = 'movie'}>🎬 Film</button>
-            <button class:active={tmdbMode === 'tv'}    on:click={() => tmdbMode = 'tv'}>📺 Série</button>
-          </div>
-          <div class="field-row">
-            <input type="text" bind:value={tmdbQuery} placeholder={tmdbMode === 'tv' ? 'Titre de série…' : 'Titre du film…'} on:keydown={(e) => e.key === 'Enter' && searchTmdb()} />
-            <button class="btn btn-accent btn-tiny" on:click={searchTmdb} disabled={tmdbSearching}>{tmdbSearching ? '…' : 'Titre'}</button>
-          </div>
-          <div class="field-row" style:margin-top="6px">
-            <input type="text" bind:value={tmdbIdQuery} placeholder="ID TMDB (ex: 12345)" inputmode="numeric" pattern="[0-9]*" on:keydown={(e) => e.key === 'Enter' && searchTmdbById()} />
-            <button class="btn btn-accent btn-tiny" on:click={searchTmdbById} disabled={tmdbSearching}>{tmdbSearching ? '…' : 'ID'}</button>
-          </div>
-          {#if tmdbResults.length > 0}
-            <ul class="tmdb-list">
-              {#each tmdbResults.slice(0, 3) as r}
-                <li>
-                  <button class="tmdb-item" on:click={() => pickTmdb(r)}>
-                    {#if r.poster_url}<img class="tmdb-poster" src={r.poster_url} alt=""/>{/if}
-                    <div class="tmdb-body">
-                      <div class="tmdb-title">{r.titre_fr || r.titre_vo} <span class="tmdb-year">({r.annee_fr})</span></div>
-                      <div class="tmdb-meta">{r.duree || ''} · ⭐ {r.note || '?'}</div>
-                    </div>
-                  </button>
-                </li>
-              {/each}
-            </ul>
-          {/if}
-        </div>
       {/if}
 
       <!-- Output dir : géré dans les Réglages, plus affiché ici. -->
@@ -3930,7 +4033,7 @@
       {/if}
 
       <!-- Audio sync screen access -->
-      {#if tracks.length > 0}
+      {#if tracks.length > 0 && tmdbValidated}
         <div class="card">
           <div class="card-title">🔊 Outils additionnels</div>
           <div class="tools-row">

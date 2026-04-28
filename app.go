@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -21,6 +23,7 @@ import (
 
 	"go-mux-lihdl-team/internal/alass"
 	"go-mux-lihdl-team/internal/audiosync"
+	"go-mux-lihdl-team/internal/chromaprint"
 	"go-mux-lihdl-team/internal/config"
 	"go-mux-lihdl-team/internal/discordindex"
 	"go-mux-lihdl-team/internal/hydracker"
@@ -114,7 +117,7 @@ func (a *App) startup(ctx context.Context) {
 
 // AppVersion est lue par le frontend (pill dans le header) et utilisée pour
 // comparer avec la dernière release GitHub lors du check de mise à jour.
-const AppVersion = "v5.1.2"
+const AppVersion = "v5.2.0"
 
 func (a *App) GetVersion() string { return AppVersion }
 
@@ -718,50 +721,11 @@ func (a *App) ExtractRefSubs(refPath, lihdlSourcePath string) ([]RefSubResult, e
 	var globalConfidence float64
 	var globalTempoFactor float64 = 1.0
 	globalMethod := "no_sync_check"
-	if lihdlSourcePath != "" {
-		refFRID := pickFirstFRAudioID(info)
-		if refFRID >= 0 {
-			lihdlInfo, lerr := mkvtool.Identify(a.ctx, binary, lihdlSourcePath)
-			if lerr == nil {
-				lihdlFRID := pickFirstFRAudioID(lihdlInfo)
-				if lihdlFRID >= 0 {
-					var durationSec float64
-					if mibin, err := mediainfo.Locate(""); err == nil {
-						if mi, err := mediainfo.Identify(a.ctx, mibin, lihdlSourcePath); err == nil {
-							for _, t := range mi.Media.Track {
-								if t.Type == "General" && t.Duration != "" {
-									if d, perr := strconv.ParseFloat(t.Duration, 64); perr == nil {
-										durationSec = d
-									}
-									break
-								}
-							}
-						}
-					}
-					binDir, _ := config.BinDir()
-					if ffmpeg, err := audiosync.Locate(binDir); err == nil {
-						wr.EventsEmit(a.ctx, "log", "🔎 Détection sync SRT (audio FR réf vs audio FR LiHDL)…")
-						emitPct(15)
-						if res, err := audiosync.DetectOffsetCross(a.ctx, ffmpeg, lihdlSourcePath, lihdlFRID, refPath, refFRID, durationSec); err == nil && res != nil {
-							globalConfidence = res.Confidence
-							globalMethod = res.Method
-							// On n'applique l'offset que si la confidence est suffisante
-							// (>= 0.4). Sinon, le décalage détecté risque d'être faux.
-							if res.Confidence >= 0.4 {
-								globalDelayMs = res.OffsetMs
-								if res.Method == "drift_linear" && res.TempoFactor > 0 {
-									globalTempoFactor = res.TempoFactor
-								}
-								wr.EventsEmit(a.ctx, "log", fmt.Sprintf("✓ sync SRT : offset %d ms + tempo %.6f appliqués (conf %.2f, %s)", res.OffsetMs, globalTempoFactor, res.Confidence, res.Method))
-							} else {
-								wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ sync SRT : décalage %d ms détecté mais confidence trop faible (%.2f) — pas d'application auto. Ajuste manuellement si besoin.", res.OffsetMs, res.Confidence))
-							}
-						}
-					}
-				}
-			}
-		}
-	}
+	// Pre-sync audio cross-correlation désactivé : peu fiable (conf 0.83 = faux
+	// positifs constatés en prod, le SRT était sorti "déjà alignée" alors que
+	// le décalage réel était de plusieurs secondes). On laisse alass faire tout
+	// le job en aval (sync auto au moment du mux), c'est l'outil dédié à ce cas
+	// (offset constant + drift FPS) et il est fiable.
 
 	// Pré-compte des subs FR/ENG texte pour calculer un % linéaire pendant la
 	// boucle d'extraction (de 80% à 99%).
@@ -1247,7 +1211,92 @@ func (a *App) ExtractFRAudios(srcPath string, wantVFF, wantVFQ, wantENG bool, li
 
 		// Détection sync (best-effort — si ffmpeg manquant ou pas de réf FR, skip).
 		extraction.TempoFactor = 1.0
-		if canSync {
+		// Pré-calcul du tempo basé sur le FPS : si la source de la piste audio
+		// (référence VF2) et la source LiHDL ont des FPS différents, l'audio
+		// extraite doit être resampled (sinon drift progressif). On l'applique
+		// AUTOMATIQUEMENT, indépendamment de la confiance audio cross-corr (qui
+		// est souvent < 0.4 quand il y a justement un drift FPS, donc bloquait).
+		if mibinTempo, _ := mediainfo.Locate(""); mibinTempo != "" {
+			srcFps := getMediaFPS(a.ctx, mibinTempo, srcPath)
+			lihdlFps := getMediaFPS(a.ctx, mibinTempo, lihdlSourcePath)
+			if srcFps > 0 && lihdlFps > 0 && math.Abs(srcFps-lihdlFps) > 0.05 {
+				extraction.TempoFactor = lihdlFps / srcFps
+				wr.EventsEmit(a.ctx, "log", fmt.Sprintf("📐 %s : FPS différents (réf %.3f vs LiHDL %.3f) → tempo audio ×%.6f", variant, srcFps, lihdlFps, extraction.TempoFactor))
+				// APPLIQUE le tempo au fichier audio extrait via ffmpeg atempo.
+				// Sans ça, TempoFactor reste juste métadata et l'audio dérive.
+				if ffmpeg != "" {
+					resampledPath := tmpPath + ".tempo.ac3"
+					rb := finalBitrate
+					if rb == 0 {
+						switch {
+						case finalChannels >= 5:
+							rb = 448
+						case finalChannels == 2:
+							rb = 192
+						default:
+							rb = 256
+						}
+					}
+					wr.EventsEmit(a.ctx, "log", fmt.Sprintf("🔄 %s : application atempo=%.6f via ffmpeg…", variant, extraction.TempoFactor))
+					if rerr := audiosync.ResampleAudioFile(a.ctx, ffmpeg, tmpPath, resampledPath, "ac3", finalChannels, rb, extraction.TempoFactor); rerr != nil {
+						wr.EventsEmit(a.ctx, "log", fmt.Sprintf("❌ %s resample : %s", variant, rerr.Error()))
+					} else {
+						os.Remove(tmpPath)
+						tmpPath = resampledPath
+						extraction.Path = tmpPath
+						extraction.WasConverted = true
+						extraction.BitrateKbps = rb
+						extraction.TempoFactor = 1.0 // baked dans le fichier
+						wr.EventsEmit(a.ctx, "log", fmt.Sprintf("✓ %s : audio resampled (durée corrigée pour FPS source)", variant))
+					}
+				}
+			}
+		}
+		// Détection offset via CHROMAPRINT : analyse les fingerprints spectraux
+		// haut-niveau (musique, ambiance), robuste aux voix différentes (VFQ vs
+		// VFF). Beaucoup plus fiable que la cross-correlation RMS classique
+		// quand les dialogues diffèrent. Doit être lancé APRÈS le resample
+		// éventuel (pour que les durées matchent).
+		offsetDetected := false
+		fpcalcPath, fpErr := chromaprint.Locate("", binDir)
+		if fpErr != nil {
+			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("ℹ Chromaprint %s : fpcalc introuvable (%s) — fallback cross-corr", variant, fpErr.Error()))
+		} else if lihdlSourcePath == "" || lihdlFRID < 0 {
+			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("ℹ Chromaprint %s : pas de source LiHDL/piste FR de réf — fallback cross-corr", variant))
+		} else {
+			lihdlAudioPath, eerr := mkvtool.ExtractTrackToTemp(a.ctx, binary, lihdlSourcePath, lihdlFRID, "ac3")
+			if eerr != nil {
+				wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ Chromaprint %s : extract LiHDL audio échoué : %s", variant, eerr.Error()))
+			} else {
+				defer os.Remove(lihdlAudioPath)
+				wr.EventsEmit(a.ctx, "log", fmt.Sprintf("🎵 Chromaprint %s : fingerprint en cours… (fpcalc=%s)", variant, fpcalcPath))
+				fpA, eA := chromaprint.Fingerprint(a.ctx, fpcalcPath, lihdlAudioPath, 600)
+				if eA != nil {
+					wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ Chromaprint %s : fingerprint LiHDL échoué : %s", variant, eA.Error()))
+				}
+				fpB, eB := chromaprint.Fingerprint(a.ctx, fpcalcPath, tmpPath, 600)
+				if eB != nil {
+					wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ Chromaprint %s : fingerprint VFQ échoué : %s", variant, eB.Error()))
+				}
+				if eA == nil && eB == nil && len(fpA) > 30 && len(fpB) > 30 {
+					offsetMs, conf, overlap := chromaprint.FindOffset(fpA, fpB, 480) // ±60s
+					wr.EventsEmit(a.ctx, "log", fmt.Sprintf("🎵 Chromaprint %s : %d hash A / %d hash B → offset %d ms, conf %.2f, overlap %d", variant, len(fpA), len(fpB), int(offsetMs), conf, overlap))
+					if conf >= 0.5 {
+						extraction.DelayMs = int(offsetMs)
+						extraction.Confidence = conf
+						extraction.Method = "chromaprint"
+						offsetDetected = true
+						wr.EventsEmit(a.ctx, "log", fmt.Sprintf("✓ Chromaprint %s : offset %d ms appliqué (conf %.2f)", variant, extraction.DelayMs, conf))
+					} else {
+						wr.EventsEmit(a.ctx, "log", fmt.Sprintf("ℹ Chromaprint %s : conf %.2f trop faible (<0.5), fallback cross-corr", variant, conf))
+					}
+				} else if eA == nil && eB == nil {
+					wr.EventsEmit(a.ctx, "log", fmt.Sprintf("ℹ Chromaprint %s : fingerprints trop courts (A=%d, B=%d hashes) — fallback", variant, len(fpA), len(fpB)))
+				}
+			}
+		}
+		// Fallback cross-correlation RMS si Chromaprint indisponible ou confidence trop basse.
+		if !offsetDetected && canSync {
 			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("🔎 Détection sync %s…", variant))
 			res, syncErr := audiosync.DetectOffsetCross(a.ctx, ffmpeg, lihdlSourcePath, lihdlFRID, srcPath, t.ID, lihdlDuration)
 			if syncErr != nil {
@@ -1304,7 +1353,7 @@ type SubSyncCheck struct {
 // source LiHDL (VAD + alignment local). Produit un SRT corrigé par entrée. Le
 // frontend remplace ensuite le path du SRT par le chemin SyncedPath pour le mux.
 // Émet des events `subsync:progress {percent, current}` pendant le traitement.
-func (a *App) CheckSubsSync(reqs []SubSyncRequest, sourceMkvPath string) ([]SubSyncCheck, error) {
+func (a *App) CheckSubsSync(reqs []SubSyncRequest, sourceMkvPath, referenceMkvPath string) ([]SubSyncCheck, error) {
 	emitProg := func(pct int, current string) {
 		wr.EventsEmit(a.ctx, "subsync:progress", map[string]any{"percent": pct, "current": current})
 	}
@@ -1328,39 +1377,185 @@ func (a *App) CheckSubsSync(reqs []SubSyncRequest, sourceMkvPath string) ([]SubS
 		return nil, fmt.Errorf("ffprobe : %w", ferr)
 	}
 
-	results := make([]SubSyncCheck, 0, len(reqs))
+	// Détection FPS : pour décider si on active --disable-fps-guessing d'alass.
+	// Si source et ref ont les MÊMES FPS → guessing désactivé (sinon alass
+	// invente un faux ratio). Si DIFFÉRENTS FPS → guessing activé (alass
+	// détecte et applique le drift naturellement).
+	disableFPSGuess := false
+	if referenceMkvPath != "" {
+		mibin, _ := mediainfo.Locate("")
+		if mibin != "" {
+			srcFps := getMediaFPS(a.ctx, mibin, sourceMkvPath)
+			refFps := getMediaFPS(a.ctx, mibin, referenceMkvPath)
+			if srcFps > 0 && refFps > 0 {
+				if math.Abs(srcFps-refFps) < 0.05 {
+					disableFPSGuess = true
+					wr.EventsEmit(a.ctx, "log", fmt.Sprintf("📐 FPS identiques (%.3f) → alass FPS guessing désactivé", srcFps))
+				} else {
+					wr.EventsEmit(a.ctx, "log", fmt.Sprintf("📐 FPS différents (réf %.3f vs source %.3f) → alass FPS guessing activé pour corriger le drift", refFps, srcFps))
+				}
+			}
+		}
+	}
+
+	// Identifie le SRT le plus long = "principal" (typiquement le Full). alass
+	// a besoin de beaucoup de subs pour s'aligner ; sur les SRT courts comme
+	// les Forced (~30 lignes), il sort des offsets délirants (+2min observé).
+	// On run alass UNIQUEMENT sur le principal, puis on applique son offset
+	// aux courts via shift SRT manuel. Tous les SRT de la même référence ont
+	// la même timeline → même offset s'applique.
+	const shortSRTThreshold = 100
+	type subEntry struct {
+		req       SubSyncRequest
+		count     int
+		origIdx   int
+		inputPath string
+	}
+	entries := make([]subEntry, len(reqs))
+	for i, r := range reqs {
+		entries[i] = subEntry{req: r, count: countSRTEntries(r.Path), origIdx: i, inputPath: r.Path}
+	}
+	// Indice du SRT le plus long (référence d'offset).
+	mainIdx := 0
+	for i := range entries {
+		if entries[i].count > entries[mainIdx].count {
+			mainIdx = i
+		}
+	}
+
+	results := make([]SubSyncCheck, len(reqs))
 	total := len(reqs)
-	for i, req := range reqs {
-		emitProg((i*100)/total, filepath.Base(req.Path))
-		lower := strings.ToLower(req.Path)
-		if !strings.HasSuffix(lower, ".srt") && !strings.HasSuffix(lower, ".ass") && !strings.HasSuffix(lower, ".ssa") {
-			results = append(results, SubSyncCheck{Path: req.Path, Error: "format non supporté par alass (SRT/ASS/SSA uniquement)"})
-			continue
-		}
-		wr.EventsEmit(a.ctx, "log", fmt.Sprintf("🔎 alass sync (%d/%d) : %s", i+1, total, filepath.Base(req.Path)))
-		// Output dans un fichier temp à côté de l'original avec suffix ".alass.srt"
-		outputPath := strings.TrimSuffix(req.Path, filepath.Ext(req.Path)) + ".alass" + filepath.Ext(req.Path)
-		// noSplit=true → un seul offset constant + correction FPS, plus stable.
-		res, err := alass.Sync(a.ctx, alassPath, sourceMkvPath, req.Path, outputPath, true, binDir)
+	mainOffsetMs := 0
+	mainFpsRatio := ""
+	mainSyncOK := false
+
+	// Step 1 : alass sur le SRT principal.
+	mainReq := entries[mainIdx].req
+	emitProg(0, filepath.Base(mainReq.Path))
+	lower := strings.ToLower(mainReq.Path)
+	if !strings.HasSuffix(lower, ".srt") && !strings.HasSuffix(lower, ".ass") && !strings.HasSuffix(lower, ".ssa") {
+		results[mainIdx] = SubSyncCheck{Path: mainReq.Path, Error: "format non supporté par alass (SRT/ASS/SSA uniquement)"}
+	} else {
+		wr.EventsEmit(a.ctx, "log", fmt.Sprintf("🔎 alass sync principal (%d lignes) : %s", entries[mainIdx].count, filepath.Base(mainReq.Path)))
+		outputPath := strings.TrimSuffix(mainReq.Path, filepath.Ext(mainReq.Path)) + ".alass" + filepath.Ext(mainReq.Path)
+		res, err := alass.Sync(a.ctx, alassPath, sourceMkvPath, entries[mainIdx].inputPath, outputPath, true, disableFPSGuess, binDir)
 		if err != nil {
-			results = append(results, SubSyncCheck{Path: req.Path, Error: err.Error()})
-			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ alass %s : %s", filepath.Base(req.Path), err.Error()))
+			results[mainIdx] = SubSyncCheck{Path: mainReq.Path, Error: err.Error()}
+			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ alass %s : %s", filepath.Base(mainReq.Path), err.Error()))
+		} else {
+			results[mainIdx] = SubSyncCheck{Path: mainReq.Path, SyncedPath: res.OutputPath, OffsetMs: res.OffsetMs, FpsRatio: res.FpsRatio}
+			mainOffsetMs = res.OffsetMs
+			mainFpsRatio = res.FpsRatio
+			mainSyncOK = true
+			extra := ""
+			if res.FpsRatio != "" {
+				extra = ", FPS ratio " + res.FpsRatio
+			}
+			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("  → %s : décalage %d ms appliqué%s", filepath.Base(mainReq.Path), res.OffsetMs, extra))
+		}
+	}
+
+	// Step 2 : pour les autres SRT, alass si suffisamment long, sinon shift manuel
+	// avec l'offset du principal (évite les faux positifs alass sur SRT courts).
+	for i, e := range entries {
+		if i == mainIdx {
 			continue
 		}
-		results = append(results, SubSyncCheck{
-			Path:       req.Path,
-			SyncedPath: res.OutputPath,
-			OffsetMs:   res.OffsetMs,
-			FpsRatio:   res.FpsRatio,
-		})
+		emitProg((i*100)/total, filepath.Base(e.req.Path))
+		lower := strings.ToLower(e.req.Path)
+		if !strings.HasSuffix(lower, ".srt") && !strings.HasSuffix(lower, ".ass") && !strings.HasSuffix(lower, ".ssa") {
+			results[i] = SubSyncCheck{Path: e.req.Path, Error: "format non supporté par alass (SRT/ASS/SSA uniquement)"}
+			continue
+		}
+		outputPath := strings.TrimSuffix(e.req.Path, filepath.Ext(e.req.Path)) + ".alass" + filepath.Ext(e.req.Path)
+		// SRT court (ex: Forced, ~30 lignes) → shift manuel basé sur le principal
+		// si l'alass principal a réussi. Sinon fallback alass.
+		if e.count < shortSRTThreshold && mainSyncOK {
+			if err := shiftSRTFile(e.inputPath, outputPath, mainOffsetMs); err != nil {
+				results[i] = SubSyncCheck{Path: e.req.Path, Error: "shift SRT court : " + err.Error()}
+				wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ shift court %s : %s", filepath.Base(e.req.Path), err.Error()))
+				continue
+			}
+			results[i] = SubSyncCheck{Path: e.req.Path, SyncedPath: outputPath, OffsetMs: mainOffsetMs, FpsRatio: mainFpsRatio}
+			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("  → %s : %d lignes, shift %d ms appliqué (basé sur le SRT principal)", filepath.Base(e.req.Path), e.count, mainOffsetMs))
+			continue
+		}
+		// Sinon : alass standard.
+		wr.EventsEmit(a.ctx, "log", fmt.Sprintf("🔎 alass sync (%d lignes) : %s", e.count, filepath.Base(e.req.Path)))
+		res, err := alass.Sync(a.ctx, alassPath, sourceMkvPath, e.inputPath, outputPath, true, disableFPSGuess, binDir)
+		if err != nil {
+			results[i] = SubSyncCheck{Path: e.req.Path, Error: err.Error()}
+			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ alass %s : %s", filepath.Base(e.req.Path), err.Error()))
+			continue
+		}
+		results[i] = SubSyncCheck{Path: e.req.Path, SyncedPath: res.OutputPath, OffsetMs: res.OffsetMs, FpsRatio: res.FpsRatio}
 		extra := ""
 		if res.FpsRatio != "" {
 			extra = ", FPS ratio " + res.FpsRatio
 		}
-		wr.EventsEmit(a.ctx, "log", fmt.Sprintf("  → %s : décalage %d ms appliqué%s", filepath.Base(req.Path), res.OffsetMs, extra))
+		wr.EventsEmit(a.ctx, "log", fmt.Sprintf("  → %s : décalage %d ms appliqué%s", filepath.Base(e.req.Path), res.OffsetMs, extra))
 	}
 	emitProg(100, "")
 	return results, nil
+}
+
+// countSRTEntries compte le nombre d'entrées (subs) dans un fichier SRT/ASS.
+// Approximation suffisante : compte les lignes "-->", marqueur de timecode.
+func countSRTEntries(path string) int {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	return strings.Count(string(data), "-->")
+}
+
+// shiftSRTFile = tempoShiftSRTFile avec tempoFactor=1.0 (offset uniquement).
+func shiftSRTFile(srcPath, dstPath string, offsetMs int) error {
+	return tempoShiftSRTFile(srcPath, dstPath, 1.0, offsetMs)
+}
+
+// tempoShiftSRTFile applique d'abord un facteur tempo (multiplication des
+// timecodes — pour corriger un drift FPS), puis un offset constant. Écrit le
+// résultat dans dstPath. Timecodes négatifs forcés à 0.
+func tempoShiftSRTFile(srcPath, dstPath string, tempoFactor float64, offsetMs int) error {
+	data, err := os.ReadFile(srcPath)
+	if err != nil {
+		return err
+	}
+	re := regexp.MustCompile(`(\d{2}):(\d{2}):(\d{2}),(\d{3})`)
+	shifted := re.ReplaceAllStringFunc(string(data), func(s string) string {
+		m := re.FindStringSubmatch(s)
+		h, _ := strconv.Atoi(m[1])
+		mi, _ := strconv.Atoi(m[2])
+		sec, _ := strconv.Atoi(m[3])
+		ms, _ := strconv.Atoi(m[4])
+		total := int(float64(h*3600000+mi*60000+sec*1000+ms)*tempoFactor) + offsetMs
+		if total < 0 {
+			total = 0
+		}
+		return fmt.Sprintf("%02d:%02d:%02d,%03d", total/3600000, (total/60000)%60, (total/1000)%60, total%1000)
+	})
+	return os.WriteFile(dstPath, []byte(shifted), 0644)
+}
+
+// getMediaFPS retourne le framerate (fps) de la première piste vidéo du fichier
+// via mediainfo. 0 si introuvable.
+func getMediaFPS(ctx context.Context, mibin, path string) float64 {
+	if mibin == "" || path == "" {
+		return 0
+	}
+	mi, err := mediainfo.Identify(ctx, mibin, path)
+	if err != nil {
+		return 0
+	}
+	for _, t := range mi.Media.Track {
+		if t.Type == "Video" && t.FrameRate != "" {
+			if f, err := strconv.ParseFloat(t.FrameRate, 64); err == nil {
+				return f
+			}
+		}
+	}
+	return 0
 }
 
 // OCRPGSTrack convertit une piste sub PGS interne au MKV en SRT texte propre :

@@ -625,6 +625,48 @@ type ResampleParams struct {
 	OutputPath  string  // chemin de sortie .ac3 ou .eac3
 }
 
+// ResampleAudioFile applique un changement de vitesse à un fichier audio AC3/EAC3
+// standalone, conversion PAL↔NTSC style : la vitesse ET le pitch changent ensemble
+// (comme jouer une cassette à 96% de sa vitesse — voix légèrement plus graves).
+//
+// On utilise asetrate (modifie la SR perçue → vitesse + pitch) puis aresample
+// (rétablit la SR de sortie). C'est la méthode standard pour adapter un audio
+// d'un FPS source vers un autre FPS (ex: 25fps → 24fps).
+//
+// atempo (utilisé pour la sync sub) GARDE le pitch et change juste la vitesse —
+// c'est correct pour un drift de sync, mais FAUX pour un changement de FPS.
+//
+// 1 génération lossy mais durée parfaitement adaptée + pitch correct.
+func ResampleAudioFile(ctx context.Context, ffmpeg, srcPath, dstPath, codec string, channels, bitrateKbps int, tempo float64) error {
+	codecName := "ac3"
+	switch codec {
+	case "ac3", "AC3", "AC-3":
+		codecName = "ac3"
+	case "eac3", "EAC3", "E-AC3", "E-AC-3":
+		codecName = "eac3"
+	}
+	// AC3/EAC3 sont quasi toujours en 48 kHz. asetrate=newSR change la SR
+	// perçue (=> vitesse+pitch), aresample=48000 force la SR de sortie standard.
+	const baseSR = 48000
+	newSR := int(float64(baseSR) * tempo)
+	filter := fmt.Sprintf("asetrate=%d,aresample=%d", newSR, baseSR)
+	args := []string{
+		"-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+		"-i", srcPath,
+		"-filter:a", filter,
+		"-c:a", codecName,
+		"-ac", strconv.Itoa(channels),
+		"-b:a", fmt.Sprintf("%dk", bitrateKbps),
+		dstPath,
+	}
+	cmd := exec.CommandContext(ctx, ffmpeg, args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("ffmpeg resample audio : %v — %s", err, string(out))
+	}
+	return nil
+}
+
 // Resample décode la piste, applique atempo (resample SoX-quality dans ffmpeg),
 // puis réencode dans le codec d'origine au même bitrate/canaux.
 // 1 génération lossy mais sync parfaite après mux.
