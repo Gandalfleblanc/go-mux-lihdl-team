@@ -114,7 +114,7 @@ func (a *App) startup(ctx context.Context) {
 
 // AppVersion est lue par le frontend (pill dans le header) et utilisée pour
 // comparer avec la dernière release GitHub lors du check de mise à jour.
-const AppVersion = "v5.1.1"
+const AppVersion = "v5.1.2"
 
 func (a *App) GetVersion() string { return AppVersion }
 

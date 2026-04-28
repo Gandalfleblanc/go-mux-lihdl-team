@@ -22,6 +22,8 @@ jobs:
           mkdir -p internal/mkvtool/binaries/darwin-arm64
           cp "$(which mkvmerge)" internal/mkvtool/binaries/darwin-arm64/mkvmerge
           chmod +x internal/mkvtool/binaries/darwin-arm64/mkvmerge
+          cp "$(which mkvextract)" internal/mkvtool/binaries/darwin-arm64/mkvextract
+          chmod +x internal/mkvtool/binaries/darwin-arm64/mkvextract
           mkdir -p internal/mediainfo/binaries/darwin-arm64
           cp "$(which mediainfo)" internal/mediainfo/binaries/darwin-arm64/mediainfo
           chmod +x internal/mediainfo/binaries/darwin-arm64/mediainfo
@@ -61,6 +63,8 @@ jobs:
           mkdir -p internal/mkvtool/binaries/darwin-amd64
           cp "$(which mkvmerge)" internal/mkvtool/binaries/darwin-amd64/mkvmerge
           chmod +x internal/mkvtool/binaries/darwin-amd64/mkvmerge
+          cp "$(which mkvextract)" internal/mkvtool/binaries/darwin-amd64/mkvextract
+          chmod +x internal/mkvtool/binaries/darwin-amd64/mkvextract
           mkdir -p internal/mediainfo/binaries/darwin-amd64
           cp "$(which mediainfo)" internal/mediainfo/binaries/darwin-amd64/mediainfo
           chmod +x internal/mediainfo/binaries/darwin-amd64/mediainfo
@@ -101,6 +105,8 @@ jobs:
           mkdir -p internal/mkvtool/binaries/linux-amd64
           cp "$(which mkvmerge)" internal/mkvtool/binaries/linux-amd64/mkvmerge
           chmod +x internal/mkvtool/binaries/linux-amd64/mkvmerge
+          cp "$(which mkvextract)" internal/mkvtool/binaries/linux-amd64/mkvextract
+          chmod +x internal/mkvtool/binaries/linux-amd64/mkvextract
           mkdir -p internal/mediainfo/binaries/linux-amd64
           cp "$(which mediainfo)" internal/mediainfo/binaries/linux-amd64/mediainfo
           chmod +x internal/mediainfo/binaries/linux-amd64/mediainfo
@@ -137,6 +143,7 @@ jobs:
           curl -L -o mkv.7z https://mkvtoolnix.download/windows/releases/98.0/mkvtoolnix-64-bit-98.0.7z
           7z x mkv.7z -o./mkv-extract
           cp ./mkv-extract/mkvtoolnix/mkvmerge.exe internal/mkvtool/binaries/windows-amd64/mkvmerge.exe
+          cp ./mkv-extract/mkvtoolnix/mkvextract.exe internal/mkvtool/binaries/windows-amd64/mkvextract.exe
           mkdir -p internal/mediainfo/binaries/windows-amd64
           curl -L -o mi.zip https://mediaarea.net/download/binary/mediainfo/24.12/MediaInfo_CLI_24.12_Windows_x64.zip
           7z x mi.zip -o./mi-extract

@@ -32,7 +32,15 @@ func Locate(configOverride, appBinDir string) (string, error) {
 			return configOverride, nil
 		}
 	}
-	// Embedded binary : extrait à appBinDir si non présent et que embed non vide.
+	// Embedded binaries : extrait mkvmerge ET mkvextract à appBinDir si non
+	// présents et embeds non vides. mkvextract est extrait au même endroit pour
+	// que findMkvextract le trouve à côté de mkvmerge.
+	if appBinDir != "" && len(embeddedExtract) > 0 {
+		extractPath := filepath.Join(appBinDir, embeddedExtractName)
+		if _, err := os.Stat(extractPath); err != nil {
+			_ = os.WriteFile(extractPath, embeddedExtract, 0755)
+		}
+	}
 	if appBinDir != "" && len(embeddedBinary) > 0 {
 		candidate := filepath.Join(appBinDir, embeddedName)
 		if _, err := os.Stat(candidate); err != nil {
