@@ -16,6 +16,7 @@ var AudioLabels = []string{
 	"FR VFQ : AC3 2.0",
 	"FR VFi : AC3 2.0",
 	"FR AD : AC3 2.0",
+	"FR AD : AAC 2.0",
 	"FR VFF : AC3 5.1",
 	"FR VFQ : AC3 5.1",
 	"FR VFi : AC3 5.1",
