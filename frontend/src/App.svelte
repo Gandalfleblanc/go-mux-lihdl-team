@@ -4,7 +4,7 @@
   import logo from './assets/images/logo.png';
   import {
     GetVersion, GetConfig, SaveConfig, GetLihdlOptions,
-    SelectMkvFile, SelectMkvFiles, SelectSubFiles, SelectSupFiles, SelectAudioFiles, SelectOutputDir, LocateMkvmerge, OpenFolder, SearchTmdbTV, SearchTmdbMovie, AnalyzeMkvSecondary, MoveToTrash, MoveDirContentsToTrash, LookupHydrackerURL, TestHydrackerKey, TestUnfrKey, OpenURL, GetMkvBasicInfo, ExtractRefSubs, ExtractFRAudios, CheckSubsSync,
+    SelectMkvFile, SelectMkvFiles, SelectSubFiles, SelectSupFiles, SelectAudioFiles, SelectOutputDir, LocateMkvmerge, OpenFolder, SearchTmdbTV, SearchTmdbMovie, AnalyzeMkvSecondary, MoveToTrash, MoveDirContentsToTrash, LookupHydrackerURL, TestHydrackerKey, TestUnfrKey, OpenURL, GetMkvBasicInfo, ExtractRefSubs, ExtractFRAudios, CheckSubsSync, CheckPSASync,
     AnalyzeMkv, SearchTmdb, TestTmdbKey, FileSize,
     Mux, CancelMux,
     CheckUpdate, InstallUpdate,
@@ -30,6 +30,50 @@
       if (!target.source || target.source === 'HDLight') target.source = 'WEBRip';
       if (sourcePath && !target.episode) {
         target.episode = detectEpisode(sourcePath.split('/').pop()) || 'S01E01';
+      }
+      // Si une source est déjà chargée, re-jouer l'auto-config PSA :
+      // - Codec H265/H264 → x265/x264 (norme GANDALF)
+      // - Audios PSA décochés (remplacés par SUPPLY)
+      // - Subs non-FR décochés
+      if (sourcePath) {
+        const psaName = sourcePath.split('/').pop() || '';
+        const psa = parsePsaSourceInfo(psaName);
+        if (psa.isPSA) {
+          videoChoice.quality = 'Custom PSA';
+          videoChoice.encoder = 'GANDALF';
+          videoChoice.team = 'GANDALF';
+          videoChoice.sourceTeam = '';
+          if (psa.source) {
+            target.source = psa.source;
+            videoChoice.sourceType = psa.source + ' PSA';
+          }
+          if (psa.videoCodec) {
+            let vc = psa.videoCodec;
+            if (vc === 'H265') vc = 'x265';
+            else if (vc === 'H264') vc = 'x264';
+            target.video_codec = vc;
+          }
+          appendLog(`✓ PSA re-détecté au switch : ${psa.source || '?'} ${target.video_codec || '?'} → Custom PSA / GANDALF`);
+        }
+        // Auto-décoche audios + subs non-FR sur les tracks déjà chargés.
+        if (tracks.length > 0) {
+          let droppedAud = 0, droppedSub = 0;
+          tracks = tracks.map(t => {
+            if (t.type === 'audio') {
+              if (t.keep) droppedAud++;
+              return { ...t, keep: false };
+            }
+            if (t.type === 'subtitles') {
+              const isFR = /^fr/i.test(t.lang || '') || /^FR /.test(t.label || '');
+              if (t.keep && !isFR) droppedSub++;
+              return { ...t, keep: isFR };
+            }
+            return t;
+          });
+          if (droppedAud || droppedSub) {
+            appendLog(`🎬 Mode PSA : ${droppedAud} audio(s) PSA décoché(s), ${droppedSub} sub(s) non-FR décoché(s)`);
+          }
+        }
       }
     } else {
       // Défauts mode LiHDL : film/release Team LiHDL
@@ -203,7 +247,7 @@
     'REMUX', 'REMUX CUSTOM',
     'WEB-DL CUSTOM', 'WEB CUSTOM',
     'WEB', 'WEB-DL', 'WEBRip',
-    'WEBRip PSA Audio SUPPLY', 'WEBRIP PSA Audio FW',
+    'WEBRip PSA Audio SUPPLY', 'WEBRIP PSA Audio FW', 'WEBRip PSA Audio Super U',
     'COMPLETE BluRay',
   ];
   const VIDEO_CODEC_OPTIONS = ['H264', 'x264', 'H265', 'x265', 'AV1'];
@@ -1218,6 +1262,9 @@
   // Source secondaire (SUPPLY/FW) — récupère uniquement audios + subs.
   let secondaryPath = '';
   let secondaryTracks = [];      // tracks audio + subs analysées
+  let secondaryMkvInfo = null;   // { duration_seconds, framerate, … }
+  let psaSyncStatus = '';         // '' | 'checking' | 'ok' | 'corrected' | 'error'
+  let psaSyncMessage = '';        // texte à afficher (offset, conf, etc.)
   let secondarySelected = [];    // tracks sélectionnées avec label LiHDL
 
   function inferAudioLabel(track) {
@@ -1333,8 +1380,12 @@
     secondaryPath = p;
     secondaryTracks = [];
     secondarySelected = [];
+    secondaryMkvInfo = null;
+    psaSyncStatus = ''; // reset
     const filename = p.split('/').pop() || '';
     AnalyzeMkvSecondary(p);
+    // FPS + durée pour la card de comparaison.
+    GetMkvBasicInfo(p).then(info => { secondaryMkvInfo = info; }).catch(() => {});
     appendLog('🔍 Analyse secondaire : ' + filename);
 
     // Auto-fill depuis le nom de fichier SUPPLY/FW.
@@ -1342,9 +1393,20 @@
     const psaName = (sourcePath || '').split('/').pop() || '';
     const psa = parsePsaSourceInfo(psaName);
     // sourceType combiné PSA + SUPPLY (ex: "WEBRip PSA Audio Supply").
+    // Whitelist des teams "officielles" affichées dans le nom : SUPPLY, FW,
+    // Super U. Pour les autres teams (ex: UNFR), on affiche juste "PSA"
+    // sans mentionner la team source.
     if (psa.isPSA && psa.source && supply.team) {
-      videoChoice.sourceType = `${psa.source} PSA Audio ${supply.team}`;
+      const validTeams = ['supply', 'fw', 'super u', 'super-u', 'superu'];
+      const teamLow = supply.team.toLowerCase();
+      if (validTeams.includes(teamLow)) {
+        videoChoice.sourceType = `${psa.source} PSA Audio ${supply.team}`;
+      } else {
+        videoChoice.sourceType = `${psa.source} PSA`;
+      }
       appendLog(`✓ sourceType : ${videoChoice.sourceType}`);
+    } else if (psa.isPSA && psa.source) {
+      videoChoice.sourceType = `${psa.source} PSA`;
     }
     // Lang flag depuis SUPPLY → override automatique.
     if (supply.langFlag) {
@@ -1357,6 +1419,51 @@
       target.episode = supplyEp;
     } else if (supplyEp && target.episode && supplyEp !== target.episode) {
       appendLog(`⚠ S/E PSA (${target.episode}) ≠ SUPPLY (${supplyEp})`);
+    }
+  }
+
+  // Vérifie la sync audio entre PSA et SUPPLY/Super U via Chromaprint.
+  // Si offset détecté avec confiance > 0.5 et |offset| > 50ms → applique
+  // DelayMs sur secondarySelected automatiquement.
+  async function checkPSASync() {
+    if (!sourcePath || !secondaryPath) return;
+    psaSyncStatus = 'checking';
+    psaSyncMessage = 'Vérification sync PSA ↔ SUPPLY…';
+    try {
+      const res = await CheckPSASync(sourcePath, secondaryPath, syncRefLang || 'fr');
+      if (res.error) {
+        psaSyncStatus = 'error';
+        psaSyncMessage = res.error;
+        appendLog('⚠ Sync PSA↔SUPPLY : ' + res.error);
+        return;
+      }
+      const off = Math.abs(res.offset_ms || 0);
+      const conf = res.confidence || 0;
+      if (conf < 0.5) {
+        psaSyncStatus = 'error';
+        psaSyncMessage = `confiance ${conf.toFixed(2)} trop faible — vérif manuelle requise`;
+        appendLog(`⚠ Sync PSA↔SUPPLY : confiance ${conf.toFixed(2)} trop faible`);
+        return;
+      }
+      if (off < 50) {
+        psaSyncStatus = 'ok';
+        psaSyncMessage = `Synchros (offset ${res.offset_ms} ms · conf ${conf.toFixed(2)})`;
+        appendLog(`✓ Sync PSA↔SUPPLY : ${res.offset_ms} ms (synchro, conf ${conf.toFixed(2)})`);
+        return;
+      }
+      // Offset significatif → applique sur les pistes audio secondarySelected.
+      // mkvmerge --sync TID:offset (positif retarde, négatif avance).
+      secondarySelected = secondarySelected.map(t => {
+        if (t.type !== 'audio') return t;
+        return { ...t, delayMs: res.offset_ms };
+      });
+      psaSyncStatus = 'corrected';
+      psaSyncMessage = `Décalage ${res.offset_ms} ms corrigé auto (conf ${conf.toFixed(2)})`;
+      appendLog(`↻ Sync PSA↔SUPPLY : décalage ${res.offset_ms} ms appliqué sur audios SUPPLY (conf ${conf.toFixed(2)})`);
+    } catch (e) {
+      psaSyncStatus = 'error';
+      psaSyncMessage = String(e);
+      appendLog('⚠ Sync PSA↔SUPPLY : ' + String(e));
     }
   }
 
@@ -1414,9 +1521,10 @@
         else if (/^FR /.test(label))             language = 'fre';
         else if (/^ENG /.test(label))            language = 'eng';
         else                                      language = lang || 'und';
-        // Tous les subs sont gardés. Default + Forced cochés UNIQUEMENT
-        // pour "FR VFF Forced" ou "FR Forced" (générique).
-        keepFlag = true;
+        // Norme PSA : on ne garde que les subs FR. Les non-FR sont
+        // filtrés (return null) → pas affichés du tout dans la liste.
+        const isFRsub = /^FR /.test(label);
+        if (!isFRsub) return null;
         const isForcedFR = /^FR( VFF)? Forced\b/.test(label);
         if (isForcedFR) {
           defaultFlag = true;
@@ -1438,10 +1546,25 @@
         forced: forcedFlag,
         order: order++,
       };
-    });
+    }).filter(Boolean);
     // Marque la 1ère piste audio FR comme default.
     const firstFr = secondarySelected.find(t => t.type === 'audio' && t.language === 'fre');
     if (firstFr) firstFr.default = true;
+    // Cas FASTSUB / VOSTFR : pas de doublage FR, on a la VO + sub FR. Donc :
+    // - 1ère audio (typiquement ENG VO) → default
+    // - 1er sub FR → default + forced (affiché auto sur la VO)
+    const langFlag = String(target.flagOverride || '').toUpperCase();
+    const isFastsubVO = /FASTSUB|VOSTFR/.test(langFlag);
+    if (isFastsubVO && !firstFr) {
+      const firstAudio = secondarySelected.find(t => t.type === 'audio');
+      if (firstAudio) firstAudio.default = true;
+      const firstFRSub = secondarySelected.find(t => t.type === 'subtitles' && /^FR /.test(t.label || ''));
+      if (firstFRSub) {
+        firstFRSub.default = true;
+        firstFRSub.forced = true;
+        appendLog(`🇫🇷 ${langFlag} : audio VO + sub FR marqués default (sub aussi forced)`);
+      }
+    }
 
     // Heuristique : si on a 2+ pistes FR audio et qu'une est en 2.0,
     // on la marque automatiquement comme AD (FR AD : <codec> 2.0).
@@ -1790,8 +1913,14 @@
           target.source = psa.source;
           videoChoice.sourceType = psa.source + ' PSA';
         }
-        if (psa.videoCodec) target.video_codec = psa.videoCodec;
-        appendLog(`✓ PSA détecté : ${psa.source || '?'} ${psa.videoCodec || '?'} → Custom PSA / GANDALF`);
+        if (psa.videoCodec) {
+          // Norme PSA team GANDALF : codec en x264/x265 (jamais H264/H265).
+          let vc = psa.videoCodec;
+          if (vc === 'H265') vc = 'x265';
+          else if (vc === 'H264') vc = 'x264';
+          target.video_codec = vc;
+        }
+        appendLog(`✓ PSA détecté : ${psa.source || '?'} ${target.video_codec || '?'} → Custom PSA / GANDALF`);
       }
     } else if (muxMode === 'lihdl') {
       // Mode LiHDL : auto-detect du sourceType depuis le nom (REMUX CUSTOM > REMUX > BluRay…)
@@ -1958,6 +2087,27 @@
       if (t.type === 'video')     base.label = '';
       return base;
     });
+    // Auto-config mode PSA : la PSA fournit la vidéo, le SUPPLY/FW/Super U
+    // fournit les audios+subs. Donc on décoche d'office les audios PSA
+    // (seront remplacés) et on ne garde que les subs FR.
+    if (muxMode === 'psa') {
+      let droppedAud = 0, droppedSub = 0;
+      tracks = tracks.map(t => {
+        if (t.type === 'audio') {
+          if (t.keep) droppedAud++;
+          return { ...t, keep: false };
+        }
+        if (t.type === 'subtitles') {
+          const isFR = /^fr/i.test(t.lang || '') || /^FR /.test(t.label || '');
+          if (t.keep && !isFR) droppedSub++;
+          return { ...t, keep: isFR };
+        }
+        return t;
+      });
+      if (droppedAud || droppedSub) {
+        appendLog(`🎬 Mode PSA : ${droppedAud} audio(s) PSA décoché(s) (remplacés par SUPPLY), ${droppedSub} sub(s) non-FR décoché(s)`);
+      }
+    }
     // Norme LiHDL : si une piste FR VFQ est présente parmi les audios (internes,
     // externes ou secondary), la 2e piste FR doit rester FR VFF (pas FR VFi).
     // On désactive donc le toggle VFi auto.
@@ -3177,6 +3327,15 @@
     EventsOn('secondary:tracks', (raw) => {
       try {
         secondaryTracks = JSON.parse(String(raw || '[]'));
+        // Mode PSA : applique automate() tout de suite pour que les pistes
+        // audio+subs SUPPLY apparaissent direct dans les panneaux PISTES,
+        // puis lance la vérif sync audio PSA ↔ SUPPLY.
+        if (muxMode === 'psa' && sourcePath && secondaryTracks.length > 0) {
+          setTimeout(() => {
+            automate();
+            checkPSASync();
+          }, 50);
+        }
       } catch (e) {
         appendLog('❌ secondary:tracks parse : ' + String(e));
       }
@@ -3356,6 +3515,9 @@
             <div class="source-label">{muxMode === 'psa' ? 'Source PSA (vidéo gardée)' : 'Source encodée (vidéo gardée)'}</div>
             {#if sourcePath}
               <div class="source-value">{sourcePath.split('/').pop()}</div>
+              {#if sourceMkvInfo}
+                <div class="source-value" style="opacity:0.7;font-size:11px;">⏱ {formatDuration(sourceMkvInfo.duration_seconds)} · 🎞 {sourceMkvInfo.framerate || '?'} fps</div>
+              {/if}
             {:else}
               <div class="source-value empty">— Aucun fichier sélectionné —</div>
             {/if}
@@ -3370,15 +3532,23 @@
           <div class="source-row" class:filled={secondaryPath}>
             <div class="source-num">2</div>
             <div class="source-info">
-              <div class="source-label">Source SUPPLY / FW (audios + subs)</div>
+              <div class="source-label">Source SUPPLY / FW / Super U (audios + subs)</div>
               {#if secondaryPath}
                 <div class="source-value">{secondaryPath.split('/').pop()} · {secondaryTracks.length} piste(s)</div>
+                {#if secondaryMkvInfo}
+                  <div class="source-value" style="opacity:0.7;font-size:11px;">⏱ {formatDuration(secondaryMkvInfo.duration_seconds)} · 🎞 {secondaryMkvInfo.framerate || '?'} fps</div>
+                {/if}
+                {#if psaSyncStatus}
+                  <div class="source-value" style="font-size:11px;font-weight:600;color:{psaSyncStatus === 'ok' ? '#7ad17a' : psaSyncStatus === 'corrected' ? '#e8b94a' : psaSyncStatus === 'error' ? '#e87a7a' : '#aaa'};">
+                    {psaSyncStatus === 'checking' ? '🔎' : psaSyncStatus === 'ok' ? '✓' : psaSyncStatus === 'corrected' ? '↻' : '⚠'} {psaSyncMessage}
+                  </div>
+                {/if}
               {:else}
                 <div class="source-value empty">— Aucun fichier sélectionné —</div>
               {/if}
             </div>
             <button class="btn btn-ghost" on:click={pickSecondaryDialog}>
-              {secondaryPath ? 'Changer' : 'Choisir SUPPLY/FW'}
+              {secondaryPath ? 'Changer' : 'Choisir SUPPLY/FW/Super U'}
             </button>
           </div>
         {/if}

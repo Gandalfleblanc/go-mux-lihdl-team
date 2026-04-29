@@ -117,7 +117,7 @@ func (a *App) startup(ctx context.Context) {
 
 // AppVersion est lue par le frontend (pill dans le header) et utilisée pour
 // comparer avec la dernière release GitHub lors du check de mise à jour.
-const AppVersion = "v5.3.0"
+const AppVersion = "v5.4.0"
 
 func (a *App) GetVersion() string { return AppVersion }
 
@@ -1540,6 +1540,96 @@ func (a *App) CheckSubsSync(reqs []SubSyncRequest, sourceMkvPath, referenceMkvPa
 	}
 	emitProg(100, "")
 	return results, nil
+}
+
+// PSASyncResult décrit le résultat de la vérif sync entre PSA et SUPPLY.
+type PSASyncResult struct {
+	OffsetMs   int     `json:"offset_ms"`
+	Confidence float64 `json:"confidence"`
+	Method     string  `json:"method"` // "chromaprint" ou "no-data"
+	FpsRefMkv  float64 `json:"fps_ref_mkv"`
+	FpsCandMkv float64 `json:"fps_cand_mkv"`
+	Error      string  `json:"error"`
+}
+
+// CheckPSASync compare l'audio de la PSA (refMkvPath) et du SUPPLY (candMkvPath)
+// via Chromaprint pour détecter un offset constant. Retourne un PSASyncResult
+// avec offset+confiance, à appliquer côté frontend (DelayMs sur secondarySelected).
+func (a *App) CheckPSASync(refMkvPath, candMkvPath, lang string) PSASyncResult {
+	res := PSASyncResult{}
+	if refMkvPath == "" || candMkvPath == "" {
+		res.Error = "chemins manquants"
+		return res
+	}
+	binary := a.LocateMkvmerge()
+	if binary == "" {
+		res.Error = "mkvmerge introuvable"
+		return res
+	}
+	binDir, _ := config.BinDir()
+	fpcalcPath, fpErr := chromaprint.Locate("", binDir)
+	if fpErr != nil {
+		res.Error = "chromaprint indisponible : " + fpErr.Error()
+		return res
+	}
+	// FPS info via mediainfo (best-effort).
+	if mibin, _ := mediainfo.Locate(""); mibin != "" {
+		res.FpsRefMkv = getMediaFPS(a.ctx, mibin, refMkvPath)
+		res.FpsCandMkv = getMediaFPS(a.ctx, mibin, candMkvPath)
+	}
+	// Identifie la 1ère piste audio FR (ou ENG) de chaque MKV.
+	if lang == "" {
+		lang = "fr"
+	}
+	refInfo, err := mkvtool.Identify(a.ctx, binary, refMkvPath)
+	if err != nil {
+		res.Error = "analyse PSA : " + err.Error()
+		return res
+	}
+	candInfo, err := mkvtool.Identify(a.ctx, binary, candMkvPath)
+	if err != nil {
+		res.Error = "analyse SUPPLY : " + err.Error()
+		return res
+	}
+	refTrackID := pickFirstAudioIDByLang(refInfo, lang)
+	candTrackID := pickFirstAudioIDByLang(candInfo, lang)
+	if refTrackID < 0 || candTrackID < 0 {
+		res.Error = "pas de piste audio trouvée dans une des sources"
+		return res
+	}
+	// Extract audio temp.
+	refAudio, eerr := mkvtool.ExtractTrackToTemp(a.ctx, binary, refMkvPath, refTrackID, "ac3")
+	if eerr != nil {
+		res.Error = "extract PSA audio : " + eerr.Error()
+		return res
+	}
+	defer os.Remove(refAudio)
+	candAudio, eerr2 := mkvtool.ExtractTrackToTemp(a.ctx, binary, candMkvPath, candTrackID, "ac3")
+	if eerr2 != nil {
+		res.Error = "extract SUPPLY audio : " + eerr2.Error()
+		return res
+	}
+	defer os.Remove(candAudio)
+	// Fingerprints + offset.
+	fpA, eA := chromaprint.Fingerprint(a.ctx, fpcalcPath, refAudio, 600)
+	if eA != nil {
+		res.Error = "fingerprint PSA : " + eA.Error()
+		return res
+	}
+	fpB, eB := chromaprint.Fingerprint(a.ctx, fpcalcPath, candAudio, 600)
+	if eB != nil {
+		res.Error = "fingerprint SUPPLY : " + eB.Error()
+		return res
+	}
+	if len(fpA) < 30 || len(fpB) < 30 {
+		res.Error = "fingerprints trop courts"
+		return res
+	}
+	offsetMs, conf, _ := chromaprint.FindOffset(fpA, fpB, 480) // ±60s
+	res.OffsetMs = int(offsetMs)
+	res.Confidence = conf
+	res.Method = "chromaprint"
+	return res
 }
 
 // countSRTEntries compte le nombre d'entrées (subs) dans un fichier SRT/ASS.

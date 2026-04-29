@@ -302,6 +302,28 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class PSASyncResult {
+	    offset_ms: number;
+	    confidence: number;
+	    method: string;
+	    fps_ref_mkv: number;
+	    fps_cand_mkv: number;
+	    error: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PSASyncResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.offset_ms = source["offset_ms"];
+	        this.confidence = source["confidence"];
+	        this.method = source["method"];
+	        this.fps_ref_mkv = source["fps_ref_mkv"];
+	        this.fps_cand_mkv = source["fps_cand_mkv"];
+	        this.error = source["error"];
+	    }
+	}
 	export class RefSubResult {
 	    path: string;
 	    language: string;

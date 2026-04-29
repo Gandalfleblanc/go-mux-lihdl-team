@@ -18,6 +18,8 @@ export function BuildFilename(arg1:naming.FilenameParams):Promise<string>;
 
 export function CancelMux():Promise<void>;
 
+export function CheckPSASync(arg1:string,arg2:string,arg3:string):Promise<main.PSASyncResult>;
+
 export function CheckSubsSync(arg1:Array<main.SubSyncRequest>,arg2:string,arg3:string,arg4:string):Promise<Array<main.SubSyncCheck>>;
 
 export function CheckUpdate():Promise<main.UpdateInfo>;

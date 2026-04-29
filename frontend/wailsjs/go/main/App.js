@@ -22,6 +22,10 @@ export function CancelMux() {
   return window['go']['main']['App']['CancelMux']();
 }
 
+export function CheckPSASync(arg1, arg2, arg3) {
+  return window['go']['main']['App']['CheckPSASync'](arg1, arg2, arg3);
+}
+
 export function CheckSubsSync(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['CheckSubsSync'](arg1, arg2, arg3, arg4);
 }
