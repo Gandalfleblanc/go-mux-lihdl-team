@@ -55,7 +55,7 @@
           }
           appendLog(`✓ PSA re-détecté au switch : ${psa.source || '?'} ${target.video_codec || '?'} → Custom PSA / GANDALF`);
         }
-        // Auto-décoche audios + subs non-FR sur les tracks déjà chargés.
+        // Auto-décoche audios + subs non-FR/non-ENG sur les tracks déjà chargés.
         if (tracks.length > 0) {
           let droppedAud = 0, droppedSub = 0;
           tracks = tracks.map(t => {
@@ -65,13 +65,15 @@
             }
             if (t.type === 'subtitles') {
               const isFR = /^fr/i.test(t.lang || '') || /^FR /.test(t.label || '');
-              if (t.keep && !isFR) droppedSub++;
-              return { ...t, keep: isFR };
+              const isENG = /^en/i.test(t.lang || '') || /^ENG /.test(t.label || '');
+              const keepIt = isFR || isENG;
+              if (t.keep && !keepIt) droppedSub++;
+              return { ...t, keep: keepIt };
             }
             return t;
           });
           if (droppedAud || droppedSub) {
-            appendLog(`🎬 Mode PSA : ${droppedAud} audio(s) PSA décoché(s), ${droppedSub} sub(s) non-FR décoché(s)`);
+            appendLog(`🎬 Mode PSA : ${droppedAud} audio(s) PSA décoché(s), ${droppedSub} sub(s) non-FR/ENG décoché(s)`);
           }
         }
       }
@@ -184,7 +186,8 @@
     const stripped = n.replace(/\.[^.]+$/, '');
     const teamMatch = /-([A-Za-z0-9]+)\s*$/.exec(stripped);
     const team = teamMatch ? teamMatch[1].toUpperCase() : '';
-    const isPSA = team === 'PSA';
+    // Accepte "PSA" exact ou tout team contenant "PSA" (ex: PSAarcane, PSA10bit).
+    const isPSA = team === 'PSA' || /PSA/i.test(team);
     let source = '';
     if (/\bWEBRip\b/i.test(n)) source = 'WEBRip';
     else if (/\bWEB-DL\b/i.test(n)) source = 'WEB-DL';
@@ -550,6 +553,10 @@
   // ---- Extraction FR Audio (VFF/VFQ depuis la source de référence) ----
   // Utilise referencePath comme unique source — pas de fichier séparé.
   let extractFRVFF = false;
+  // Toggle "inclure l'année avant l'épisode" pour les séries où le nom seul
+  // est ambigu (ex: remake "The Office 2024" vs original "The Office 2005").
+  // Format avec : Title.YYYY.SxxExx... ; sans : Title.SxxExx...
+  let includeYearInEpisode = false;
   // Référence audio pour la sync (Chromaprint + cross-corr) : "fr" (default,
   // matche la VFF/VFi de la source LiHDL) ou "eng" (pour les cas où la VFF
   // de la source n'est pas fiable, ex: source LiHDL re-encodée avec un drift
@@ -1265,6 +1272,12 @@
   let secondaryMkvInfo = null;   // { duration_seconds, framerate, … }
   let psaSyncStatus = '';         // '' | 'checking' | 'ok' | 'corrected' | 'error'
   let psaSyncMessage = '';        // texte à afficher (offset, conf, etc.)
+  // Réactif : true si FPS PSA ≈ FPS SUPPLY (±0.05) ET audio sync OK ou corrigé.
+  $: psaSourcesValid = !!(
+    sourceMkvInfo && secondaryMkvInfo &&
+    Math.abs((sourceMkvInfo.framerate || 0) - (secondaryMkvInfo.framerate || 0)) <= 0.05 &&
+    (psaSyncStatus === 'ok' || psaSyncStatus === 'corrected')
+  );
   let secondarySelected = [];    // tracks sélectionnées avec label LiHDL
 
   function inferAudioLabel(track) {
@@ -1521,10 +1534,11 @@
         else if (/^FR /.test(label))             language = 'fre';
         else if (/^ENG /.test(label))            language = 'eng';
         else                                      language = lang || 'und';
-        // Norme PSA : on ne garde que les subs FR. Les non-FR sont
-        // filtrés (return null) → pas affichés du tout dans la liste.
+        // Norme PSA : on garde les subs FR + ENG (toutes variantes).
+        // Les autres langues sont filtrées (return null).
         const isFRsub = /^FR /.test(label);
-        if (!isFRsub) return null;
+        const isENGsub = /^ENG /.test(label);
+        if (!isFRsub && !isENGsub) return null;
         const isForcedFR = /^FR( VFF)? Forced\b/.test(label);
         if (isForcedFR) {
           defaultFlag = true;
@@ -1817,8 +1831,14 @@
     // Titre du fichier = FR ou VO selon target.lang (≠ titre cible qui est toujours FR).
     const cleanTitle = stripYearSuffix(filenameTitleForBuild());
     if (cleanTitle) parts.push(dotify(cleanTitle));
-    // Mode série : SxxExx remplace l'année. Mode film : année.
+    // Mode série : SxxExx remplace l'année (sauf si toggle "inclure l'année"
+    // est activé, ex: pour distinguer remake/original). Mode film : année.
     if (target.episode) {
+      if (includeYearInEpisode) {
+        const yearMatch = String(target.title || '').match(/\((\d{4})\)\s*$/);
+        const year = target.year || (yearMatch ? yearMatch[1] : '');
+        if (year) parts.push(year);
+      }
       parts.push(target.episode);
     } else {
       const yearMatch = String(target.title || '').match(/\((\d{4})\)\s*$/);
@@ -1833,6 +1853,21 @@
     // WiTH.AD inséré entre le flag (VOF/FRENCH.VOF/etc.) et la résolution.
     if (hasAudioDescription()) { parts.push('WiTH'); parts.push('AD'); }
     if (target.resolution) parts.push(target.resolution);
+    // Pour 2160p : insérer 4KLight + DV.HDR10Plus si les 2 sont détectés via
+    // mediainfo de la piste vidéo (Dolby Vision ET HDR10+).
+    if (target.resolution === '2160p') {
+      parts.push('4KLight');
+      const vt = tracks.find(t => t.type === 'video');
+      if (vt) {
+        const hdr = ((vt.mi_hdr_format || '') + ' ' + (vt.mi_hdr_compat || '') + ' ' + (vt.mi_hdr_string || '') + ' ' + (vt.mi_hdr_profile || '')).toLowerCase();
+        const hasDV = /dolby ?vision|dvhe|dvh1/.test(hdr);
+        const hasHDR10Plus = /hdr10\+/.test(hdr);
+        if (hasDV && hasHDR10Plus) {
+          parts.push('DV');
+          parts.push('HDR10Plus');
+        }
+      }
+    }
     if (target.source) parts.push(target.source);
     const ac = firstAudioCodecForFilename();
     if (ac) parts.push(ac);
@@ -1860,7 +1895,7 @@
   $: previewFilename = (function() {
     const _deps = [tracks.length, videoChoice.team, target.title, target.year,
                    target.resolution, target.source, target.video_codec, target.lang,
-                   target.episode, target.flagOverride,
+                   target.episode, target.flagOverride, includeYearInEpisode,
                    secondarySelected.length,
                    ...tracks.map(t => (t.keep ? '1' : '0') + (t.label || '')),
                    ...secondarySelected.map(t => (t.keep ? '1' : '0') + (t.label || ''))];
@@ -1920,7 +1955,15 @@
           else if (vc === 'H264') vc = 'x264';
           target.video_codec = vc;
         }
-        appendLog(`✓ PSA détecté : ${psa.source || '?'} ${target.video_codec || '?'} → Custom PSA / GANDALF`);
+        // Auto-détection résolution depuis le filename PSA.
+        if (/\b2160p\b/i.test(filename) || /\b4K\b/i.test(filename)) {
+          target.resolution = '2160p';
+        } else if (/\b1080p\b/i.test(filename)) {
+          target.resolution = '1080p';
+        } else if (/\b720p\b/i.test(filename)) {
+          target.resolution = '720p';
+        }
+        appendLog(`✓ PSA détecté : ${psa.source || '?'} ${target.resolution} ${target.video_codec || '?'} → Custom PSA / GANDALF`);
       }
     } else if (muxMode === 'lihdl') {
       // Mode LiHDL : auto-detect du sourceType depuis le nom (REMUX CUSTOM > REMUX > BluRay…)
@@ -2081,6 +2124,10 @@
         mi_channels: t.mi_channels || '',
         mi_service_kind: t.mi_service_kind || '',
         mi_service_kind_name: t.mi_service_kind_name || '',
+        mi_hdr_format: t.mi_hdr_format || '',
+        mi_hdr_compat: t.mi_hdr_compat || '',
+        mi_hdr_profile: t.mi_hdr_profile || '',
+        mi_hdr_string: t.mi_hdr_string || '',
       };
       if (t.type === 'audio')     base.label = suggestAudioLabelFlat(base);
       if (t.type === 'subtitles') base.label = suggestSubLabelFlat(base);
@@ -2089,7 +2136,7 @@
     });
     // Auto-config mode PSA : la PSA fournit la vidéo, le SUPPLY/FW/Super U
     // fournit les audios+subs. Donc on décoche d'office les audios PSA
-    // (seront remplacés) et on ne garde que les subs FR.
+    // (seront remplacés) et on ne garde que les subs FR + ENG.
     if (muxMode === 'psa') {
       let droppedAud = 0, droppedSub = 0;
       tracks = tracks.map(t => {
@@ -2099,13 +2146,15 @@
         }
         if (t.type === 'subtitles') {
           const isFR = /^fr/i.test(t.lang || '') || /^FR /.test(t.label || '');
-          if (t.keep && !isFR) droppedSub++;
-          return { ...t, keep: isFR };
+          const isENG = /^en/i.test(t.lang || '') || /^ENG /.test(t.label || '');
+          const keepIt = isFR || isENG;
+          if (t.keep && !keepIt) droppedSub++;
+          return { ...t, keep: keepIt };
         }
         return t;
       });
       if (droppedAud || droppedSub) {
-        appendLog(`🎬 Mode PSA : ${droppedAud} audio(s) PSA décoché(s) (remplacés par SUPPLY), ${droppedSub} sub(s) non-FR décoché(s)`);
+        appendLog(`🎬 Mode PSA : ${droppedAud} audio(s) PSA décoché(s) (remplacés par SUPPLY), ${droppedSub} sub(s) non-FR/ENG décoché(s)`);
       }
     }
     // Norme LiHDL : si une piste FR VFQ est présente parmi les audios (internes,
@@ -3509,8 +3558,8 @@
         <div class="source-list">
 
         <!-- Ligne ① Source principale -->
-        <div class="source-row" class:filled={sourcePath}>
-          <div class="source-num">1</div>
+        <div class="source-row" class:filled={sourcePath} style={muxMode === 'psa' && psaSourcesValid ? 'border-left:3px solid #7ad17a;background:rgba(122,209,122,0.08);' : ''}>
+          <div class="source-num">{muxMode === 'psa' && psaSourcesValid ? '✓' : '1'}</div>
           <div class="source-info">
             <div class="source-label">{muxMode === 'psa' ? 'Source PSA (vidéo gardée)' : 'Source encodée (vidéo gardée)'}</div>
             {#if sourcePath}
@@ -3529,8 +3578,8 @@
 
         <!-- Ligne ② SUPPLY/FW (mode PSA uniquement) -->
         {#if muxMode === 'psa'}
-          <div class="source-row" class:filled={secondaryPath}>
-            <div class="source-num">2</div>
+          <div class="source-row" class:filled={secondaryPath} style={psaSourcesValid ? 'border-left:3px solid #7ad17a;background:rgba(122,209,122,0.08);' : ''}>
+            <div class="source-num">{psaSourcesValid ? '✓' : '2'}</div>
             <div class="source-info">
               <div class="source-label">Source SUPPLY / FW / Super U (audios + subs)</div>
               {#if secondaryPath}
@@ -3769,8 +3818,8 @@
 
       <!-- Tracks (vidéo + audio + subs) — vue compacte mockup. Cachées tant que TMDB pas validé pour qu'on reste visuellement sur l'accueil. -->
       {#if tracks.length > 0 && tmdbValidated}
-        {@const audioCount = tracks.filter(t=>t.type==='audio').length + externalAudios.length + secondarySelected.filter(t=>t.type==='audio').length}
-        {@const subCount   = tracks.filter(t=>t.type==='subtitles').length + externalSubs.length + secondarySelected.filter(t=>t.type==='subtitles').length}
+        {@const audioCount = tracks.filter(t=>t.type==='audio' && t.keep).length + externalAudios.filter(a=>a.keep).length + secondarySelected.filter(t=>t.type==='audio' && t.keep).length}
+        {@const subCount   = tracks.filter(t=>t.type==='subtitles' && t.keep).length + externalSubs.filter(s=>s.keep).length + secondarySelected.filter(t=>t.type==='subtitles' && t.keep).length}
         {@const videoCount = tracks.filter(t=>t.type==='video').length}
         <div class="card card-grow">
           <div class="card-title-row">
@@ -3796,14 +3845,14 @@
           {/if}
 
           <!-- Audio (merge internal/external/secondary triés par ordre) -->
-          {#if tracks.some(t => t.type === 'audio') || externalAudios.length > 0 || secondarySelected.some(t => t.type === 'audio')}
+          {#if tracks.some(t => t.type === 'audio' && t.keep) || externalAudios.some(a => a.keep) || secondarySelected.some(t => t.type === 'audio' && t.keep)}
             {@const internalAudios = tracks.filter(t => t.type === 'audio')}
             {@const secondaryAudios = secondarySelected.filter(t => t.type === 'audio')}
             {@const mergedAudios = [
               ...internalAudios.map((t, i) => ({ kind: 'internal', idx: i, ref: t, order: t.order ?? 0 })),
               ...externalAudios.map((a, i) => ({ kind: 'external', idx: i, ref: a, order: a.order ?? 0 })),
               ...secondaryAudios.map((s, i) => ({ kind: 'secondary', idx: i, ref: s, order: s.order ?? 0 })),
-            ].sort((a, b) => a.order - b.order)}
+            ].filter(item => item.ref.keep).sort((a, b) => a.order - b.order)}
             <div class="tracks-section">
               <div class="tracks-section-header audio"><span class="tracks-section-dot"></span><span class="tracks-section-label">♪ Pistes audio</span><span class="tracks-section-count">{audioCount}</span></div>
             {#each mergedAudios as item (item.kind + '-' + item.idx)}
@@ -3853,14 +3902,14 @@
           {/if}
 
           <!-- Subtitles -->
-          {#if tracks.some(t => t.type === 'subtitles') || externalSubs.length > 0 || secondarySelected.some(t => t.type === 'subtitles')}
+          {#if tracks.some(t => t.type === 'subtitles' && t.keep) || externalSubs.some(s => s.keep) || secondarySelected.some(t => t.type === 'subtitles' && t.keep)}
             {@const internalSubs = tracks.filter(t => t.type === 'subtitles')}
             {@const secondarySubs = secondarySelected.filter(t => t.type === 'subtitles')}
             {@const mergedSubs = [
               ...internalSubs.map((t, i) => ({ kind: 'internal', idx: i, ref: t, order: t.order ?? 0 })),
               ...externalSubs.map((s, i) => ({ kind: 'external', idx: i, ref: s, order: s.order ?? 0 })),
               ...secondarySubs.map((s, i) => ({ kind: 'secondary', idx: i, ref: s, order: s.order ?? 0 })),
-            ].sort((a, b) => a.order - b.order)}
+            ].filter(item => item.ref.keep).sort((a, b) => a.order - b.order)}
             <div class="tracks-section">
               <div class="tracks-section-header sub"><span class="tracks-section-dot"></span><span class="tracks-section-label">A Sous-titres</span><span class="tracks-section-count">{subCount}</span></div>
             {#each mergedSubs as item (item.kind + '-' + item.idx)}
@@ -4206,10 +4255,20 @@
               <span class="field-label">{target.episode ? 'Épisode' : 'Année'}</span>
               {#if target.episode}
                 <input type="text" bind:value={target.episode} placeholder="S01E01" maxlength="10" />
+                <label class="chk" style="margin-top:6px;font-size:11px;" title="Inclure l'année avant SxxExx (ex: pour remake — Title.2024.S01E01)">
+                  <input type="checkbox" bind:checked={includeYearInEpisode} />
+                  <span>Inclure année</span>
+                </label>
               {:else}
                 <input type="text" bind:value={target.year} placeholder="2025" maxlength="4" />
               {/if}
             </div>
+            {#if target.episode && includeYearInEpisode}
+              <div class="field">
+                <span class="field-label">Année (incluse)</span>
+                <input type="text" bind:value={target.year} placeholder="2024" maxlength="4" />
+              </div>
+            {/if}
             <div class="field">
               <span class="field-label">Codec auto-suggéré</span>
               <input type="text" value={suggestedCodecDisplay || '—'} readonly />

@@ -117,7 +117,7 @@ func (a *App) startup(ctx context.Context) {
 
 // AppVersion est lue par le frontend (pill dans le header) et utilisée pour
 // comparer avec la dernière release GitHub lors du check de mise à jour.
-const AppVersion = "v5.4.0"
+const AppVersion = "v5.5.0"
 
 func (a *App) GetVersion() string { return AppVersion }
 
@@ -367,15 +367,22 @@ func (a *App) AnalyzeMkv(path string) {
 			if mi, mErr2 := mediainfo.Identify(a.ctx, mibin, path); mErr2 == nil {
 				audIdx, subIdx := 0, 0
 				audTracks, subTracks := []mkvtool.Track{}, []mkvtool.Track{}
+				videoTracks := []mkvtool.Track{}
 				for _, t := range info.Tracks {
-					if t.Type == "audio" {
+					if t.Type == "video" {
+						videoTracks = append(videoTracks, t)
+					} else if t.Type == "audio" {
 						audTracks = append(audTracks, t)
 					} else if t.Type == "subtitles" {
 						subTracks = append(subTracks, t)
 					}
 				}
+				vidIdx := 0
 				for _, mt := range mi.Media.Track {
-					if mt.Type == "Audio" && audIdx < len(audTracks) {
+					if mt.Type == "Video" && vidIdx < len(videoTracks) {
+						mediainfoByID[videoTracks[vidIdx].ID] = mt
+						vidIdx++
+					} else if mt.Type == "Audio" && audIdx < len(audTracks) {
 						mediainfoByID[audTracks[audIdx].ID] = mt
 						audIdx++
 					} else if mt.Type == "Text" && subIdx < len(subTracks) {
@@ -412,6 +419,11 @@ func (a *App) AnalyzeMkv(path string) {
 				row["mi_service_kind_name"] = mt.ServiceKindNames
 				row["mi_stream_size"] = mt.StreamSize
 				row["mi_element_count"] = mt.ElementCount
+				// HDR (utile pour les pistes vidéo 4K).
+				row["mi_hdr_format"] = mt.HDRFormat
+				row["mi_hdr_compat"] = mt.HDRFormatCompatibility
+				row["mi_hdr_profile"] = mt.HDRFormatProfile
+				row["mi_hdr_string"] = mt.HDRFormatString
 			}
 			tracksPayload = append(tracksPayload, row)
 		}

@@ -60,6 +60,11 @@ type Track struct {
 	Duration                 string `json:"Duration"`        // en secondes (string)
 	FrameRate                string `json:"FrameRate"`       // FPS (string, ex: "23.976")
 	FrameRateMode            string `json:"FrameRate_Mode"`  // "CFR" / "VFR"
+	// HDR (vidéo 4K) : DV / HDR10+ / HLG / etc. Exposés via mediainfo.
+	HDRFormat                string `json:"HDR_Format"`              // ex: "Dolby Vision / SMPTE ST 2086"
+	HDRFormatCompatibility   string `json:"HDR_Format_Compatibility"`// ex: "HDR10+ Profile A", "HDR10"
+	HDRFormatProfile         string `json:"HDR_Format_Profile"`      // ex: "dvhe.05"
+	HDRFormatString          string `json:"HDR_Format/String"`       // version string complète
 }
 
 // Info est la structure renvoyée par mediainfo --Output=JSON.
