@@ -848,17 +848,31 @@
   // Auto-reset après mux réussi : envoie source + sous-titres + secondaire à
   // la corbeille (réversible), puis reset l'état.
   async function autoResetAfterMux(preserveAutoMuxStatus = false) {
-    // Vide tout le contenu du dossier "LiHDL en cours" (norme : tous les fichiers
-    // source/référence/SUPPLY/subs externes y vivent, et après un mux réussi on
-    // peut tout dégager). Inclut sous-dossiers, exclut .DS_Store.
-    const lihdlEnCoursDir = '/Users/gandalf/Downloads/LiHDL en cours';
-    try {
-      const n = await MoveDirContentsToTrash(lihdlEnCoursDir);
-      if (n > 0) {
-        appendLog(`🗑 ${n} élément(s) du dossier "LiHDL en cours" envoyé(s) à la corbeille`);
+    if (muxMode === 'psa') {
+      // PSA : on trash UNIQUEMENT les fichiers de l'épisode muxé (PSA +
+      // SUPPLY/FW + MKV synchro) pour ne pas toucher aux autres épisodes
+      // potentiellement encore en attente dans "PSA en cours".
+      const psaFiles = [sourcePath, secondaryPath, psaSyncedSourceMkv].filter(Boolean);
+      if (psaFiles.length > 0) {
+        try {
+          await MoveToTrash(psaFiles);
+          appendLog(`🗑 ${psaFiles.length} fichier(s) source(s) envoyé(s) à la corbeille`);
+        } catch (e) {
+          appendLog('⚠ corbeille fichiers PSA : ' + String(e));
+        }
       }
-    } catch (e) {
-      appendLog('⚠ vidage "LiHDL en cours" : ' + String(e));
+    } else {
+      // LiHDL : vide tout le contenu du dossier "LiHDL en cours" (norme :
+      // tous les fichiers source/référence/SUPPLY/subs externes y vivent).
+      const lihdlEnCoursDir = '/Users/gandalf/Downloads/LiHDL en cours';
+      try {
+        const n = await MoveDirContentsToTrash(lihdlEnCoursDir);
+        if (n > 0) {
+          appendLog(`🗑 ${n} élément(s) du dossier "LiHDL en cours" envoyé(s) à la corbeille`);
+        }
+      } catch (e) {
+        appendLog('⚠ vidage "LiHDL en cours" : ' + String(e));
+      }
     }
     // Reset UI désactivé après mux : on garde l'état + le log visibles pour
     // que l'utilisateur puisse copier les logs et inspecter le résultat.
@@ -1664,7 +1678,17 @@
           appendLog(`🇫🇷 ${langFlag} : audio VO + sub FR marqués default (sub aussi forced)`);
         }
       } else {
-        appendLog(`🇫🇷 ${langFlag} : audio VO marqué default — sub FR synchronisé externe garde le default+forced`);
+        // Marque le 1er sub FR externe synchronisé comme default+forced.
+        // Priorité Forced > Full pour le default.
+        const extFRForced = externalSubs.find(s => s.fromReference && /^FR /.test(s.label || '') && /Forced/.test(s.label || ''));
+        const extFRFull = externalSubs.find(s => s.fromReference && /^FR /.test(s.label || '') && !/Forced/.test(s.label || ''));
+        const target = extFRForced || extFRFull;
+        if (target) {
+          target.default = true;
+          target.forced = true;
+          externalSubs = [...externalSubs]; // trigger reactivity
+          appendLog(`🇫🇷 ${langFlag} : audio VO + sub FR synchronisé externe marqués default+forced`);
+        }
       }
     }
 
