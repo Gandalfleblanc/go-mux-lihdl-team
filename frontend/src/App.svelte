@@ -1971,20 +1971,23 @@
     // WiTH.AD inséré entre le flag (VOF/FRENCH.VOF/etc.) et la résolution.
     if (hasAudioDescription()) { parts.push('WiTH'); parts.push('AD'); }
     if (target.resolution) parts.push(target.resolution);
-    // Pour 2160p : insérer 4KLight + DV.HDR10Plus si les 2 sont détectés via
-    // mediainfo de la piste vidéo (Dolby Vision ET HDR10+).
+    // Pour 2160p : insérer 4KLight + tags HDR. Détection via mediainfo de la
+    // piste vidéo + fallback sur le nom du fichier source PSA (parfois
+    // mediainfo ne détecte pas DV/HDR10+ alors que le titre les annonce).
     if (target.resolution === '2160p') {
       parts.push('4KLight');
       const vt = tracks.find(t => t.type === 'video');
-      if (vt) {
-        const hdr = ((vt.mi_hdr_format || '') + ' ' + (vt.mi_hdr_compat || '') + ' ' + (vt.mi_hdr_string || '') + ' ' + (vt.mi_hdr_profile || '')).toLowerCase();
-        const hasDV = /dolby ?vision|dvhe|dvh1/.test(hdr);
-        const hasHDR10Plus = /hdr10\+/.test(hdr);
-        if (hasDV && hasHDR10Plus) {
-          parts.push('DV');
-          parts.push('HDR10Plus');
-        }
-      }
+      const hdr = vt
+        ? ((vt.mi_hdr_format || '') + ' ' + (vt.mi_hdr_compat || '') + ' ' + (vt.mi_hdr_string || '') + ' ' + (vt.mi_hdr_profile || '')).toLowerCase()
+        : '';
+      const fname = (sourcePath || '').split('/').pop() || '';
+      const fnameUp = fname.toUpperCase();
+      const hasDV = /dolby ?vision|dvhe|dvh1/.test(hdr) || /\bDV\b/.test(fnameUp);
+      const hasHDR10Plus = /hdr10\+/.test(hdr) || /\bHDR10\+|\bHDR10PLUS\b/.test(fnameUp);
+      const hasHDR = /\bhdr\b/.test(hdr) || /\bHDR\b/.test(fnameUp);
+      if (hasDV) parts.push('DV');
+      if (hasHDR10Plus) parts.push('HDR10Plus');
+      else if (hasHDR) parts.push('HDR');
     }
     if (target.source) parts.push(target.source);
     const ac = firstAudioCodecForFilename();
