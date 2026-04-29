@@ -557,6 +557,9 @@
   // est ambigu (ex: remake "The Office 2024" vs original "The Office 2005").
   // Format avec : Title.YYYY.SxxExx... ; sans : Title.SxxExx...
   let includeYearInEpisode = false;
+  // Flag extra détecté dans le nom SUPPLY (ex: "FiNAL"). Inséré entre
+  // SxxExx et le flag langue dans le filename de sortie.
+  let supplyExtraFlag = '';
   // Référence audio pour la sync (Chromaprint + cross-corr) : "fr" (default,
   // matche la VFF/VFi de la source LiHDL) ou "eng" (pour les cas où la VFF
   // de la source n'est pas fiable, ex: source LiHDL re-encodée avec un drift
@@ -1322,14 +1325,17 @@
     else if (ch === 6) chans = '5.1';
     else if (ch === 8) chans = '7.1';
     // Atmos : on cherche "atmos" ou "JOC" dans tous les champs mediainfo dispo
-    // (Format_Profile, Format_Commercial, Format_AdditionalFeatures, etc.)
+    // (Format, Format_Profile, Format_Commercial, Format_AdditionalFeatures, etc.)
     const atmosFields = [
       String(track.track_name || ''),
       String(track.mi_title || ''),
+      String(track.mi_format || ''),
       String(track.mi_format_profile || ''),
       String(track.mi_format_commercial || ''),
       String(track.mi_format_commercial_if_any || ''),
       String(track.mi_format_features || ''),
+      String(track.codec || ''),
+      String(track.codecId || ''),
     ].join(' ').toUpperCase();
     const isAtmos = atmosFields.includes('ATMOS') || atmosFields.includes('JOC');
     // Service kind mediainfo : VI = Visual Impaired (audiodescription), HI = Hearing Impaired
@@ -1395,7 +1401,13 @@
     secondarySelected = [];
     secondaryMkvInfo = null;
     psaSyncStatus = ''; // reset
+    supplyExtraFlag = ''; // reset
     const filename = p.split('/').pop() || '';
+    // Détecte un flag "FiNAL" dans le nom SUPPLY → sera inséré dans le filename.
+    if (/\bFiNAL\b/i.test(filename)) {
+      supplyExtraFlag = 'FiNAL';
+      appendLog(`🏁 Flag "FiNAL" détecté dans SUPPLY → inséré entre SxxExx et MULTi`);
+    }
     AnalyzeMkvSecondary(p);
     // FPS + durée pour la card de comparaison.
     GetMkvBasicInfo(p).then(info => { secondaryMkvInfo = info; }).catch(() => {});
@@ -1481,6 +1493,7 @@
   }
 
   function clearSecondary() {
+    supplyExtraFlag = '';
     secondaryPath = '';
     secondaryTracks = [];
     secondarySelected = [];
@@ -1606,7 +1619,7 @@
     // Debug : log de chaque piste audio avec ses indicateurs Atmos depuis mediainfo
     for (const raw of secondaryTracks) {
       if (raw.type !== 'audio') continue;
-      appendLog(`[audio] id=${raw.id} lang=${raw.language} name="${raw.track_name||''}" format_profile="${raw.mi_format_profile||''}" features="${raw.mi_format_features||''}" commercial="${raw.mi_format_commercial||''}"`);
+      appendLog(`[audio] id=${raw.id} lang=${raw.language} codec="${raw.codec||''}" codec_id="${raw.codec_id||''}" mi_format="${raw.mi_format||''}" profile="${raw.mi_format_profile||''}" features="${raw.mi_format_features||''}" commercial="${raw.mi_format_commercial||''}" name="${raw.track_name||''}"`);
     }
     // Plus de 2ᵉ passe sur les subs : par défaut Full, SDH uniquement si
     // mediainfo (ServiceKind=HI) ou track_name explicite (sourds/hearing/SDH).
@@ -1616,6 +1629,10 @@
     if (!target.episode) {
       target.episode = detectEpisode((sourcePath || '').split('/').pop()) || 'S01E01';
     }
+    // 4. Norme LiHDL : swap FR VFF ↔ FR VFi selon useVFi (true par défaut sauf
+    //    si VFQ détectée). Sans VFQ, la piste FR principale doit être VFi
+    //    (même si y'a une AD à côté). Avec VFQ, elle reste VFF.
+    applyVFiSwap();
     appendLog('⚡ Automatisé : ' + secondarySelected.filter(t=>t.type==='audio').length + ' audio(s) + ' + secondarySelected.filter(t=>t.type==='subtitles').length + ' sub(s) depuis SUPPLY/FW');
   }
 
@@ -1840,6 +1857,8 @@
         if (year) parts.push(year);
       }
       parts.push(target.episode);
+      // Flag extra du SUPPLY (ex: FiNAL) inséré entre SxxExx et MULTi.
+      if (supplyExtraFlag) parts.push(supplyExtraFlag);
     } else {
       const yearMatch = String(target.title || '').match(/\((\d{4})\)\s*$/);
       const year = target.year || (yearMatch ? yearMatch[1] : '');
@@ -1895,7 +1914,7 @@
   $: previewFilename = (function() {
     const _deps = [tracks.length, videoChoice.team, target.title, target.year,
                    target.resolution, target.source, target.video_codec, target.lang,
-                   target.episode, target.flagOverride, includeYearInEpisode,
+                   target.episode, target.flagOverride, includeYearInEpisode, supplyExtraFlag,
                    secondarySelected.length,
                    ...tracks.map(t => (t.keep ? '1' : '0') + (t.label || '')),
                    ...secondarySelected.map(t => (t.keep ? '1' : '0') + (t.label || ''))];
