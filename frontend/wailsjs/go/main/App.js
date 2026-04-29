@@ -70,6 +70,10 @@ export function ExtractFRAudios(arg1, arg2, arg3, arg4, arg5, arg6) {
   return window['go']['main']['App']['ExtractFRAudios'](arg1, arg2, arg3, arg4, arg5, arg6);
 }
 
+export function ExtractFirstAudioFromMkv(arg1) {
+  return window['go']['main']['App']['ExtractFirstAudioFromMkv'](arg1);
+}
+
 export function ExtractRefSubs(arg1, arg2) {
   return window['go']['main']['App']['ExtractRefSubs'](arg1, arg2);
 }
@@ -196,6 +200,10 @@ export function SelectSubFiles() {
 
 export function SelectSupFiles() {
   return window['go']['main']['App']['SelectSupFiles']();
+}
+
+export function SyncSupplySubsToPSA(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['SyncSupplySubsToPSA'](arg1, arg2, arg3, arg4);
 }
 
 export function TestHydrackerKey(arg1) {

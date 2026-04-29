@@ -99,7 +99,18 @@ func Sync(ctx context.Context, alassPath, referenceMKV, inputSRT, outputSRT stri
 	// se remplit (exit 1, stderr vide).
 	cmd.Stdout = &stdout
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("alass-cli : %w — %s", err, stderr.String())
+		// Inclut stdout + stderr pour debug : alass écrit parfois ses erreurs
+		// sur stdout, et stderr peut être vide en cas de SIGPIPE silencieux.
+		errMsg := strings.TrimSpace(stderr.String())
+		outMsg := strings.TrimSpace(stdout.String())
+		details := errMsg
+		if outMsg != "" {
+			if details != "" {
+				details += " | "
+			}
+			details += "stdout: " + outMsg
+		}
+		return nil, fmt.Errorf("alass-cli : %w — %s (args: %v)", err, details, args)
 	}
 	// alass écrit "shifted block of … by …" et "ratio is X/Y" sur STDOUT,
 	// pas sur stderr. On parse les deux pour être robuste aux versions futures.

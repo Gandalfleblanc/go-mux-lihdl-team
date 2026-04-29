@@ -42,6 +42,8 @@ export function DownloadOpenSubtitle(arg1:string,arg2:string):Promise<string>;
 
 export function ExtractFRAudios(arg1:string,arg2:boolean,arg3:boolean,arg4:boolean,arg5:string,arg6:string):Promise<Array<main.FRAudioExtraction>>;
 
+export function ExtractFirstAudioFromMkv(arg1:string):Promise<main.ExtractedAudio>;
+
 export function ExtractRefSubs(arg1:string,arg2:string):Promise<Array<main.RefSubResult>>;
 
 export function FileSize(arg1:string):Promise<number>;
@@ -105,6 +107,8 @@ export function SelectOutputDir():Promise<string>;
 export function SelectSubFiles():Promise<Array<string>>;
 
 export function SelectSupFiles():Promise<Array<string>>;
+
+export function SyncSupplySubsToPSA(arg1:string,arg2:string,arg3:number,arg4:number):Promise<Array<main.SyncedSubResult>>;
 
 export function TestHydrackerKey(arg1:string):Promise<main.ApiKeyTestResult>;
 

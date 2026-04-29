@@ -117,7 +117,7 @@ func (a *App) startup(ctx context.Context) {
 
 // AppVersion est lue par le frontend (pill dans le header) et utilisée pour
 // comparer avec la dernière release GitHub lors du check de mise à jour.
-const AppVersion = "v5.5.2"
+const AppVersion = "v5.6.0"
 
 func (a *App) GetVersion() string { return AppVersion }
 
@@ -619,7 +619,7 @@ type MkvBasicInfo struct {
 	Framerate       float64 `json:"framerate"`
 	Width           int     `json:"width"`
 	Height          int     `json:"height"`
-	HasVFQAudio     bool    `json:"has_vfq_audio"` // une piste audio FR Canada détectée
+	HasVFQAudio     bool    `json:"has_vfq_audio"`  // une piste audio FR Canada détectée
 	VFQTrackInfo    string  `json:"vfq_track_info"` // libellé court (ex: "fr-CA · EAC3 5.1")
 }
 
@@ -690,15 +690,15 @@ func (a *App) GetMkvBasicInfo(path string) (*MkvBasicInfo, error) {
 // RefSubResult décrit un sous-titre FR/ENG SRT extrait d'une source de référence,
 // prêt à être ajouté à externalSubs côté frontend.
 type RefSubResult struct {
-	Path        string  `json:"path"`        // chemin du .srt extrait dans un fichier temporaire
-	Language    string  `json:"language"`    // "FR" ou "ENG" (préfixe LiHDL)
-	Forced      bool    `json:"forced"`      // flag forced du mkv source
-	SDH         bool    `json:"sdh"`         // SDH détecté (FR uniquement)
-	Label       string  `json:"label"`       // label LiHDL prêt (ex: "FR Full : SRT")
-	DelayMs     int     `json:"delay_ms"`    // décalage à appliquer (mkvmerge --sync) si réf désynchro vs source LiHDL
+	Path        string  `json:"path"`         // chemin du .srt extrait dans un fichier temporaire
+	Language    string  `json:"language"`     // "FR" ou "ENG" (préfixe LiHDL)
+	Forced      bool    `json:"forced"`       // flag forced du mkv source
+	SDH         bool    `json:"sdh"`          // SDH détecté (FR uniquement)
+	Label       string  `json:"label"`        // label LiHDL prêt (ex: "FR Full : SRT")
+	DelayMs     int     `json:"delay_ms"`     // décalage à appliquer (mkvmerge --sync) si réf désynchro vs source LiHDL
 	TempoFactor float64 `json:"tempo_factor"` // ratio atempo si drift linéaire (1.0 = pas de drift)
-	Confidence  float64 `json:"confidence"`  // confiance de la détection sync [-1,1]
-	Method      string  `json:"method"`      // "constant" | "drift_linear" | "low_confidence" | "no_sync_check"
+	Confidence  float64 `json:"confidence"`   // confiance de la détection sync [-1,1]
+	Method      string  `json:"method"`       // "constant" | "drift_linear" | "low_confidence" | "no_sync_check"
 }
 
 // ExtractRefSubs scanne la source de référence, extrait ses pistes sous-titres
@@ -881,30 +881,30 @@ func (a *App) ExtractRefSubs(refPath, lihdlSourcePath string) ([]RefSubResult, e
 // tiers, prête à être ajoutée à externalAudios côté frontend. Inclut le délai
 // de synchronisation auto-détecté vs la source LiHDL.
 type FRAudioExtraction struct {
-	Path         string  `json:"path"`          // chemin du fichier audio extrait (temp)
-	Variant      string  `json:"variant"`       // "VFF" ou "VFQ"
-	Codec        string  `json:"codec"`         // "AC3", "EAC3", "DTS", "TRUEHD", etc.
-	CodecID      string  `json:"codec_id"`      // codec_id mkvmerge brut (ex: A_EAC3)
-	Channels     int     `json:"channels"`      // 2, 6, 8…
-	TrackName    string  `json:"track_name"`    // nom de piste source (pour hints atmos)
-	Language     string  `json:"language"`      // "fre" ou "fr-ca"
-	DelayMs      int     `json:"delay_ms"`      // décalage détecté (mkvmerge --sync)
-	TempoFactor  float64 `json:"tempo_factor"`  // ratio atempo si drift linéaire (1.0 = pas de drift)
+	Path         string  `json:"path"`         // chemin du fichier audio extrait (temp)
+	Variant      string  `json:"variant"`      // "VFF" ou "VFQ"
+	Codec        string  `json:"codec"`        // "AC3", "EAC3", "DTS", "TRUEHD", etc.
+	CodecID      string  `json:"codec_id"`     // codec_id mkvmerge brut (ex: A_EAC3)
+	Channels     int     `json:"channels"`     // 2, 6, 8…
+	TrackName    string  `json:"track_name"`   // nom de piste source (pour hints atmos)
+	Language     string  `json:"language"`     // "fre" ou "fr-ca"
+	DelayMs      int     `json:"delay_ms"`     // décalage détecté (mkvmerge --sync)
+	TempoFactor  float64 `json:"tempo_factor"` // ratio atempo si drift linéaire (1.0 = pas de drift)
 	Confidence   float64 `json:"confidence"`
 	Method       string  `json:"method"` // "constant" | "drift_linear" | "low_confidence"…
 	Notes        string  `json:"notes"`
 	WasConverted bool    `json:"was_converted"` // true si ffmpeg→AC3, false si extraction lossless (déjà AC3)
 	BitrateKbps  int     `json:"bitrate_kbps"`  // bitrate AC3 utilisé (96, 192, 256, 448)
 	// Champs mediainfo pour atmos detection côté frontend (inferAudioLabel).
-	MITitle           string `json:"mi_title"`
-	MIFormat          string `json:"mi_format"`
-	MIFormatProfile   string `json:"mi_format_profile"`
-	MIFormatCommercial string `json:"mi_format_commercial"`
+	MITitle                 string `json:"mi_title"`
+	MIFormat                string `json:"mi_format"`
+	MIFormatProfile         string `json:"mi_format_profile"`
+	MIFormatCommercial      string `json:"mi_format_commercial"`
 	MIFormatCommercialIfAny string `json:"mi_format_commercial_if_any"`
-	MIFormatFeatures  string `json:"mi_format_features"`
-	MIChannels        string `json:"mi_channels"`
-	MIServiceKind     string `json:"mi_service_kind"`
-	MIServiceKindName string `json:"mi_service_kind_name"`
+	MIFormatFeatures        string `json:"mi_format_features"`
+	MIChannels              string `json:"mi_channels"`
+	MIServiceKind           string `json:"mi_service_kind"`
+	MIServiceKindName       string `json:"mi_service_kind_name"`
 }
 
 // codecIDToExt mappe un codec_id mkvmerge à l'extension de fichier appropriée
@@ -1554,14 +1554,224 @@ func (a *App) CheckSubsSync(reqs []SubSyncRequest, sourceMkvPath, referenceMkvPa
 	return results, nil
 }
 
+// SyncedSubResult décrit un sous-titre extrait du SUPPLY et synchronisé avec
+// la PSA via alass. Utilisé par le mode PSA pour récupérer les SRT FR du
+// SUPPLY tout en les alignant sur l'audio PSA.
+type SyncedSubResult struct {
+	Path     string `json:"path"`     // chemin du .srt corrigé par alass (ou brut si alass échoue)
+	Label    string `json:"label"`    // ex: "FR Full : SRT", "FR Forced : SRT"
+	Language string `json:"language"` // code ISO ex: "fre"
+	Default  bool   `json:"default"`
+	Forced   bool   `json:"forced"`
+	OffsetMs int    `json:"offset_ms"` // décalage appliqué par alass
+	Synced   bool   `json:"synced"`    // true si alass a réussi
+}
+
+// SyncSupplySubsToPSA extrait les subs FR/ENG du SUPPLY et les synchronise
+// sur l'audio PSA via alass + chromaprint. Retourne les paths .srt corrigés
+// à ajouter comme externalSubs côté frontend.
+// SyncSupplySubsToPSA extrait les subs FR/ENG du SUPPLY et les synchronise sur
+// PSA. Stratégie (façon Subtitle Edit) :
+//  1. Toujours tenter alass MULTI-SPLIT sub→sub avec une ref PSA texte si dispo
+//     (sub→audio en fallback si la PSA n'a aucun sub texte). Multi-split gère
+//     les décalages variables (intro coupée, scènes différentes).
+//  2. Si alass échoue ET qu'on a offset/tempo audio → tempoShift comme filet.
+//  3. Sinon → sub brut.
+func (a *App) SyncSupplySubsToPSA(psaMkvPath, supplyMkvPath string, offsetMs int, tempoRatio float64) ([]SyncedSubResult, error) {
+	if psaMkvPath == "" || supplyMkvPath == "" {
+		return nil, errors.New("chemins PSA ou SUPPLY manquants")
+	}
+	binary := a.LocateMkvmerge()
+	if binary == "" {
+		return nil, errors.New("mkvmerge introuvable")
+	}
+	binDir, _ := config.BinDir()
+	if tempoRatio == 0 {
+		tempoRatio = 1.0
+	}
+	hasAudioTransform := offsetMs != 0 || tempoRatio != 1.0
+	alassPath, aerr := alass.Locate(binDir)
+	if aerr != nil {
+		return nil, fmt.Errorf("alass-cli : %w", aerr)
+	}
+	if _, ferr := audiosync.Locate(binDir); ferr != nil {
+		return nil, fmt.Errorf("ffmpeg : %w", ferr)
+	}
+	if _, ferr := audiosync.LocateFfprobe(binDir); ferr != nil {
+		return nil, fmt.Errorf("ffprobe : %w", ferr)
+	}
+	supplyInfo, err := mkvtool.Identify(a.ctx, binary, supplyMkvPath)
+	if err != nil {
+		return nil, fmt.Errorf("analyse SUPPLY : %w", err)
+	}
+	// Stratégie : alass sub→audio_PSA. Le VAD (Voice Activity Detection)
+	// sur l'audio est la vérité terrain — bien plus fiable que sub→sub
+	// (qui aligne juste des timestamps de blocs sans regarder le contenu).
+	// alass se charge d'extraire l'audio via ffmpeg en interne.
+	psaRefForAlass := psaMkvPath
+	results := []SyncedSubResult{}
+	for _, t := range supplyInfo.Tracks {
+		if t.Type != "subtitles" {
+			continue
+		}
+		lang := strings.ToLower(t.Properties.Language)
+		isFR := lang == "fre" || lang == "fra" || lang == "fr" || strings.HasPrefix(lang, "fr-")
+		isENG := lang == "eng" || lang == "en" || strings.HasPrefix(lang, "en-")
+		if !isFR && !isENG {
+			continue
+		}
+		codecID := strings.ToUpper(t.Properties.CodecID)
+		isText := strings.Contains(codecID, "TEXT") || strings.Contains(codecID, "UTF") || strings.Contains(codecID, "ASS") || strings.Contains(codecID, "SSA")
+		if !isText {
+			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("ℹ sub #%d ignoré (%s, format image non extractible)", t.ID, t.Properties.CodecID))
+			continue
+		}
+		srtPath, eerr := mkvtool.ExtractTrackToTemp(a.ctx, binary, supplyMkvPath, t.ID, "srt")
+		if eerr != nil {
+			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ extract sub #%d : %s", t.ID, eerr.Error()))
+			continue
+		}
+		outputPath := strings.TrimSuffix(srtPath, filepath.Ext(srtPath)) + ".synced.srt"
+		variant := "Full"
+		if t.Properties.ForcedTrack {
+			variant = "Forced"
+		}
+		var label, langCode string
+		if isFR {
+			label = "FR " + variant + " : SRT"
+			langCode = "fre"
+		} else {
+			label = "ENG " + variant + " : SRT"
+			langCode = "eng"
+		}
+		sr := SyncedSubResult{Label: label, Language: langCode, Forced: t.Properties.ForcedTrack}
+		if isFR && variant == "Forced" {
+			sr.Default = true
+		}
+		// alass MULTI-SPLIT sub→audio_PSA. VAD audio = vérité terrain.
+		// noSplit=false → gère les décalages variables (intro coupée, etc.).
+		// disableFPSGuessing=false → laisse alass deviner si drift FPS.
+		wr.EventsEmit(a.ctx, "log", fmt.Sprintf("🔎 alass multi-split sub #%d (%s) vs audio PSA…", t.ID, lang))
+		res, syncErr := alass.Sync(a.ctx, alassPath, psaRefForAlass, srtPath, outputPath, false, false, binDir)
+		if syncErr == nil && res != nil {
+			sr.Path = res.OutputPath
+			sr.Synced = true
+			sr.OffsetMs = res.OffsetMs
+			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("✓ sub #%d : alass multi-split OK, shift max %d ms (%s)", t.ID, res.OffsetMs, label))
+			results = append(results, sr)
+			continue
+		}
+		// 2. alass a échoué → fallback tempoShift si on a offset/tempo audio.
+		alassErr := "résultat vide"
+		if syncErr != nil {
+			alassErr = syncErr.Error()
+		}
+		if hasAudioTransform {
+			if terr := tempoShiftSRTFile(srtPath, outputPath, tempoRatio, offsetMs); terr == nil {
+				sr.Path = outputPath
+				sr.Synced = true
+				sr.OffsetMs = offsetMs
+				wr.EventsEmit(a.ctx, "log", fmt.Sprintf("↻ sub #%d : alass KO (%s) → fallback offset %d ms + tempo %.6f appliqués", t.ID, alassErr, offsetMs, tempoRatio))
+				results = append(results, sr)
+				continue
+			}
+		}
+		// 3. Sub brut.
+		sr.Path = srtPath
+		sr.Synced = false
+		wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ sub #%d : alass KO (%s) — sub brut utilisé", t.ID, alassErr))
+		results = append(results, sr)
+	}
+	return results, nil
+}
+
+// ExtractFirstAudioFromMkv extrait la 1ère piste audio FR (ou ENG en fallback)
+// d'un MKV vers un fichier temporaire .ac3/.eac3. Utilisé pour le mode PSA
+// quand le user fournit un MKV "synchro" comme source audio.
+type ExtractedAudio struct {
+	Path     string `json:"path"`
+	Codec    string `json:"codec"` // ex: "AC3", "EAC3", "AAC"
+	Label    string `json:"label"` // ex: "FR VFi : EAC3 5.1"
+	Channels int    `json:"channels"`
+	Error    string `json:"error"`
+}
+
+func (a *App) ExtractFirstAudioFromMkv(mkvPath string) ExtractedAudio {
+	res := ExtractedAudio{}
+	if mkvPath == "" {
+		res.Error = "chemin vide"
+		return res
+	}
+	binary := a.LocateMkvmerge()
+	if binary == "" {
+		res.Error = "mkvmerge introuvable"
+		return res
+	}
+	info, err := mkvtool.Identify(a.ctx, binary, mkvPath)
+	if err != nil {
+		res.Error = "analyse mkv : " + err.Error()
+		return res
+	}
+	// 1ère FR, sinon 1ère audio quelconque.
+	trackID := pickFirstAudioIDByLang(info, "fr")
+	if trackID < 0 {
+		res.Error = "aucune piste audio trouvée"
+		return res
+	}
+	// Trouve les détails de la piste choisie.
+	var selectedTrack mkvtool.Track
+	for _, t := range info.Tracks {
+		if t.ID == trackID {
+			selectedTrack = t
+			break
+		}
+	}
+	codec := codecIDToLabel(selectedTrack.Properties.CodecID)
+	ext := strings.ToLower(codec)
+	if ext != "ac3" && ext != "eac3" {
+		ext = "ac3" // fallback (mkvextract préfère .ac3)
+	}
+	tmpPath, eerr := mkvtool.ExtractTrackToTemp(a.ctx, binary, mkvPath, trackID, ext)
+	if eerr != nil {
+		res.Error = "extract : " + eerr.Error()
+		return res
+	}
+	res.Path = tmpPath
+	res.Codec = codec
+	res.Channels = selectedTrack.Properties.AudioChannels
+	// Label par défaut FR VFi ou ENG VO selon langue + ATMOS si JOC.
+	lang := strings.ToLower(selectedTrack.Properties.Language)
+	prefix := "ENG VO"
+	if lang == "fre" || lang == "fra" || lang == "fr" || strings.HasPrefix(lang, "fr-") {
+		prefix = "FR VFi"
+	}
+	chStr := "5.1"
+	switch selectedTrack.Properties.AudioChannels {
+	case 1:
+		chStr = "1.0"
+	case 2:
+		chStr = "2.0"
+	case 6:
+		chStr = "5.1"
+	case 8:
+		chStr = "7.1"
+	}
+	res.Label = fmt.Sprintf("%s : %s %s", prefix, codec, chStr)
+	return res
+}
+
 // PSASyncResult décrit le résultat de la vérif sync entre PSA et SUPPLY.
 type PSASyncResult struct {
-	OffsetMs   int     `json:"offset_ms"`
-	Confidence float64 `json:"confidence"`
-	Method     string  `json:"method"` // "chromaprint" ou "no-data"
-	FpsRefMkv  float64 `json:"fps_ref_mkv"`
-	FpsCandMkv float64 `json:"fps_cand_mkv"`
-	Error      string  `json:"error"`
+	OffsetMs           int     `json:"offset_ms"`
+	Confidence         float64 `json:"confidence"`
+	Method             string  `json:"method"` // "chromaprint" ou "no-data"
+	FpsRefMkv          float64 `json:"fps_ref_mkv"`
+	FpsCandMkv         float64 `json:"fps_cand_mkv"`
+	TempoRatio         float64 `json:"tempo_ratio"`          // duration_PSA / duration_SUPPLY
+	ResampledAudioPath string  `json:"resampled_audio_path"` // .ac3 SUPPLY atempo'd (vide si pas de drift)
+	ResampledChannels  int     `json:"resampled_channels"`
+	ResampledTrackID   int     `json:"resampled_track_id"` // ID de la piste SUPPLY originale (à drop)
+	Error              string  `json:"error"`
 }
 
 // CheckPSASync compare l'audio de la PSA (refMkvPath) et du SUPPLY (candMkvPath)
@@ -1584,10 +1794,18 @@ func (a *App) CheckPSASync(refMkvPath, candMkvPath, lang string) PSASyncResult {
 		res.Error = "chromaprint indisponible : " + fpErr.Error()
 		return res
 	}
-	// FPS info via mediainfo (best-effort).
+	// FPS + durée info via mediainfo (best-effort).
+	res.TempoRatio = 1.0
 	if mibin, _ := mediainfo.Locate(""); mibin != "" {
 		res.FpsRefMkv = getMediaFPS(a.ctx, mibin, refMkvPath)
 		res.FpsCandMkv = getMediaFPS(a.ctx, mibin, candMkvPath)
+		// Calcul du tempo ratio : si SUPPLY est plus longue que PSA, faut la
+		// raccourcir via mkvmerge --sync ratio. Tolérance 100ms (sinon ratio=1).
+		durRef := getMediaDuration(a.ctx, mibin, refMkvPath)
+		durCand := getMediaDuration(a.ctx, mibin, candMkvPath)
+		if durRef > 0 && durCand > 0 && math.Abs(durRef-durCand) > 0.1 {
+			res.TempoRatio = durRef / durCand
+		}
 	}
 	// Identifie la 1ère piste audio FR (ou ENG) de chaque MKV.
 	if lang == "" {
@@ -1641,6 +1859,52 @@ func (a *App) CheckPSASync(refMkvPath, candMkvPath, lang string) PSASyncResult {
 	res.OffsetMs = int(offsetMs)
 	res.Confidence = conf
 	res.Method = "chromaprint"
+	res.ResampledTrackID = candTrackID
+
+	// Si drift FPS détecté (ratio durée != 1) → resample SUPPLY audio via ffmpeg
+	// atempo. Le tempo est BAKED dans le fichier .ac3 → mux fiable, pas dépendant
+	// de l'interprétation mkvmerge --sync ratio.
+	if math.Abs(res.TempoRatio-1.0) > 0.001 && conf >= 0.5 {
+		ffmpegPath, _ := audiosync.Locate(binDir)
+		if ffmpegPath != "" {
+			// Récupère codec/channels/bitrate via mediainfo pour le ré-encodage.
+			channels := 6
+			bitrate := 448
+			if mibin, _ := mediainfo.Locate(""); mibin != "" {
+				if mi, err := mediainfo.Identify(a.ctx, mibin, candMkvPath); err == nil {
+					audIdx := 0
+					for _, t := range mi.Media.Track {
+						if t.Type != "Audio" {
+							continue
+						}
+						if audIdx == 0 {
+							if c, err := strconv.Atoi(t.Channels); err == nil && c > 0 {
+								channels = c
+							}
+							if br, err := strconv.Atoi(t.BitRate); err == nil && br > 0 {
+								bitrate = br / 1000
+							}
+							break
+						}
+						audIdx++
+					}
+				}
+			}
+			// Convention ResampleAudioFile : tempo > 1 = audio plus rapide (durée
+			// plus courte). On veut SUPPLY de durée durSupply → durée durRef,
+			// donc tempo = durSupply/durRef = 1/TempoRatio.
+			tempoForResample := 1.0 / res.TempoRatio
+			outputPath := candAudio + ".resampled.ac3"
+			rerr := audiosync.ResampleAudioFile(a.ctx, ffmpegPath, candAudio, outputPath, "ac3", channels, bitrate, tempoForResample)
+			if rerr != nil {
+				wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ Resample SUPPLY audio : %s", rerr.Error()))
+			} else {
+				res.ResampledAudioPath = outputPath
+				res.ResampledChannels = channels
+				wr.EventsEmit(a.ctx, "log", fmt.Sprintf("🔄 Audio SUPPLY resamplé via atempo=%.6f → %s", tempoForResample, filepath.Base(outputPath)))
+			}
+		}
+	}
 	return res
 }
 
@@ -1681,6 +1945,26 @@ func tempoShiftSRTFile(srcPath, dstPath string, tempoFactor float64, offsetMs in
 		return fmt.Sprintf("%02d:%02d:%02d,%03d", total/3600000, (total/60000)%60, (total/1000)%60, total%1000)
 	})
 	return os.WriteFile(dstPath, []byte(shifted), 0644)
+}
+
+// getMediaDuration retourne la durée du conteneur en secondes via mediainfo.
+// 0 si introuvable.
+func getMediaDuration(ctx context.Context, mibin, path string) float64 {
+	if mibin == "" || path == "" {
+		return 0
+	}
+	mi, err := mediainfo.Identify(ctx, mibin, path)
+	if err != nil {
+		return 0
+	}
+	for _, t := range mi.Media.Track {
+		if t.Type == "General" && t.Duration != "" {
+			if d, perr := strconv.ParseFloat(t.Duration, 64); perr == nil {
+				return d
+			}
+		}
+	}
+	return 0
 }
 
 // getMediaFPS retourne le framerate (fps) de la première piste vidéo du fichier
@@ -3080,4 +3364,3 @@ func (a *App) DiscordIndexRefreshRemote() error {
 	_, err = discordindex.FetchRemoteIndex(a.ctx, url, path)
 	return err
 }
-

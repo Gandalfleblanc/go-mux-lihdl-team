@@ -248,8 +248,9 @@ type SecondaryTrack struct {
 	Language       string
 	Default        bool
 	Forced         bool
-	VisualImpaired bool // flag malvoyant pour les pistes AD
-	DelayMs        int  // décalage audio en ms (--sync TID:OFFSET sur le mkv secondaire)
+	VisualImpaired bool    // flag malvoyant pour les pistes AD
+	DelayMs        int     // décalage audio en ms (--sync TID:OFFSET sur le mkv secondaire)
+	TempoRatio     float64 // ratio o/p mkvmerge (étire/compresse les timecodes ; 1.0 = ignore)
 	Order          int
 }
 
@@ -491,8 +492,15 @@ func buildArgs(p MuxParams) []string {
 			if st.VisualImpaired {
 				args = append(args, "--visual-impaired-flag", id+":1")
 			}
-			if st.DelayMs != 0 {
-				args = append(args, "--sync", id+":"+strconv.Itoa(st.DelayMs))
+			if st.DelayMs != 0 || (st.TempoRatio != 0 && st.TempoRatio != 1.0) {
+				sync := id + ":" + strconv.Itoa(st.DelayMs)
+				if st.TempoRatio != 0 && st.TempoRatio != 1.0 {
+					// Format mkvmerge --sync TID:DELAY,o/p — applique le scale
+					// factor o/p aux timecodes, puis ajoute le delay.
+					num := int(st.TempoRatio * 1000000)
+					sync += "," + strconv.Itoa(num) + "/1000000"
+				}
+				args = append(args, "--sync", sync)
 			}
 		}
 		for _, st := range p.SecondarySubs {

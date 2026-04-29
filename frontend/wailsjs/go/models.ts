@@ -154,6 +154,26 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class ExtractedAudio {
+	    path: string;
+	    codec: string;
+	    label: string;
+	    channels: number;
+	    error: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExtractedAudio(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.codec = source["codec"];
+	        this.label = source["label"];
+	        this.channels = source["channels"];
+	        this.error = source["error"];
+	    }
+	}
 	export class FRAudioExtraction {
 	    path: string;
 	    variant: string;
@@ -308,6 +328,10 @@ export namespace main {
 	    method: string;
 	    fps_ref_mkv: number;
 	    fps_cand_mkv: number;
+	    tempo_ratio: number;
+	    resampled_audio_path: string;
+	    resampled_channels: number;
+	    resampled_track_id: number;
 	    error: string;
 	
 	    static createFrom(source: any = {}) {
@@ -321,6 +345,10 @@ export namespace main {
 	        this.method = source["method"];
 	        this.fps_ref_mkv = source["fps_ref_mkv"];
 	        this.fps_cand_mkv = source["fps_cand_mkv"];
+	        this.tempo_ratio = source["tempo_ratio"];
+	        this.resampled_audio_path = source["resampled_audio_path"];
+	        this.resampled_channels = source["resampled_channels"];
+	        this.resampled_track_id = source["resampled_track_id"];
 	        this.error = source["error"];
 	    }
 	}
@@ -404,6 +432,30 @@ export namespace main {
 	        this.language = source["language"];
 	        this.name = source["name"];
 	        this.channels = source["channels"];
+	    }
+	}
+	export class SyncedSubResult {
+	    path: string;
+	    label: string;
+	    language: string;
+	    default: boolean;
+	    forced: boolean;
+	    offset_ms: number;
+	    synced: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new SyncedSubResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.label = source["label"];
+	        this.language = source["language"];
+	        this.default = source["default"];
+	        this.forced = source["forced"];
+	        this.offset_ms = source["offset_ms"];
+	        this.synced = source["synced"];
 	    }
 	}
 	export class TmdbTestResult {
@@ -505,6 +557,7 @@ export namespace mkvtool {
 	    Forced: boolean;
 	    VisualImpaired: boolean;
 	    DelayMs: number;
+	    TempoRatio: number;
 	    Order: number;
 	
 	    static createFrom(source: any = {}) {
@@ -520,6 +573,7 @@ export namespace mkvtool {
 	        this.Forced = source["Forced"];
 	        this.VisualImpaired = source["VisualImpaired"];
 	        this.DelayMs = source["DelayMs"];
+	        this.TempoRatio = source["TempoRatio"];
 	        this.Order = source["Order"];
 	    }
 	}

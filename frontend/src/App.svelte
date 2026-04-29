@@ -4,7 +4,7 @@
   import logo from './assets/images/logo.png';
   import {
     GetVersion, GetConfig, SaveConfig, GetLihdlOptions,
-    SelectMkvFile, SelectMkvFiles, SelectSubFiles, SelectSupFiles, SelectAudioFiles, SelectOutputDir, LocateMkvmerge, OpenFolder, SearchTmdbTV, SearchTmdbMovie, AnalyzeMkvSecondary, MoveToTrash, MoveDirContentsToTrash, LookupHydrackerURL, TestHydrackerKey, TestUnfrKey, OpenURL, GetMkvBasicInfo, ExtractRefSubs, ExtractFRAudios, CheckSubsSync, CheckPSASync,
+    SelectMkvFile, SelectMkvFiles, SelectSubFiles, SelectSupFiles, SelectAudioFiles, SelectOutputDir, LocateMkvmerge, OpenFolder, SearchTmdbTV, SearchTmdbMovie, AnalyzeMkvSecondary, MoveToTrash, MoveDirContentsToTrash, LookupHydrackerURL, TestHydrackerKey, TestUnfrKey, OpenURL, GetMkvBasicInfo, ExtractRefSubs, ExtractFRAudios, CheckSubsSync, CheckPSASync, ExtractFirstAudioFromMkv, SyncSupplySubsToPSA,
     AnalyzeMkv, SearchTmdb, TestTmdbKey, FileSize,
     Mux, CancelMux,
     CheckUpdate, InstallUpdate,
@@ -1274,6 +1274,8 @@
   let secondaryTracks = [];      // tracks audio + subs analysées
   let secondaryMkvInfo = null;   // { duration_seconds, framerate, … }
   let psaSyncStatus = '';         // '' | 'checking' | 'ok' | 'corrected' | 'error'
+  let psaSyncOffsetMs = 0;        // offset audio détecté (à appliquer aux subs aussi)
+  let psaSyncTempoRatio = 1.0;    // tempo audio détecté (à appliquer aux subs aussi)
   let psaSyncMessage = '';        // texte à afficher (offset, conf, etc.)
   // Réactif : true si FPS PSA ≈ FPS SUPPLY (±0.05) ET audio sync OK ou corrigé.
   $: psaSourcesValid = !!(
@@ -1401,6 +1403,8 @@
     secondarySelected = [];
     secondaryMkvInfo = null;
     psaSyncStatus = ''; // reset
+    psaSyncOffsetMs = 0;
+    psaSyncTempoRatio = 1.0;
     supplyExtraFlag = ''; // reset
     const filename = p.split('/').pop() || '';
     // Détecte un flag "FiNAL" dans le nom SUPPLY → sera inséré dans le filename.
@@ -1476,15 +1480,55 @@
         appendLog(`✓ Sync PSA↔SUPPLY : ${res.offset_ms} ms (synchro, conf ${conf.toFixed(2)})`);
         return;
       }
-      // Offset significatif → applique sur les pistes audio secondarySelected.
-      // mkvmerge --sync TID:offset (positif retarde, négatif avance).
-      secondarySelected = secondarySelected.map(t => {
-        if (t.type !== 'audio') return t;
-        return { ...t, delayMs: res.offset_ms };
-      });
-      psaSyncStatus = 'corrected';
-      psaSyncMessage = `Décalage ${res.offset_ms} ms corrigé auto (conf ${conf.toFixed(2)})`;
-      appendLog(`↻ Sync PSA↔SUPPLY : décalage ${res.offset_ms} ms appliqué sur audios SUPPLY (conf ${conf.toFixed(2)})`);
+      // Offset significatif → 2 cas :
+      //   A. Pas de drift → simple --sync sur la piste SUPPLY
+      //   B. Drift détecté → l'audio SUPPLY a été resamplé via atempo (.ac3
+      //      retourné par le backend). On drop la piste SUPPLY originale et
+      //      on ajoute le .ac3 resamplé comme externalAudio (avec --sync delay).
+      const applyDelay = res.offset_ms;
+      const tempoRatio = res.tempo_ratio || 1.0;
+      psaSyncOffsetMs = applyDelay;
+      psaSyncTempoRatio = tempoRatio;
+      const hasResample = !!res.resampled_audio_path;
+      if (hasResample) {
+        // Drop la SUPPLY audio originale (track ID = res.resampled_track_id)
+        secondarySelected = secondarySelected.map(t => {
+          if (t.type === 'audio' && t.id === res.resampled_track_id) {
+            return { ...t, keep: false };
+          }
+          return t;
+        });
+        // Ajoute le .ac3 resamplé comme externalAudio.
+        const ch = res.resampled_channels || 6;
+        const chStr = ch === 8 ? '7.1' : ch === 6 ? '5.1' : ch === 2 ? '2.0' : `${ch}ch`;
+        const label = `ENG VO : AC3 ${chStr}`;
+        let maxOrder = 0;
+        for (const t of tracks) maxOrder = Math.max(maxOrder, t.order ?? 0);
+        for (const a of externalAudios) maxOrder = Math.max(maxOrder, a.order ?? 0);
+        externalAudios = [...externalAudios, {
+          path: res.resampled_audio_path,
+          name: `ENG.VO.AC3.${chStr}.ac3`,
+          label,
+          keep: true,
+          default: true,
+          forced: false,
+          delayMs: applyDelay,
+          tempoFactor: 1.0, // déjà baked
+          order: maxOrder + 10,
+        }];
+        psaSyncStatus = 'corrected';
+        psaSyncMessage = `Drift ${tempoRatio.toFixed(6)} resamplé + offset ${applyDelay} ms (conf ${conf.toFixed(2)})`;
+        appendLog(`↻ Sync PSA↔SUPPLY : audio SUPPLY resamplé via atempo + offset ${applyDelay} ms ajouté en externe (conf ${conf.toFixed(2)})`);
+      } else {
+        // Pas de drift, simple --sync sur la SUPPLY directe.
+        secondarySelected = secondarySelected.map(t => {
+          if (t.type !== 'audio') return t;
+          return { ...t, delayMs: applyDelay };
+        });
+        psaSyncStatus = 'corrected';
+        psaSyncMessage = `Décalage ${res.offset_ms} ms corrigé auto (conf ${conf.toFixed(2)})`;
+        appendLog(`↻ Sync PSA↔SUPPLY : décalage ${res.offset_ms} ms → mkvmerge --sync ${applyDelay} ms (conf ${conf.toFixed(2)})`);
+      }
     } catch (e) {
       psaSyncStatus = 'error';
       psaSyncMessage = String(e);
@@ -1518,6 +1562,27 @@
     // 1. Drop audios/subs internes du PSA (keep=false).
     tracks = tracks.map(t => (t.type === 'audio' || t.type === 'subtitles') ? { ...t, keep: false } : t);
     // 2. Construit secondarySelected depuis SUPPLY tracks avec auto-labels.
+    // Préserve les modifs utilisateur/checkPSASync/syncSupplySubsToPSA
+    // (keep:false, delayMs, tempoRatio) sinon écrasées quand automate est
+    // rappelé avant le mux.
+    const prevDelayByID = {};
+    const prevTempoByID = {};
+    const prevKeepFalseByID = {};
+    for (const t of secondarySelected) {
+      if (t.type === 'audio') {
+        if (t.delayMs) prevDelayByID[t.id] = t.delayMs;
+        if (t.tempoRatio && t.tempoRatio !== 1.0) prevTempoByID[t.id] = t.tempoRatio;
+      }
+      // keep:false préservé pour audio ET subs (syncSupplySubsToPSA décoche
+      // les subs SUPPLY après alass).
+      if (t.keep === false) prevKeepFalseByID[t.id] = true;
+    }
+    // Détecte si syncSupplySubsToPSA a déjà tourné (= externalSubs avec
+    // fromReference et label SRT) pour empêcher le re-marquage default+forced
+    // du sub SUPPLY original.
+    const hasExternalSyncedFRSub = externalSubs.some(s =>
+      s.fromReference && /^FR /.test(s.label || '') && /SRT/.test(s.label || '')
+    );
     const seenLangSubs = {};
     let order = 100; // après la vidéo (qui sera order=0..99)
     secondarySelected = secondaryTracks.map(t => {
@@ -1568,9 +1633,11 @@
         codec_id: t.codec_id,
         language,
         label,
-        keep: keepFlag,
+        keep: prevKeepFalseByID[t.id] ? false : keepFlag,
         default: defaultFlag,
         forced: forcedFlag,
+        delayMs: prevDelayByID[t.id] || 0,
+        tempoRatio: prevTempoByID[t.id] || 1.0,
         order: order++,
       };
     }).filter(Boolean);
@@ -1585,11 +1652,19 @@
     if (isFastsubVO && !firstFr) {
       const firstAudio = secondarySelected.find(t => t.type === 'audio');
       if (firstAudio) firstAudio.default = true;
-      const firstFRSub = secondarySelected.find(t => t.type === 'subtitles' && /^FR /.test(t.label || ''));
-      if (firstFRSub) {
-        firstFRSub.default = true;
-        firstFRSub.forced = true;
-        appendLog(`🇫🇷 ${langFlag} : audio VO + sub FR marqués default (sub aussi forced)`);
+      // Si syncSupplySubsToPSA a ajouté un sub FR synchronisé en externe,
+      // on ne re-marque PAS le sub SUPPLY original (qui est désynchro). Le
+      // sub externe synchronisé prend le rôle default+forced via son flag
+      // interne (sr.Default côté backend).
+      if (!hasExternalSyncedFRSub) {
+        const firstFRSub = secondarySelected.find(t => t.type === 'subtitles' && /^FR /.test(t.label || ''));
+        if (firstFRSub) {
+          firstFRSub.default = true;
+          firstFRSub.forced = true;
+          appendLog(`🇫🇷 ${langFlag} : audio VO + sub FR marqués default (sub aussi forced)`);
+        }
+      } else {
+        appendLog(`🇫🇷 ${langFlag} : audio VO marqué default — sub FR synchronisé externe garde le default+forced`);
       }
     }
 
@@ -2327,6 +2402,124 @@
     } catch (e) {
       appendLog('❌ ' + String(e));
     }
+  }
+
+  // Mode PSA : ajoute un MKV "synchro avec la PSA" → l'app extrait sa 1ère
+  // piste audio FR (ou ENG fallback) et l'ajoute comme externalAudio. Drop
+  // automatiquement les audios SUPPLY puisque cet audio les remplace.
+  let psaSyncedAudioPath = '';   // path du .ac3/.eac3 extrait
+  let psaSyncedSourceMkv = '';   // path du MKV source choisi (pour affichage)
+  async function pickPSASyncedAudio() {
+    try {
+      const p = await SelectMkvFile();
+      if (!p) return;
+      psaSyncedSourceMkv = p;
+      appendLog(`🎵 Extraction audio depuis ${basename(p)}…`);
+      const res = await ExtractFirstAudioFromMkv(p);
+      if (res.error) {
+        appendLog('❌ ' + res.error);
+        psaSyncedSourceMkv = '';
+        return;
+      }
+      psaSyncedAudioPath = res.path;
+      // Vire d'éventuels audios resampled ajoutés par checkPSASync auto
+      // (le MKV synchro fourni par le user les remplace).
+      externalAudios = externalAudios.filter(a => !(a.path && a.path.includes('.resampled.ac3')));
+      // Ajoute comme externalAudio.
+      let maxOrder = 0;
+      for (const t of tracks) maxOrder = Math.max(maxOrder, t.order ?? 0);
+      for (const a of externalAudios) maxOrder = Math.max(maxOrder, a.order ?? 0);
+      let size = -1;
+      try { size = await FileSize(res.path); } catch {}
+      externalAudios = [...externalAudios, {
+        path: res.path,
+        name: basename(res.path),
+        size,
+        keep: true,
+        default: true,
+        forced: false,
+        label: res.label || 'FR VFi : AC3 5.1',
+        delayMs: 0,
+        tempoFactor: 1.0,
+        order: maxOrder + 10,
+      }];
+      // Drop tous les audios SUPPLY (remplacés par cet audio synchro).
+      secondarySelected = secondarySelected.map(t =>
+        t.type === 'audio' ? { ...t, keep: false } : t
+      );
+      psaSyncStatus = 'ok';
+      psaSyncMessage = `Audio synchro extrait : ${res.label}`;
+      appendLog(`✓ Audio extrait (${res.codec} ${res.channels}ch) → label: ${res.label}. Audios SUPPLY décochés.`);
+    } catch (e) {
+      appendLog('❌ ' + String(e));
+    }
+  }
+  // Mode PSA : extrait les subs FR/ENG du SUPPLY et les synchronise sur la PSA
+  // via alass. Les subs corrigés sont ajoutés comme externalSubs et les subs
+  // SUPPLY originaux sont décochés.
+  let psaSubSyncRunning = false;
+  async function syncSupplySubsToPSA() {
+    if (!sourcePath) { appendLog('⚠ PSA non chargée'); return; }
+    if (!secondaryPath) { appendLog('⚠ SUPPLY non chargée'); return; }
+    psaSubSyncRunning = true;
+    try {
+      const driven = (psaSyncOffsetMs !== 0 || (psaSyncTempoRatio && psaSyncTempoRatio !== 1.0));
+      if (driven) {
+        appendLog(`🎯 Sync subs SUPPLY → PSA (audio-driven : offset ${psaSyncOffsetMs} ms, tempo ${psaSyncTempoRatio.toFixed(6)})…`);
+      } else {
+        appendLog(`🔎 Sync subs SUPPLY → PSA via alass…`);
+      }
+      const results = await SyncSupplySubsToPSA(sourcePath, secondaryPath, psaSyncOffsetMs, psaSyncTempoRatio || 1.0);
+      if (!results || results.length === 0) {
+        appendLog('ℹ Aucun sub FR/ENG texte trouvé dans SUPPLY');
+        return;
+      }
+      // Drop les subs SUPPLY (les externalSubs synchronisés les remplacent).
+      secondarySelected = secondarySelected.map(t =>
+        t.type === 'subtitles' ? { ...t, keep: false } : t
+      );
+      // Ajoute chaque sub corrigé comme externalSub.
+      let maxOrder = 0;
+      for (const t of tracks) maxOrder = Math.max(maxOrder, t.order ?? 0);
+      for (const s of externalSubs) maxOrder = Math.max(maxOrder, s.order ?? 0);
+      for (const r of results) {
+        maxOrder += 10;
+        let size = -1;
+        try { size = await FileSize(r.path); } catch {}
+        externalSubs = [...externalSubs, {
+          path: r.path,
+          name: basename(r.path),
+          size,
+          keep: true,
+          default: !!r.default,
+          forced: !!r.forced,
+          label: r.label,
+          delayMs: 0, // alass a déjà baked l'offset
+          tempoFactor: 1.0,
+          order: maxOrder,
+          fromReference: true,
+        }];
+      }
+      const synced = results.filter(r => r.synced).length;
+      appendLog(`✓ ${results.length} sub(s) ajoutés (${synced} synchronisés alass, ${results.length - synced} bruts) — subs SUPPLY décochés`);
+    } catch (e) {
+      appendLog('❌ Sync subs : ' + String(e));
+    } finally {
+      psaSubSyncRunning = false;
+    }
+  }
+
+  function clearPSASyncedAudio() {
+    if (psaSyncedAudioPath) {
+      externalAudios = externalAudios.filter(a => a.path !== psaSyncedAudioPath);
+    }
+    psaSyncedAudioPath = '';
+    psaSyncedSourceMkv = '';
+    // Re-coche les audios SUPPLY (le user n'a plus d'audio externe).
+    secondarySelected = secondarySelected.map(t =>
+      t.type === 'audio' ? { ...t, keep: true } : t
+    );
+    appendLog('↩ Audio synchro retiré, audios SUPPLY re-cochés');
   }
 
   function removeExternalAudio(idx) {
@@ -3085,15 +3278,21 @@
     }));
 
     // Pistes secondaires (SUPPLY/FW) — audios et subs séparés.
-    const secAudios = secondarySelected.filter(t => t.type === 'audio' && t.keep).map(t => ({
-      ID: t.id,
-      Name: t.label || '',
-      Language: t.language || mapLangCode(t.label || ''),
-      Default: !!t.default,
-      Forced: !!t.forced,
-      VisualImpaired: isAD(t.label),
-      Order: t.order ?? 0,
-    }));
+    // Si un MKV synchro est fourni en ligne ③ (mode PSA), on EXCLUT toujours
+    // les audios SUPPLY (l'audio extrait du MKV synchro les remplace).
+    const secAudios = psaSyncedAudioPath
+      ? []
+      : secondarySelected.filter(t => t.type === 'audio' && t.keep).map(t => ({
+          ID: t.id,
+          Name: t.label || '',
+          Language: t.language || mapLangCode(t.label || ''),
+          Default: !!t.default,
+          Forced: !!t.forced,
+          VisualImpaired: isAD(t.label),
+          DelayMs: t.delayMs || 0,
+          TempoRatio: t.tempoRatio || 1.0,
+          Order: t.order ?? 0,
+        }));
     const secSubs = secondarySelected.filter(t => t.type === 'subtitles' && t.keep).map(t => ({
       ID: t.id,
       Name: t.label || '',
@@ -3615,9 +3814,38 @@
                 <div class="source-value empty">— Aucun fichier sélectionné —</div>
               {/if}
             </div>
-            <button class="btn btn-ghost" on:click={pickSecondaryDialog}>
-              {secondaryPath ? 'Changer' : 'Choisir SUPPLY/FW/Super U'}
-            </button>
+            <div class="source-row-actions">
+              {#if secondaryPath}
+                <button class="btn-primary btn-tiny" on:click={syncSupplySubsToPSA} disabled={psaSubSyncRunning} title="Extrait les subs FR/ENG du SUPPLY et les synchronise sur la PSA via alass">
+                  {psaSubSyncRunning ? '⏳' : '🔎 Sync subs → PSA'}
+                </button>
+              {/if}
+              <button class="btn btn-ghost" on:click={pickSecondaryDialog}>
+                {secondaryPath ? 'Changer' : 'Choisir SUPPLY/FW/Super U'}
+              </button>
+            </div>
+          </div>
+
+          <!-- Ligne ③ MKV synchro (mode PSA — extrait audio + bypass SUPPLY audio) -->
+          <div class="source-row" class:filled={psaSyncedAudioPath} style={psaSyncedAudioPath ? 'border-left:3px solid #7ad17a;background:rgba(122,209,122,0.08);' : ''}>
+            <div class="source-num">{psaSyncedAudioPath ? '✓' : '3'}</div>
+            <div class="source-info">
+              <div class="source-label">MKV synchro (optionnel · audio extrait + bypass SUPPLY audio)</div>
+              {#if psaSyncedAudioPath}
+                <div class="source-value">{basename(psaSyncedSourceMkv)}</div>
+                <div class="source-value" style="opacity:0.7;font-size:11px;">Audio extrait + audios SUPPLY décochés</div>
+              {:else}
+                <div class="source-value empty">— Optionnel : un .mkv dont l'audio est déjà synchro avec la PSA —</div>
+              {/if}
+            </div>
+            <div class="source-row-actions">
+              <button class="btn btn-ghost" on:click={pickPSASyncedAudio}>
+                {psaSyncedAudioPath ? 'Changer' : 'Choisir MKV'}
+              </button>
+              {#if psaSyncedAudioPath}
+                <button class="btn btn-ghost btn-icon" on:click={clearPSASyncedAudio} title="Retirer le MKV synchro">✕</button>
+              {/if}
+            </div>
           </div>
         {/if}
 
@@ -3863,10 +4091,11 @@
             </div>
           {/if}
 
-          <!-- Audio (merge internal/external/secondary triés par ordre) -->
-          {#if tracks.some(t => t.type === 'audio' && t.keep) || externalAudios.some(a => a.keep) || secondarySelected.some(t => t.type === 'audio' && t.keep)}
+          <!-- Audio (merge internal/external/secondary triés par ordre).
+               Si MKV synchro fourni en mode PSA → on cache TOUS les audios SUPPLY. -->
+          {#if tracks.some(t => t.type === 'audio' && t.keep) || externalAudios.some(a => a.keep) || (secondarySelected.some(t => t.type === 'audio' && t.keep) && !psaSyncedAudioPath)}
             {@const internalAudios = tracks.filter(t => t.type === 'audio')}
-            {@const secondaryAudios = secondarySelected.filter(t => t.type === 'audio')}
+            {@const secondaryAudios = psaSyncedAudioPath ? [] : secondarySelected.filter(t => t.type === 'audio')}
             {@const mergedAudios = [
               ...internalAudios.map((t, i) => ({ kind: 'internal', idx: i, ref: t, order: t.order ?? 0 })),
               ...externalAudios.map((a, i) => ({ kind: 'external', idx: i, ref: a, order: a.order ?? 0 })),
