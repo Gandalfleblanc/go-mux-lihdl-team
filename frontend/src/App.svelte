@@ -719,15 +719,11 @@
         // sa logique de hints (track_name) n'est pas fiable sur une piste
         // extraite (elle perd son contexte mkv).
         const ch = formatChannels(ex.channels);
-        const atmosFields = [
-          String(ex.track_name || ''),
-          String(ex.mi_title || ''),
-          String(ex.mi_format_profile || ''),
-          String(ex.mi_format_commercial || ''),
-          String(ex.mi_format_commercial_if_any || ''),
-          String(ex.mi_format_features || ''),
-        ].join(' ').toUpperCase();
-        const isAtmos = (atmosFields.includes('ATMOS') || atmosFields.includes('JOC')) && ex.codec === 'EAC3' && ch === '5.1';
+        // ATMOS par-piste : JOC dans Format_AdditionalFeatures ou ATMOS
+        // explicite dans track_name. Pas Format_Commercial (propagé).
+        const exFeatures = String(ex.mi_format_features || '').toUpperCase();
+        const exName = String(ex.track_name || '').toUpperCase();
+        const isAtmos = (exFeatures.includes('JOC') || exName.includes('ATMOS')) && ex.codec === 'EAC3' && ch === '5.1';
         const atmosSuffix = isAtmos ? ' ATMOS' : '';
         // Norme LiHDL : "FR <variant>" pour FR (VFF/VFQ/VFi/VOF), "ENG VO" pour anglais.
         const labelPrefix = ex.variant === 'ENG' ? 'ENG VO' : `FR ${ex.variant}`;
@@ -1340,20 +1336,14 @@
     else if (ch === 2) chans = '2.0';
     else if (ch === 6) chans = '5.1';
     else if (ch === 8) chans = '7.1';
-    // Atmos : on cherche "atmos" ou "JOC" dans tous les champs mediainfo dispo
-    // (Format, Format_Profile, Format_Commercial, Format_AdditionalFeatures, etc.)
-    const atmosFields = [
-      String(track.track_name || ''),
-      String(track.mi_title || ''),
-      String(track.mi_format || ''),
-      String(track.mi_format_profile || ''),
-      String(track.mi_format_commercial || ''),
-      String(track.mi_format_commercial_if_any || ''),
-      String(track.mi_format_features || ''),
-      String(track.codec || ''),
-      String(track.codecId || ''),
-    ].join(' ').toUpperCase();
-    const isAtmos = atmosFields.includes('ATMOS') || atmosFields.includes('JOC');
+    // ATMOS : signature fiable par-piste = "JOC" dans mi_format_features.
+    // Les champs Format_Commercial_IfAny / Format_Commercial sont parfois
+    // propagés à TOUTES les pistes EAC3 du fichier dès qu'une seule est Atmos
+    // → faux positifs. On accepte aussi "ATMOS" dans le track_name
+    // (mention explicite par l'encodeur).
+    const features = String(track.mi_format_features || '').toUpperCase();
+    const trackName = String(track.track_name || '').toUpperCase();
+    const isAtmos = features.includes('JOC') || trackName.includes('ATMOS');
     // Service kind mediainfo : VI = Visual Impaired (audiodescription), HI = Hearing Impaired
     const isAD = /^vi$/i.test(String(track.mi_service_kind || '')) ||
                  /audio.?descrip|\bad\b|vmal|malvoyant|visual.?impair/i.test(hints);

@@ -117,7 +117,7 @@ func (a *App) startup(ctx context.Context) {
 
 // AppVersion est lue par le frontend (pill dans le header) et utilisée pour
 // comparer avec la dernière release GitHub lors du check de mise à jour.
-const AppVersion = "v5.6.2"
+const AppVersion = "v5.6.3"
 
 func (a *App) GetVersion() string { return AppVersion }
 
@@ -363,7 +363,7 @@ func (a *App) AnalyzeMkv(path string) {
 
 		// Enrichissement mediainfo (audio/sub) : mêmes champs qu'AnalyzeMkvSecondary.
 		mediainfoByID := map[int]mediainfo.Track{}
-		if mibin, mErr := mediainfo.Locate(""); mErr == nil {
+		if mibin, mErr := mediainfo.Locate(func() string { d, _ := config.BinDir(); return d }()); mErr == nil {
 			if mi, mErr2 := mediainfo.Identify(a.ctx, mibin, path); mErr2 == nil {
 				audIdx, subIdx := 0, 0
 				audTracks, subTracks := []mkvtool.Track{}, []mkvtool.Track{}
@@ -463,7 +463,7 @@ func (a *App) AnalyzeMkvSecondary(path string) {
 
 		// Tente d'enrichir avec mediainfo (best-effort, silencieux si absent).
 		mediainfoByID := map[int]mediainfo.Track{}
-		if mibin, err := mediainfo.Locate(""); err == nil {
+		if mibin, err := mediainfo.Locate(func() string { d, _ := config.BinDir(); return d }()); err == nil {
 			if mi, err := mediainfo.Identify(a.ctx, mibin, path); err == nil {
 				// Mapping par index : 1ère audio mediainfo = 1ère audio mkvmerge
 				audIdx, subIdx := 0, 0
@@ -630,7 +630,7 @@ func (a *App) GetMkvBasicInfo(path string) (*MkvBasicInfo, error) {
 	}
 	out := &MkvBasicInfo{}
 	// 1) mediainfo : durée + framerate + dimensions
-	if mibin, err := mediainfo.Locate(""); err == nil {
+	if mibin, err := mediainfo.Locate(func() string { d, _ := config.BinDir(); return d }()); err == nil {
 		if mi, err := mediainfo.Identify(a.ctx, mibin, path); err == nil {
 			for _, t := range mi.Media.Track {
 				switch t.Type {
@@ -1097,7 +1097,7 @@ func (a *App) ExtractFRAudios(srcPath string, wantVFF, wantVFQ, wantENG bool, li
 	// la barre de progression de la conversion AC3.
 	mediainfoByID := map[int]mediainfo.Track{}
 	var srcDuration float64
-	if mibin, err := mediainfo.Locate(""); err == nil {
+	if mibin, err := mediainfo.Locate(func() string { d, _ := config.BinDir(); return d }()); err == nil {
 		if mi, err := mediainfo.Identify(a.ctx, mibin, srcPath); err == nil {
 			audIdx := 0
 			audTracks := []mkvtool.Track{}
@@ -1130,7 +1130,7 @@ func (a *App) ExtractFRAudios(srcPath string, wantVFF, wantVFQ, wantENG bool, li
 			lihdlFRID = pickFirstAudioIDByLang(lihdlInfo, syncRefLang)
 		}
 		// Durée pour détection de drift.
-		if mibin, err := mediainfo.Locate(""); err == nil {
+		if mibin, err := mediainfo.Locate(func() string { d, _ := config.BinDir(); return d }()); err == nil {
 			if mi, err := mediainfo.Identify(a.ctx, mibin, lihdlSourcePath); err == nil {
 				for _, t := range mi.Media.Track {
 					if t.Type == "General" && t.Duration != "" {
@@ -1255,7 +1255,7 @@ func (a *App) ExtractFRAudios(srcPath string, wantVFF, wantVFQ, wantENG bool, li
 		// extraite doit être resampled (sinon drift progressif). On l'applique
 		// AUTOMATIQUEMENT, indépendamment de la confiance audio cross-corr (qui
 		// est souvent < 0.4 quand il y a justement un drift FPS, donc bloquait).
-		if mibinTempo, _ := mediainfo.Locate(""); mibinTempo != "" {
+		if mibinTempo, _ := mediainfo.Locate(func() string { d, _ := config.BinDir(); return d }()); mibinTempo != "" {
 			srcFps := getMediaFPS(a.ctx, mibinTempo, srcPath)
 			lihdlFps := getMediaFPS(a.ctx, mibinTempo, lihdlSourcePath)
 			if srcFps > 0 && lihdlFps > 0 && math.Abs(srcFps-lihdlFps) > 0.05 {
@@ -1431,7 +1431,7 @@ func (a *App) CheckSubsSync(reqs []SubSyncRequest, sourceMkvPath, referenceMkvPa
 	//       (typiquement déjà adapté à la source LiHDL → juste l'offset)
 	fpsSame := true
 	if referenceMkvPath != "" {
-		mibin, _ := mediainfo.Locate("")
+		mibin, _ := mediainfo.Locate(func() string { d, _ := config.BinDir(); return d }())
 		if mibin != "" {
 			srcFps := getMediaFPS(a.ctx, mibin, sourceMkvPath)
 			refFps := getMediaFPS(a.ctx, mibin, referenceMkvPath)
@@ -1756,7 +1756,43 @@ func (a *App) ExtractFirstAudioFromMkv(mkvPath string) ExtractedAudio {
 	case 8:
 		chStr = "7.1"
 	}
-	res.Label = fmt.Sprintf("%s : %s %s", prefix, codec, chStr)
+	// ATMOS : pour EAC3 5.1, on consulte mediainfo pour détecter JOC sur la
+	// piste sélectionnée. JOC = Joint Object Coding = signature EAC3 ATMOS.
+	atmosSuffix := ""
+	if codec == "EAC3" && chStr == "5.1" {
+		if mibin, mErr := mediainfo.Locate(func() string { d, _ := config.BinDir(); return d }()); mErr == nil {
+			if mi, mErr2 := mediainfo.Identify(a.ctx, mibin, mkvPath); mErr2 == nil {
+				audIdx := 0
+				audTracks := []mkvtool.Track{}
+				for _, t := range info.Tracks {
+					if t.Type == "audio" {
+						audTracks = append(audTracks, t)
+					}
+				}
+				for _, mt := range mi.Media.Track {
+					if mt.Type != "Audio" {
+						continue
+					}
+					if audIdx >= len(audTracks) {
+						break
+					}
+					if audTracks[audIdx].ID == trackID {
+						// JOC = signature ATMOS par-piste fiable (Format_AdditionalFeatures).
+						// FormatCommercial peut propager "Atmos" sur toutes les pistes du
+						// fichier dès qu'une seule l'est → on l'évite.
+						feat := strings.ToUpper(mt.FormatAdditionalFeatures)
+						title := strings.ToUpper(mt.Title)
+						if strings.Contains(feat, "JOC") || strings.Contains(title, "ATMOS") {
+							atmosSuffix = " ATMOS"
+						}
+						break
+					}
+					audIdx++
+				}
+			}
+		}
+	}
+	res.Label = fmt.Sprintf("%s : %s %s%s", prefix, codec, chStr, atmosSuffix)
 	return res
 }
 
@@ -1796,7 +1832,7 @@ func (a *App) CheckPSASync(refMkvPath, candMkvPath, lang string) PSASyncResult {
 	}
 	// FPS + durée info via mediainfo (best-effort).
 	res.TempoRatio = 1.0
-	if mibin, _ := mediainfo.Locate(""); mibin != "" {
+	if mibin, _ := mediainfo.Locate(func() string { d, _ := config.BinDir(); return d }()); mibin != "" {
 		res.FpsRefMkv = getMediaFPS(a.ctx, mibin, refMkvPath)
 		res.FpsCandMkv = getMediaFPS(a.ctx, mibin, candMkvPath)
 		// Calcul du tempo ratio : si SUPPLY est plus longue que PSA, faut la
@@ -1870,7 +1906,7 @@ func (a *App) CheckPSASync(refMkvPath, candMkvPath, lang string) PSASyncResult {
 			// Récupère codec/channels/bitrate via mediainfo pour le ré-encodage.
 			channels := 6
 			bitrate := 448
-			if mibin, _ := mediainfo.Locate(""); mibin != "" {
+			if mibin, _ := mediainfo.Locate(func() string { d, _ := config.BinDir(); return d }()); mibin != "" {
 				if mi, err := mediainfo.Identify(a.ctx, mibin, candMkvPath); err == nil {
 					audIdx := 0
 					for _, t := range mi.Media.Track {
@@ -2591,7 +2627,7 @@ func (a *App) DetectAudioOffset(path string, refID, otherID int) (*audiosync.Det
 	}
 	// Durée totale du film via mediainfo (pour activer la double-mesure).
 	var durationSec float64
-	if mibin, err := mediainfo.Locate(""); err == nil {
+	if mibin, err := mediainfo.Locate(func() string { d, _ := config.BinDir(); return d }()); err == nil {
 		if mi, err := mediainfo.Identify(a.ctx, mibin, path); err == nil {
 			for _, t := range mi.Media.Track {
 				if t.Type == "General" && t.Duration != "" {
@@ -2675,7 +2711,7 @@ func (a *App) MuxAudioSync(req AudioSyncRequest) error {
 	}
 	metaByID := map[int]trackMeta{}
 	if len(resampleTIDs) > 0 {
-		if mibin, err := mediainfo.Locate(""); err == nil {
+		if mibin, err := mediainfo.Locate(func() string { d, _ := config.BinDir(); return d }()); err == nil {
 			if mi, err := mediainfo.Identify(a.ctx, mibin, req.InputPath); err == nil {
 				audIdx := 0
 				for _, t := range info.Tracks {
