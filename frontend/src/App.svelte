@@ -1363,6 +1363,7 @@
     else if (lang === 'chi' || lang === 'zho' || lang === 'zh') prefix = 'CHI VO';
     else if (lang === 'rus' || lang === 'ru') prefix = 'RUS VO';
     else if (lang === 'dut' || lang === 'nld' || lang === 'nl') prefix = 'DUT VO';
+    else if (lang === 'nor' || lang === 'no' || lang === 'nb' || lang === 'nob' || lang === 'nn' || lang === 'nno') prefix = 'NOR VO';
     // ATMOS : suffixe ajouté pour toute langue dès lors qu'on est en EAC3 5.1
     // ET que mediainfo signale JOC (Atmos) ou que track_name contient "atmos".
     const atmosSuffix = (isAtmos && codec === 'EAC3' && chans === '5.1') ? ' ATMOS' : '';
@@ -1605,6 +1606,7 @@
         else if (/^CHI /.test(label))            language = 'zho';
         else if (/^RUS /.test(label))            language = 'rus';
         else if (/^DUT /.test(label))            language = 'dut';
+        else if (/^NOR /.test(label))            language = 'nor';
         else                                      language = t.language || 'und';
         defaultFlag = false; // 1ère piste FR sera default plus tard
       } else {
@@ -1853,7 +1855,9 @@
   function dotify(s) {
     // Convertit espaces/tirets en points, capitalise chaque segment.
     // ex: "jurassic world: fallen kingdom" → "Jurassic.World.Fallen.Kingdom"
+    // Norme release : "&" → "and" (TMDB renvoie souvent l'esperluette).
     const cleaned = String(s || '').trim()
+      .replace(/&/g, 'and')          // & → and (sinon perdu par le regex suivant)
       .replace(/[\s\-]+/g, '.')      // espaces et tirets → points
       .replace(/[^\w.À-ſ]/g, '')  // retire les autres caractères (sauf accents)
       .replace(/\.+/g, '.');           // points consécutifs → un seul
@@ -3978,10 +3982,13 @@
                 {#if referencePath}
                   <div class="source-value">{basename(referencePath)}</div>
                   {#if referenceMkvInfo && sourceMkvInfo}
+                    {@const refSyncOK = (Array.isArray(subSyncResults) && subSyncResults.length > 0 && subSyncResults.every(r => !r.error)) || frAudioExtractionResult === 'success'}
                     <div class="compat-grid">
-                      <span>Durée : {formatDuration(sourceMkvInfo.duration_seconds)} vs {formatDuration(referenceMkvInfo.duration_seconds)} <span class:compat-ok={compat.durationOK} class:compat-bad={compat.durationOK === false}>{compat.durationOK ? '✓' : '✗'}</span></span>
-                      <span>FPS : {sourceMkvInfo.framerate || '?'} vs {referenceMkvInfo.framerate || '?'} <span class:compat-ok={compat.fpsOK} class:compat-bad={compat.fpsOK === false}>{compat.fpsOK ? '✓' : '✗'}</span></span>
+                      <span>Durée : {formatDuration(referenceMkvInfo.duration_seconds)} · {referenceMkvInfo.framerate || '?'} fps</span>
                       <span>VFQ : <span class:compat-ok={referenceMkvInfo.has_vfq_audio} class:compat-bad={!referenceMkvInfo.has_vfq_audio}>{referenceMkvInfo.has_vfq_audio ? '✓ ' + (referenceMkvInfo.vfq_track_info || 'piste détectée') : '✗ aucune piste FR Canada'}</span></span>
+                      {#if refSyncOK}
+                        <span class="compat-ok">✓ Sync valide</span>
+                      {/if}
                     </div>
                   {/if}
                   <div class="fr-audio-options">
@@ -4008,6 +4015,10 @@
                     <label class="vfq-toggle">
                       <input type="radio" name="syncRefLang" bind:group={syncRefLang} value="fr" disabled={frAudioExtracting} />
                       <span>FR (VFF/VFi)</span>
+                    </label>
+                    <label class="vfq-toggle">
+                      <input type="radio" name="syncRefLang" bind:group={syncRefLang} value="fr-ca" disabled={frAudioExtracting} />
+                      <span>FR VFQ</span>
                     </label>
                     <label class="vfq-toggle">
                       <input type="radio" name="syncRefLang" bind:group={syncRefLang} value="eng" disabled={frAudioExtracting} />
