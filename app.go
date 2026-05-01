@@ -117,7 +117,7 @@ func (a *App) startup(ctx context.Context) {
 
 // AppVersion est lue par le frontend (pill dans le header) et utilisée pour
 // comparer avec la dernière release GitHub lors du check de mise à jour.
-const AppVersion = "v5.6.3"
+const AppVersion = "v5.6.4"
 
 func (a *App) GetVersion() string { return AppVersion }
 
@@ -971,7 +971,13 @@ func pickFirstAudioIDByLang(info *mkvtool.Info, lang string) int {
 			continue
 		}
 		l := strings.ToLower(t.Properties.Language)
+		name := strings.ToLower(t.Properties.TrackName)
 		switch lang {
+		case "fr-ca", "vfq":
+			// FR VFQ strict : code fr-ca explicite OU mots-clés Canada/Québec/VFQ.
+			if l == "fr-ca" || strings.Contains(name, "vfq") || strings.Contains(name, "canad") || strings.Contains(name, "québ") || strings.Contains(name, "quebec") {
+				return t.ID
+			}
 		case "fr", "fre", "fra":
 			if l == "fre" || l == "fra" || l == "fr" || strings.HasPrefix(l, "fr-") {
 				return t.ID
@@ -1459,7 +1465,7 @@ func (a *App) CheckSubsSync(reqs []SubSyncRequest, sourceMkvPath, referenceMkvPa
 	// On run alass UNIQUEMENT sur le principal, puis on applique son offset
 	// aux courts via shift SRT manuel. Tous les SRT de la même référence ont
 	// la même timeline → même offset s'applique.
-	const shortSRTThreshold = 100
+	const shortSRTThreshold = 300
 	type subEntry struct {
 		req       SubSyncRequest
 		count     int
@@ -1491,9 +1497,12 @@ func (a *App) CheckSubsSync(reqs []SubSyncRequest, sourceMkvPath, referenceMkvPa
 	if !strings.HasSuffix(lower, ".srt") && !strings.HasSuffix(lower, ".ass") && !strings.HasSuffix(lower, ".ssa") {
 		results[mainIdx] = SubSyncCheck{Path: mainReq.Path, Error: "format non supporté par alass (SRT/ASS/SSA uniquement)"}
 	} else {
-		wr.EventsEmit(a.ctx, "log", fmt.Sprintf("🔎 alass sync principal (%d lignes) : %s", entries[mainIdx].count, filepath.Base(mainReq.Path)))
+		wr.EventsEmit(a.ctx, "log", fmt.Sprintf("🔎 alass multi-split principal (%d lignes) : %s", entries[mainIdx].count, filepath.Base(mainReq.Path)))
 		outputPath := strings.TrimSuffix(mainReq.Path, filepath.Ext(mainReq.Path)) + ".alass" + filepath.Ext(mainReq.Path)
-		res, err := alass.Sync(a.ctx, alassPath, sourceMkvPath, entries[mainIdx].inputPath, outputPath, true, fpsGuessDisabledForReq(mainReq), binDir)
+		// noSplit=false : multi-split pour gérer un drift non-linéaire (decalage
+		// qui s'accumule en cours d'épisode, intro coupée, scènes différentes).
+		// Un offset constant ne suffit pas dans ces cas.
+		res, err := alass.Sync(a.ctx, alassPath, sourceMkvPath, entries[mainIdx].inputPath, outputPath, false, fpsGuessDisabledForReq(mainReq), binDir)
 		if err != nil {
 			results[mainIdx] = SubSyncCheck{Path: mainReq.Path, Error: err.Error()}
 			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ alass %s : %s", filepath.Base(mainReq.Path), err.Error()))
@@ -1535,9 +1544,9 @@ func (a *App) CheckSubsSync(reqs []SubSyncRequest, sourceMkvPath, referenceMkvPa
 			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("  → %s : %d lignes, shift %d ms appliqué (basé sur le SRT principal)", filepath.Base(e.req.Path), e.count, mainOffsetMs))
 			continue
 		}
-		// Sinon : alass standard.
-		wr.EventsEmit(a.ctx, "log", fmt.Sprintf("🔎 alass sync (%d lignes) : %s", e.count, filepath.Base(e.req.Path)))
-		res, err := alass.Sync(a.ctx, alassPath, sourceMkvPath, e.inputPath, outputPath, true, fpsGuessDisabledForReq(e.req), binDir)
+		// Sinon : alass multi-split standard (gère drift non-linéaire).
+		wr.EventsEmit(a.ctx, "log", fmt.Sprintf("🔎 alass multi-split (%d lignes) : %s", e.count, filepath.Base(e.req.Path)))
+		res, err := alass.Sync(a.ctx, alassPath, sourceMkvPath, e.inputPath, outputPath, false, fpsGuessDisabledForReq(e.req), binDir)
 		if err != nil {
 			results[i] = SubSyncCheck{Path: e.req.Path, Error: err.Error()}
 			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ alass %s : %s", filepath.Base(e.req.Path), err.Error()))

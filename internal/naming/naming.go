@@ -46,6 +46,7 @@ var AudioLabels = []string{
 	"GER VO : AC3 5.1",
 	"GER VO : EAC3 5.1",
 	"GER VO : EAC3 5.1 ATMOS",
+	"JPN VO : AC3 2.0",
 	"JPN VO : AC3 5.1",
 	"JPN VO : EAC3 5.1",
 	"JPN VO : EAC3 5.1 ATMOS",
@@ -58,6 +59,10 @@ var AudioLabels = []string{
 	"DUT VO : AC3 5.1",
 	"DUT VO : EAC3 5.1",
 	"DUT VO : EAC3 5.1 ATMOS",
+	"NOR VO : AC3 2.0",
+	"NOR VO : AC3 5.1",
+	"NOR VO : EAC3 5.1",
+	"NOR VO : EAC3 5.1 ATMOS",
 }
 
 // SubtitleLabels est la liste ordonnée des libellés sous-titres LiHDL.
@@ -231,13 +236,22 @@ func BuildFilename(p FilenameParams) string {
 }
 
 // dotify remplace les espaces par des points (norme LiHDL pour les noms
-// de fichier). Trim les espaces en début/fin.
+// de fichier). Trim les espaces en début/fin. Convertit "&" en "and"
+// (norme release : "Friends & Neighbors" → "Friends.and.Neighbors").
 func dotify(s string) string {
 	s = trimSpace(s)
 	out := make([]byte, 0, len(s))
 	prevDot := false
 	for i := 0; i < len(s); i++ {
 		c := s[i]
+		if c == '&' {
+			if !prevDot {
+				out = append(out, '.')
+			}
+			out = append(out, 'a', 'n', 'd', '.')
+			prevDot = true
+			continue
+		}
 		if c == ' ' {
 			if !prevDot {
 				out = append(out, '.')
@@ -247,6 +261,10 @@ func dotify(s string) string {
 		}
 		out = append(out, c)
 		prevDot = c == '.'
+	}
+	// Trim final dot si "&" était en fin
+	if n := len(out); n > 0 && out[n-1] == '.' {
+		out = out[:n-1]
 	}
 	return string(out)
 }
