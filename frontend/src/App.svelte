@@ -1503,27 +1503,52 @@
           }
           return t;
         });
-        // Ajoute le .ac3 resamplé comme externalAudio.
+        // Ajoute l'audio resamplé comme externalAudio. Codec + langue
+        // préservés depuis le backend (AC3/EAC3 + ATMOS si JOC source).
         const ch = res.resampled_channels || 6;
         const chStr = ch === 8 ? '7.1' : ch === 6 ? '5.1' : ch === 2 ? '2.0' : `${ch}ch`;
-        const label = `ENG VO : AC3 ${chStr}`;
-        let maxOrder = 0;
-        for (const t of tracks) maxOrder = Math.max(maxOrder, t.order ?? 0);
-        for (const a of externalAudios) maxOrder = Math.max(maxOrder, a.order ?? 0);
+        const codec = (res.resampled_codec || 'AC3').toUpperCase();
+        const lang = String(res.resampled_language || '').toLowerCase();
+        let prefix = 'ENG VO';
+        if (lang === 'fre' || lang === 'fra' || lang === 'fr' || lang.startsWith('fr-')) prefix = 'FR VFi';
+        else if (lang === 'eng' || lang === 'en' || lang.startsWith('en-')) prefix = 'ENG VO';
+        else if (lang === 'jpn' || lang === 'ja') prefix = 'JPN VO';
+        else if (lang === 'ita' || lang === 'it') prefix = 'ITA VO';
+        else if (lang === 'spa' || lang === 'es') prefix = 'SPA VO';
+        else if (lang === 'ger' || lang === 'de') prefix = 'GER VO';
+        const atmosSuffix = (res.resampled_is_atmos && codec === 'EAC3' && chStr === '5.1') ? ' ATMOS' : '';
+        const label = `${prefix} : ${codec} ${chStr}${atmosSuffix}`;
+        const fileExt = codec === 'EAC3' ? 'eac3' : 'ac3';
+        // Order : pour une piste FR, on la veut AVANT les autres audios
+        // (norme LiHDL = FR > ENG). Pour autre langue, on l'ajoute en queue.
+        const isFRprefix = prefix.startsWith('FR ');
+        let resampledOrder;
+        if (isFRprefix) {
+          let minAudioOrder = Infinity;
+          for (const t of tracks) if (t.type === 'audio' && (t.order ?? 0) < minAudioOrder) minAudioOrder = t.order ?? 0;
+          for (const t of secondarySelected) if (t.type === 'audio' && (t.order ?? 0) < minAudioOrder) minAudioOrder = t.order ?? 0;
+          for (const a of externalAudios) if ((a.order ?? 0) < minAudioOrder) minAudioOrder = a.order ?? 0;
+          resampledOrder = (minAudioOrder === Infinity ? 100 : minAudioOrder) - 10;
+        } else {
+          let maxOrder = 0;
+          for (const t of tracks) maxOrder = Math.max(maxOrder, t.order ?? 0);
+          for (const a of externalAudios) maxOrder = Math.max(maxOrder, a.order ?? 0);
+          resampledOrder = maxOrder + 10;
+        }
         externalAudios = [...externalAudios, {
           path: res.resampled_audio_path,
-          name: `ENG.VO.AC3.${chStr}.ac3`,
+          name: `${prefix.replace(/ /g, '.')}.${codec}.${chStr}${atmosSuffix.replace(/ /g, '.')}.${fileExt}`,
           label,
           keep: true,
           default: true,
           forced: false,
           delayMs: applyDelay,
           tempoFactor: 1.0, // déjà baked
-          order: maxOrder + 10,
+          order: resampledOrder,
         }];
         psaSyncStatus = 'corrected';
-        psaSyncMessage = `Drift ${tempoRatio.toFixed(6)} resamplé + offset ${applyDelay} ms (conf ${conf.toFixed(2)})`;
-        appendLog(`↻ Sync PSA↔SUPPLY : audio SUPPLY resamplé via atempo + offset ${applyDelay} ms ajouté en externe (conf ${conf.toFixed(2)})`);
+        psaSyncMessage = `Drift ${tempoRatio.toFixed(6)} resamplé (${label}) + offset ${applyDelay} ms (conf ${conf.toFixed(2)})`;
+        appendLog(`↻ Sync PSA↔SUPPLY : ${label} resamplé via atempo + offset ${applyDelay} ms ajouté en externe (conf ${conf.toFixed(2)})`);
       } else {
         // Pas de drift, simple --sync sur la SUPPLY directe.
         secondarySelected = secondarySelected.map(t => {
@@ -1558,14 +1583,64 @@
 
   // ⚡ Automatiser : drop tous audios/subs internes du PSA, prend ceux du SUPPLY,
   // applique les labels LiHDL automatiques, et règle Team=GANDALF + mode série.
+  // Mode PSA : ré-ordonne tous les subs (PSA kept + SUPPLY + externes) selon
+  // la priorité LiHDL (FR avant ENG ; Forced > Full > SDH). Sinon les subs
+  // PSA gardés (order bas hérité du mkv) ou les externes synchronisés (order
+  // élevé) finissent au mauvais endroit.
+  function reorderPSASubs() {
+    const allSubsForOrder = [
+      ...tracks.filter(t => t.type === 'subtitles' && t.keep),
+      ...secondarySelected.filter(t => t.type === 'subtitles'),
+      ...externalSubs,
+    ];
+    allSubsForOrder.sort((a, b) => subLabelPriority(a.label) - subLabelPriority(b.label));
+    let subOrder = 1000;
+    for (const s of allSubsForOrder) {
+      s.order = subOrder;
+      subOrder += 10;
+    }
+    // Force la réactivité Svelte sur les 3 sources mutées.
+    tracks = [...tracks];
+    secondarySelected = [...secondarySelected];
+    externalSubs = [...externalSubs];
+  }
+
   function automate() {
     if (!sourcePath) { appendLog('⚠ Charge d\'abord le fichier PSA'); return; }
     if (!secondaryPath || secondaryTracks.length === 0) {
       appendLog('⚠ Charge un fichier SUPPLY/FW d\'abord');
       return;
     }
-    // 1. Drop audios/subs internes du PSA (keep=false).
-    tracks = tracks.map(t => (t.type === 'audio' || t.type === 'subtitles') ? { ...t, keep: false } : t);
+    // 1. Drop audios PSA (toujours remplacés par SUPPLY). Pour les subs PSA,
+    //    ne décocher QUE ceux dont SUPPLY fournit l'équivalent (même langue +
+    //    même variante Forced/Full/SDH) — sinon on perdrait des subs uniques au
+    //    PSA (typiquement ENG SDH absent du SUPPLY).
+    const supplySubVariants = new Set();
+    for (const st of secondaryTracks) {
+      if (st.type !== 'subtitles') continue;
+      const slang = String(st.language || '').toLowerCase();
+      const baseLang = (slang === 'fre' || slang === 'fra' || slang === 'fr' || slang.startsWith('fr-')) ? 'FR'
+                     : (slang === 'eng' || slang === 'en' || slang.startsWith('en-')) ? 'ENG'
+                     : '';
+      if (!baseLang) continue;
+      const sname = String(st.track_name || '').toLowerCase();
+      const sIsHI = /^hi$/i.test(String(st.mi_service_kind || '')) || /\bsdh\b|sourds|hearing|malentend/i.test(sname);
+      const sVariant = st.forced ? 'Forced' : (sIsHI ? 'SDH' : 'Full');
+      supplySubVariants.add(`${baseLang}|${sVariant}`);
+    }
+    tracks = tracks.map(t => {
+      if (t.type === 'audio') return { ...t, keep: false };
+      if (t.type === 'subtitles') {
+        const lbl = String(t.label || '').toUpperCase();
+        const baseLang = lbl.startsWith('FR ') ? 'FR' : lbl.startsWith('ENG ') ? 'ENG' : '';
+        const variant = /\bFORCED\b/.test(lbl) ? 'Forced' : /\bSDH\b/.test(lbl) ? 'SDH' : 'Full';
+        if (baseLang && supplySubVariants.has(`${baseLang}|${variant}`)) {
+          return { ...t, keep: false };
+        }
+        return t; // pas d'équivalent SUPPLY → on garde le sub PSA
+      }
+      return t;
+    });
     // 2. Construit secondarySelected depuis SUPPLY tracks avec auto-labels.
     // Préserve les modifs utilisateur/checkPSASync/syncSupplySubsToPSA
     // (keep:false, delayMs, tempoRatio) sinon écrasées quand automate est
@@ -1706,6 +1781,8 @@
         }
       }
     }
+
+    reorderPSASubs();
 
     // Debug : log de chaque piste audio avec ses indicateurs Atmos depuis mediainfo
     for (const raw of secondaryTracks) {
@@ -2523,6 +2600,7 @@
       }
       const synced = results.filter(r => r.synced).length;
       appendLog(`✓ ${results.length} sub(s) ajoutés (${synced} synchronisés alass, ${results.length - synced} bruts) — subs SUPPLY décochés`);
+      reorderPSASubs();
     } catch (e) {
       appendLog('❌ Sync subs : ' + String(e));
     } finally {
@@ -2641,12 +2719,21 @@
     const isPGS = codec.includes('PGS') || codec.includes('HDMV');
     const fmt = isPGS ? 'PGS' : 'SRT';
     const forced = !!t.forced;
+    // SDH : mediainfo ServiceKind=HI OU sdh_detected du backend (FR uniquement)
+    // OU track_name explicite (sourds/hearing/SDH/malentendants).
+    const isHI = /^hi$/i.test(String(t.mi_service_kind || '')) ||
+                 /hearing|impair|deaf/i.test(String(t.mi_service_kind_name || ''));
+    const nameHints = String(t.track_name || '') + ' ' + String(t.mi_title || '');
+    const isSDHName = /\bsdh\b|sourds|hearing|malentend/i.test(nameHints);
+    const isSDH = !!t.sdh_detected || isHI || isSDHName;
+    let kind;
+    if (forced) kind = 'Forced';
+    else if (isSDH) kind = 'SDH';
+    else kind = 'Full';
     if (lang === 'fre' || lang === 'fra' || lang === 'fr') {
-      const kind = forced ? 'Forced' : 'Full';
       return `FR ${kind} : ${fmt}`;
     }
     if (lang === 'eng' || lang === 'en') {
-      const kind = forced ? 'Forced' : 'Full';
       return `ENG ${kind} : ${fmt}`;
     }
     return '';
