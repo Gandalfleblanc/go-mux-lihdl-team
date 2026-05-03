@@ -117,7 +117,7 @@ func (a *App) startup(ctx context.Context) {
 
 // AppVersion est lue par le frontend (pill dans le header) et utilisée pour
 // comparer avec la dernière release GitHub lors du check de mise à jour.
-const AppVersion = "v5.6.4"
+const AppVersion = "v5.6.5"
 
 func (a *App) GetVersion() string { return AppVersion }
 
@@ -1813,9 +1813,12 @@ type PSASyncResult struct {
 	FpsRefMkv          float64 `json:"fps_ref_mkv"`
 	FpsCandMkv         float64 `json:"fps_cand_mkv"`
 	TempoRatio         float64 `json:"tempo_ratio"`          // duration_PSA / duration_SUPPLY
-	ResampledAudioPath string  `json:"resampled_audio_path"` // .ac3 SUPPLY atempo'd (vide si pas de drift)
+	ResampledAudioPath string  `json:"resampled_audio_path"` // SUPPLY atempo'd (vide si pas de drift)
 	ResampledChannels  int     `json:"resampled_channels"`
 	ResampledTrackID   int     `json:"resampled_track_id"` // ID de la piste SUPPLY originale (à drop)
+	ResampledLanguage  string  `json:"resampled_language"` // code ISO de la piste resamplée (fre/eng/...)
+	ResampledCodec     string  `json:"resampled_codec"`    // codec de sortie ("AC3" ou "EAC3")
+	ResampledIsAtmos   bool    `json:"resampled_is_atmos"` // true si JOC détecté sur la piste source
 	Error              string  `json:"error"`
 }
 
@@ -1905,16 +1908,103 @@ func (a *App) CheckPSASync(refMkvPath, candMkvPath, lang string) PSASyncResult {
 	res.Confidence = conf
 	res.Method = "chromaprint"
 	res.ResampledTrackID = candTrackID
+	// Renseigne la langue de la piste resamplée (pour le label frontend correct).
+	for _, t := range candInfo.Tracks {
+		if t.ID == candTrackID {
+			res.ResampledLanguage = t.Properties.Language
+			break
+		}
+	}
+
+	// Dual-point chromaprint : mesure l'offset à la fin et compare avec le
+	// début pour calculer le tempo réel (compense un éventuel drift). C'est
+	// PLUS précis que durRef/durCand (qui se base sur la durée container,
+	// faussée par chapitres/scrap). Si pas de drift mesurable → fallback sur
+	// le ratio de durée déjà calculé.
+	if ffmpegEndPath, _ := audiosync.Locate(binDir); ffmpegEndPath != "" {
+		durRef := getMediaDuration(a.ctx, func() string { d, _ := mediainfo.Locate(func() string { dd, _ := config.BinDir(); return dd }()); return d }(), refMkvPath)
+		durCand := getMediaDuration(a.ctx, func() string { d, _ := mediainfo.Locate(func() string { dd, _ := config.BinDir(); return dd }()); return d }(), candMkvPath)
+		windowSec := 60.0
+		if durRef > windowSec*3 && durCand > windowSec*3 {
+			tmpRefEnd := refAudio + ".end.wav"
+			tmpCandEnd := candAudio + ".end.wav"
+			defer os.Remove(tmpRefEnd)
+			defer os.Remove(tmpCandEnd)
+			extractEnd := func(src, dst string, totalDur float64) error {
+				startSec := totalDur - windowSec - 5
+				if startSec < 0 {
+					startSec = 0
+				}
+				cmd := exec.CommandContext(a.ctx, ffmpegEndPath,
+					"-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+					"-ss", fmt.Sprintf("%.3f", startSec),
+					"-i", src,
+					"-t", fmt.Sprintf("%.3f", windowSec),
+					"-map", "0:a:0",
+					"-ac", "1", "-ar", "16000",
+					"-f", "wav", dst,
+				)
+				out, err := cmd.CombinedOutput()
+				if err != nil {
+					return fmt.Errorf("%v — %s", err, string(out))
+				}
+				return nil
+			}
+			if extractEnd(refMkvPath, tmpRefEnd, durRef) == nil && extractEnd(candMkvPath, tmpCandEnd, durCand) == nil {
+				fpEndA, eEA := chromaprint.Fingerprint(a.ctx, fpcalcPath, tmpRefEnd, int(windowSec))
+				fpEndB, eEB := chromaprint.Fingerprint(a.ctx, fpcalcPath, tmpCandEnd, int(windowSec))
+				if eEA == nil && eEB == nil && len(fpEndA) >= 30 && len(fpEndB) >= 30 {
+					endOffsetMs, endConf, _ := chromaprint.FindOffset(fpEndA, fpEndB, 480)
+					if endConf >= 0.5 {
+						// Drift = différence entre offset à la fin et au début.
+						// FindOffset(PSA, SUPPLY) renvoie offset positif si SUPPLY est
+						// décalée plus tard que PSA. Si drift croît positivement →
+						// SUPPLY accumule du retard = SUPPLY plus LENTE → durée
+						// SUPPLY > durée PSA. La convention TempoRatio est PSA/SUPPLY,
+						// donc < 1 dans ce cas. Approximation :
+						//   durSupply ≈ durRef + driftMs/1000
+						//   TempoRatio = durRef / durSupply ≈ 1 - (driftMs/1000)/spanSec
+						endOffsetInt := int(endOffsetMs)
+						driftMs := float64(endOffsetInt - res.OffsetMs)
+						midRefEnd := durRef - windowSec/2 - 5
+						midRefStart := windowSec / 2
+						spanSec := midRefEnd - midRefStart
+						if spanSec > 60 {
+							realTempo := 1.0 - (driftMs/1000.0)/spanSec
+							if realTempo > 0.95 && realTempo < 1.05 {
+								wr.EventsEmit(a.ctx, "log", fmt.Sprintf("📐 Dual-point sync : offset début=%dms / fin=%dms / drift=%.1fms sur %.0fs → tempo réel=%.6f (vs durée=%.6f)", res.OffsetMs, endOffsetInt, driftMs, spanSec, realTempo, res.TempoRatio))
+								res.TempoRatio = realTempo
+							}
+						}
+					}
+				}
+			}
+		}
+	}
 
 	// Si drift FPS détecté (ratio durée != 1) → resample SUPPLY audio via ffmpeg
-	// atempo. Le tempo est BAKED dans le fichier .ac3 → mux fiable, pas dépendant
-	// de l'interprétation mkvmerge --sync ratio.
+	// atempo. Le tempo est BAKED dans le fichier audio → mux fiable, pas dépendant
+	// de l'interprétation mkvmerge --sync ratio. Préserve le codec source
+	// (AC3/EAC3) au lieu de tout convertir en AC3.
 	if math.Abs(res.TempoRatio-1.0) > 0.001 && conf >= 0.5 {
 		ffmpegPath, _ := audiosync.Locate(binDir)
 		if ffmpegPath != "" {
-			// Récupère codec/channels/bitrate via mediainfo pour le ré-encodage.
+			// Détecte codec/channels/bitrate/JOC de la piste cible via mediainfo.
+			// Matching par index audio (audIdx) entre mkv tracks et mediainfo tracks.
 			channels := 6
 			bitrate := 448
+			outCodec := "AC3"
+			outExt := "ac3"
+			isAtmos := false
+			candAudIdx := 0
+			for _, t := range candInfo.Tracks {
+				if t.Type == "audio" {
+					if t.ID == candTrackID {
+						break
+					}
+					candAudIdx++
+				}
+			}
 			if mibin, _ := mediainfo.Locate(func() string { d, _ := config.BinDir(); return d }()); mibin != "" {
 				if mi, err := mediainfo.Identify(a.ctx, mibin, candMkvPath); err == nil {
 					audIdx := 0
@@ -1922,12 +2012,22 @@ func (a *App) CheckPSASync(refMkvPath, candMkvPath, lang string) PSASyncResult {
 						if t.Type != "Audio" {
 							continue
 						}
-						if audIdx == 0 {
+						if audIdx == candAudIdx {
 							if c, err := strconv.Atoi(t.Channels); err == nil && c > 0 {
 								channels = c
 							}
 							if br, err := strconv.Atoi(t.BitRate); err == nil && br > 0 {
 								bitrate = br / 1000
+							}
+							fmtUp := strings.ToUpper(t.Format)
+							if strings.Contains(fmtUp, "E-AC-3") || strings.Contains(fmtUp, "EAC3") {
+								outCodec = "EAC3"
+								outExt = "eac3"
+							}
+							feat := strings.ToUpper(t.FormatAdditionalFeatures)
+							title := strings.ToUpper(t.Title)
+							if strings.Contains(feat, "JOC") || strings.Contains(title, "ATMOS") {
+								isAtmos = true
 							}
 							break
 						}
@@ -1935,18 +2035,17 @@ func (a *App) CheckPSASync(refMkvPath, candMkvPath, lang string) PSASyncResult {
 					}
 				}
 			}
-			// Convention ResampleAudioFile : tempo > 1 = audio plus rapide (durée
-			// plus courte). On veut SUPPLY de durée durSupply → durée durRef,
-			// donc tempo = durSupply/durRef = 1/TempoRatio.
+			res.ResampledCodec = outCodec
+			res.ResampledIsAtmos = isAtmos
 			tempoForResample := 1.0 / res.TempoRatio
-			outputPath := candAudio + ".resampled.ac3"
-			rerr := audiosync.ResampleAudioFile(a.ctx, ffmpegPath, candAudio, outputPath, "ac3", channels, bitrate, tempoForResample)
+			outputPath := candAudio + ".resampled." + outExt
+			rerr := audiosync.ResampleAudioFile(a.ctx, ffmpegPath, candAudio, outputPath, outExt, channels, bitrate, tempoForResample)
 			if rerr != nil {
 				wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ Resample SUPPLY audio : %s", rerr.Error()))
 			} else {
 				res.ResampledAudioPath = outputPath
 				res.ResampledChannels = channels
-				wr.EventsEmit(a.ctx, "log", fmt.Sprintf("🔄 Audio SUPPLY resamplé via atempo=%.6f → %s", tempoForResample, filepath.Base(outputPath)))
+				wr.EventsEmit(a.ctx, "log", fmt.Sprintf("🔄 Audio SUPPLY (%s%s) resamplé via atempo=%.6f → %s", outCodec, map[bool]string{true: " ATMOS"}[isAtmos], tempoForResample, filepath.Base(outputPath)))
 			}
 		}
 	}

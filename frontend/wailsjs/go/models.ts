@@ -332,6 +332,9 @@ export namespace main {
 	    resampled_audio_path: string;
 	    resampled_channels: number;
 	    resampled_track_id: number;
+	    resampled_language: string;
+	    resampled_codec: string;
+	    resampled_is_atmos: boolean;
 	    error: string;
 	
 	    static createFrom(source: any = {}) {
@@ -349,6 +352,9 @@ export namespace main {
 	        this.resampled_audio_path = source["resampled_audio_path"];
 	        this.resampled_channels = source["resampled_channels"];
 	        this.resampled_track_id = source["resampled_track_id"];
+	        this.resampled_language = source["resampled_language"];
+	        this.resampled_codec = source["resampled_codec"];
+	        this.resampled_is_atmos = source["resampled_is_atmos"];
 	        this.error = source["error"];
 	    }
 	}
