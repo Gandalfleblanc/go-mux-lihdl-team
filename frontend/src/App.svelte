@@ -1611,10 +1611,17 @@
       appendLog('⚠ Charge un fichier SUPPLY/FW d\'abord');
       return;
     }
+    // Détection mode FASTSUB.VOSTFR / UNFR : pas de doublage FR, juste un sub
+    // FR à coller sur la VO ENG. Dans ce cas on drop TOUS les autres subs
+    // (PSA + SUPPLY non-FR) et on garde UNIQUEMENT le sub FR du SUPPLY.
+    const langFlagEarly = String(target.flagOverride || '').toUpperCase();
+    const supplyName = String(secondaryPath || '').toUpperCase();
+    const isUnfrFastsub = /FASTSUB|VOSTFR/.test(langFlagEarly) || /UNFR/.test(supplyName);
     // 1. Drop audios PSA (toujours remplacés par SUPPLY). Pour les subs PSA,
     //    ne décocher QUE ceux dont SUPPLY fournit l'équivalent (même langue +
     //    même variante Forced/Full/SDH) — sinon on perdrait des subs uniques au
     //    PSA (typiquement ENG SDH absent du SUPPLY).
+    //    En mode UNFR/FASTSUB : DROP TOUS les subs PSA d'office.
     const supplySubVariants = new Set();
     for (const st of secondaryTracks) {
       if (st.type !== 'subtitles') continue;
@@ -1631,6 +1638,7 @@
     tracks = tracks.map(t => {
       if (t.type === 'audio') return { ...t, keep: false };
       if (t.type === 'subtitles') {
+        if (isUnfrFastsub) return { ...t, keep: false }; // mode UNFR : drop tous les subs PSA
         const lbl = String(t.label || '').toUpperCase();
         const baseLang = lbl.startsWith('FR ') ? 'FR' : lbl.startsWith('ENG ') ? 'ENG' : '';
         const variant = /\bFORCED\b/.test(lbl) ? 'Forced' : /\bSDH\b/.test(lbl) ? 'SDH' : 'Full';
@@ -1695,11 +1703,20 @@
         else                                      language = lang || 'und';
         // Norme PSA : on garde les subs FR + ENG (toutes variantes).
         // Les autres langues sont filtrées (return null).
+        // En mode UNFR/FASTSUB : on garde UNIQUEMENT le sub FR (pas l'ENG).
         const isFRsub = /^FR /.test(label);
         const isENGsub = /^ENG /.test(label);
-        if (!isFRsub && !isENGsub) return null;
+        if (isUnfrFastsub) {
+          if (!isFRsub) return null;
+        } else {
+          if (!isFRsub && !isENGsub) return null;
+        }
         const isForcedFR = /^FR( VFF)? Forced\b/.test(label);
-        if (isForcedFR) {
+        // En mode UNFR/FASTSUB : 1er sub FR (peu importe Forced ou Full) → default+forced
+        if (isUnfrFastsub && isFRsub) {
+          defaultFlag = true;
+          forcedFlag = true;
+        } else if (isForcedFR) {
           defaultFlag = true;
           forcedFlag = true;
         } else {
@@ -2567,7 +2584,7 @@
       } else {
         appendLog(`🔎 Sync subs SUPPLY → PSA via alass…`);
       }
-      const results = await SyncSupplySubsToPSA(sourcePath, secondaryPath, psaSyncOffsetMs, psaSyncTempoRatio || 1.0);
+      const results = await SyncSupplySubsToPSA(sourcePath, secondaryPath, psaSyncOffsetMs, psaSyncTempoRatio || 1.0, psaSyncedSourceMkv || '');
       if (!results || results.length === 0) {
         appendLog('ℹ Aucun sub FR/ENG texte trouvé dans SUPPLY');
         return;

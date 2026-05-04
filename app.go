@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -117,7 +118,7 @@ func (a *App) startup(ctx context.Context) {
 
 // AppVersion est lue par le frontend (pill dans le header) et utilisée pour
 // comparer avec la dernière release GitHub lors du check de mise à jour.
-const AppVersion = "v5.6.5"
+const AppVersion = "v5.6.6"
 
 func (a *App) GetVersion() string { return AppVersion }
 
@@ -1581,12 +1582,12 @@ type SyncedSubResult struct {
 // à ajouter comme externalSubs côté frontend.
 // SyncSupplySubsToPSA extrait les subs FR/ENG du SUPPLY et les synchronise sur
 // PSA. Stratégie (façon Subtitle Edit) :
-//  1. Toujours tenter alass MULTI-SPLIT sub→sub avec une ref PSA texte si dispo
-//     (sub→audio en fallback si la PSA n'a aucun sub texte). Multi-split gère
-//     les décalages variables (intro coupée, scènes différentes).
-//  2. Si alass échoue ET qu'on a offset/tempo audio → tempoShift comme filet.
-//  3. Sinon → sub brut.
-func (a *App) SyncSupplySubsToPSA(psaMkvPath, supplyMkvPath string, offsetMs int, tempoRatio float64) ([]SyncedSubResult, error) {
+//  1. Si syncedMkvPath fourni (card 3 MKV synchro) avec audio FR : utiliser
+//     SON audio comme ref alass (sub FR vs audio FR même langue = match précis).
+//  2. Sinon : alass MULTI-SPLIT sub→audio_PSA (langue diff = moins précis).
+//  3. Si alass échoue ET offset/tempo audio dispo → tempoShift filet.
+//  4. Sinon → sub brut.
+func (a *App) SyncSupplySubsToPSA(psaMkvPath, supplyMkvPath string, offsetMs int, tempoRatio float64, syncedMkvPath string) ([]SyncedSubResult, error) {
 	if psaMkvPath == "" || supplyMkvPath == "" {
 		return nil, errors.New("chemins PSA ou SUPPLY manquants")
 	}
@@ -1617,7 +1618,62 @@ func (a *App) SyncSupplySubsToPSA(psaMkvPath, supplyMkvPath string, offsetMs int
 	// sur l'audio est la vérité terrain — bien plus fiable que sub→sub
 	// (qui aligne juste des timestamps de blocs sans regarder le contenu).
 	// alass se charge d'extraire l'audio via ffmpeg en interne.
+	// Préfère le MKV synchro (card 3) comme ref alass si fourni : il contient
+	// l'audio FR ALIGNÉ sur PSA. Aligner sub FR sur audio FR (même langue) =
+	// matching alass nettement plus fiable que sub FR sur audio ENG.
 	psaRefForAlass := psaMkvPath
+	if syncedMkvPath != "" {
+		psaRefForAlass = syncedMkvPath
+		wr.EventsEmit(a.ctx, "log", "🎯 alass ref = MKV synchro (audio FR aligné PSA — match plus précis)")
+	}
+	// PRIORITÉ 1 : extraire un sub PSA texte comme ref alass — sub→sub par
+	// timestamps est plus précis que sub→audio quand le drift audio est gros.
+	// Ordre : FR > ENG > toute autre langue. Override si succès.
+	psaRefLang := ""
+	if psaInfo, perr := mkvtool.Identify(a.ctx, binary, psaMkvPath); perr == nil && psaInfo != nil {
+		isText := func(t mkvtool.Track) bool {
+			c := strings.ToUpper(t.Properties.CodecID)
+			return strings.Contains(c, "TEXT") || strings.Contains(c, "UTF") || strings.Contains(c, "ASS") || strings.Contains(c, "SSA")
+		}
+		nbTextSubs := 0
+		for _, t := range psaInfo.Tracks {
+			if t.Type == "subtitles" && isText(t) {
+				nbTextSubs++
+			}
+		}
+		wr.EventsEmit(a.ctx, "log", fmt.Sprintf("🔎 PSA : %d sub(s) texte trouvé(s) pour ref alass", nbTextSubs))
+		tryExtract := func(predicate func(string) bool, label string) bool {
+			for _, t := range psaInfo.Tracks {
+				if t.Type != "subtitles" || !isText(t) {
+					continue
+				}
+				if !predicate(strings.ToLower(t.Properties.Language)) {
+					continue
+				}
+				if extracted, eerr := mkvtool.ExtractTrackToTemp(a.ctx, binary, psaMkvPath, t.ID, "srt"); eerr == nil {
+					psaRefForAlass = extracted
+					psaRefLang = label
+					return true
+				}
+			}
+			return false
+		}
+		if !tryExtract(func(l string) bool {
+			return l == "fre" || l == "fra" || l == "fr" || strings.HasPrefix(l, "fr-")
+		}, "FR") {
+			if !tryExtract(func(l string) bool {
+				return l == "eng" || l == "en" || strings.HasPrefix(l, "en-")
+			}, "ENG") {
+				tryExtract(func(l string) bool { return true }, "any")
+			}
+		}
+		if psaRefLang != "" {
+			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("📝 Sub %s PSA extrait → ref alass sub→sub (matching par timestamps précis)", psaRefLang))
+			defer os.Remove(psaRefForAlass)
+		} else {
+			wr.EventsEmit(a.ctx, "log", "⚠ Aucun sub PSA texte extractible — fallback alass sub→audio")
+		}
+	}
 	results := []SyncedSubResult{}
 	for _, t := range supplyInfo.Tracks {
 		if t.Type != "subtitles" {
@@ -1641,9 +1697,19 @@ func (a *App) SyncSupplySubsToPSA(psaMkvPath, supplyMkvPath string, offsetMs int
 			continue
 		}
 		outputPath := strings.TrimSuffix(srtPath, filepath.Ext(srtPath)) + ".synced.srt"
+		// Détecte SDH via track_name (mots-clés "sdh", "sourds", "hearing",
+		// "malentend") ou via codec_id contenant "HI". Forced > SDH > Full.
 		variant := "Full"
+		nameHints := strings.ToLower(t.Properties.TrackName)
+		isSDH := strings.Contains(nameHints, "sdh") ||
+			strings.Contains(nameHints, "sourds") ||
+			strings.Contains(nameHints, "hearing") ||
+			strings.Contains(nameHints, "malentend") ||
+			strings.Contains(nameHints, "deaf")
 		if t.Properties.ForcedTrack {
 			variant = "Forced"
+		} else if isSDH {
+			variant = "SDH"
 		}
 		var label, langCode string
 		if isFR {
@@ -1657,18 +1723,47 @@ func (a *App) SyncSupplySubsToPSA(psaMkvPath, supplyMkvPath string, offsetMs int
 		if isFR && variant == "Forced" {
 			sr.Default = true
 		}
-		// alass MULTI-SPLIT sub→audio_PSA. VAD audio = vérité terrain.
+		// Forced subs COURTS (<200 lignes) : ne PAS toucher (timing court +
+		// alass peut faux-matcher sur peu de subs et les casser). Sub brut.
+		// Forced LONGS (≥200 lignes) = sub principal FASTSUB/VOSTFR marqué
+		// forced — on doit le synchroniser via alass comme un sub normal.
+		if variant == "Forced" {
+			nbLines := countSRTEntries(srtPath)
+			if nbLines < 200 {
+				sr.Path = srtPath
+				sr.Synced = false
+				sr.OffsetMs = 0
+				wr.EventsEmit(a.ctx, "log", fmt.Sprintf("ℹ sub #%d Forced court (%d lignes) : utilisé brut (pas alass)", t.ID, nbLines))
+				results = append(results, sr)
+				continue
+			}
+			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("ℹ sub #%d Forced long (%d lignes = sub principal FASTSUB) → alass", t.ID, nbLines))
+		}
+		// alass MULTI-SPLIT. Si on a extrait un sub PSA texte (psaRefLang != ""),
+		// on fait sub→sub (matching par timestamps). Sinon sub→audio (VAD).
 		// noSplit=false → gère les décalages variables (intro coupée, etc.).
 		// disableFPSGuessing=false → laisse alass deviner si drift FPS.
-		wr.EventsEmit(a.ctx, "log", fmt.Sprintf("🔎 alass multi-split sub #%d (%s) vs audio PSA…", t.ID, lang))
+		refDesc := "audio PSA"
+		if psaRefLang != "" {
+			refDesc = "sub " + psaRefLang + " PSA"
+		}
+		wr.EventsEmit(a.ctx, "log", fmt.Sprintf("🔎 alass multi-split sub #%d (%s) vs %s…", t.ID, lang, refDesc))
 		res, syncErr := alass.Sync(a.ctx, alassPath, psaRefForAlass, srtPath, outputPath, false, false, binDir)
-		if syncErr == nil && res != nil {
+		// Garde-fou : si alass propose un shift aberrant (>60s), c'est un faux
+		// match catastrophique. Sinon on accepte (drifts type Hunting Party
+		// peuvent atteindre 8-10s légitimement).
+		const maxReasonableShiftMs = 60000
+		alassShiftReasonable := res != nil && res.OffsetMs > -maxReasonableShiftMs && res.OffsetMs < maxReasonableShiftMs
+		if syncErr == nil && res != nil && alassShiftReasonable {
 			sr.Path = res.OutputPath
 			sr.Synced = true
 			sr.OffsetMs = res.OffsetMs
 			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("✓ sub #%d : alass multi-split OK, shift max %d ms (%s)", t.ID, res.OffsetMs, label))
 			results = append(results, sr)
 			continue
+		}
+		if res != nil && !alassShiftReasonable {
+			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ sub #%d : alass shift aberrant (%d ms > ±5s) → rejeté, fallback offset audio", t.ID, res.OffsetMs))
 		}
 		// 2. alass a échoué → fallback tempoShift si on a offset/tempo audio.
 		alassErr := "résultat vide"
@@ -1888,25 +1983,40 @@ func (a *App) CheckPSASync(refMkvPath, candMkvPath, lang string) PSASyncResult {
 		return res
 	}
 	defer os.Remove(candAudio)
-	// Fingerprints + offset.
+	// Fingerprints + offset (mesure initiale, best-effort). Si fpcalc échoue
+	// ou fingerprints trop courts, on continue vers le multi-point qui est
+	// autonome (utilise ffmpeg + cross-correlation, pas fpcalc).
+	var offsetMs float64
+	var conf float64
+	chromaprintOK := true
 	fpA, eA := chromaprint.Fingerprint(a.ctx, fpcalcPath, refAudio, 600)
 	if eA != nil {
-		res.Error = "fingerprint PSA : " + eA.Error()
-		return res
+		wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ chromaprint PSA fail (%s) — skip vers multi-point", eA.Error()))
+		chromaprintOK = false
 	}
-	fpB, eB := chromaprint.Fingerprint(a.ctx, fpcalcPath, candAudio, 600)
-	if eB != nil {
-		res.Error = "fingerprint SUPPLY : " + eB.Error()
-		return res
+	if chromaprintOK {
+		fpB, eB := chromaprint.Fingerprint(a.ctx, fpcalcPath, candAudio, 600)
+		if eB != nil {
+			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ chromaprint SUPPLY fail (%s) — skip vers multi-point", eB.Error()))
+			chromaprintOK = false
+		} else if len(fpA) < 30 || len(fpB) < 30 {
+			wr.EventsEmit(a.ctx, "log", "⚠ fingerprints trop courts — skip vers multi-point")
+			chromaprintOK = false
+		} else {
+			offsetMs, conf, _ = chromaprint.FindOffset(fpA, fpB, 480) // ±60s
+		}
 	}
-	if len(fpA) < 30 || len(fpB) < 30 {
-		res.Error = "fingerprints trop courts"
-		return res
+	if chromaprintOK {
+		res.OffsetMs = int(offsetMs)
+		res.Confidence = conf
+		res.Method = "chromaprint"
+	} else {
+		// Valeurs par défaut si chromaprint a échoué — le multi-point va override.
+		res.OffsetMs = 0
+		res.Confidence = 0.5
+		res.Method = "multi-point-only"
+		conf = 0.5 // permet au flow drift/resample d'aval de continuer
 	}
-	offsetMs, conf, _ := chromaprint.FindOffset(fpA, fpB, 480) // ±60s
-	res.OffsetMs = int(offsetMs)
-	res.Confidence = conf
-	res.Method = "chromaprint"
 	res.ResampledTrackID = candTrackID
 	// Renseigne la langue de la piste resamplée (pour le label frontend correct).
 	for _, t := range candInfo.Tracks {
@@ -1916,68 +2026,233 @@ func (a *App) CheckPSASync(refMkvPath, candMkvPath, lang string) PSASyncResult {
 		}
 	}
 
-	// Dual-point chromaprint : mesure l'offset à la fin et compare avec le
-	// début pour calculer le tempo réel (compense un éventuel drift). C'est
-	// PLUS précis que durRef/durCand (qui se base sur la durée container,
-	// faussée par chapitres/scrap). Si pas de drift mesurable → fallback sur
-	// le ratio de durée déjà calculé.
+	// État partagé entre multi-point et resample (pour permettre multi-segment
+	// atempo plus bas si on a plusieurs points fiables).
+	type pointMeasure struct {
+		t          float64
+		offsetMs   float64
+		confidence float64
+	}
+	var sharedMeasures []pointMeasure
+	var sharedDurRef, sharedSlope, sharedIntercept float64
+	var sharedRegressionOK bool
+
+	// Multi-point chromaprint : mesure l'offset à N points uniformes dans la
+	// durée du contenu, garde uniquement les points à confidence haute, puis
+	// régression linéaire pour calculer offset_initial + tempo réel. BIEN plus
+	// robuste qu'un point unique (qui peut être faussé par : générique différent,
+	// silence, musique répétitive, faux match chromaprint).
 	if ffmpegEndPath, _ := audiosync.Locate(binDir); ffmpegEndPath != "" {
-		durRef := getMediaDuration(a.ctx, func() string { d, _ := mediainfo.Locate(func() string { dd, _ := config.BinDir(); return dd }()); return d }(), refMkvPath)
-		durCand := getMediaDuration(a.ctx, func() string { d, _ := mediainfo.Locate(func() string { dd, _ := config.BinDir(); return dd }()); return d }(), candMkvPath)
+		mibinM, _ := mediainfo.Locate(func() string { dd, _ := config.BinDir(); return dd }())
+		durRef := getMediaDuration(a.ctx, mibinM, refMkvPath)
+		durCand := getMediaDuration(a.ctx, mibinM, candMkvPath)
+		sharedDurRef = durRef
 		windowSec := 60.0
-		if durRef > windowSec*3 && durCand > windowSec*3 {
-			tmpRefEnd := refAudio + ".end.wav"
-			tmpCandEnd := candAudio + ".end.wav"
-			defer os.Remove(tmpRefEnd)
-			defer os.Remove(tmpCandEnd)
-			extractEnd := func(src, dst string, totalDur float64) error {
-				startSec := totalDur - windowSec - 5
-				if startSec < 0 {
-					startSec = 0
+		nPoints := 5
+		// Échantillons uniquement dans la zone commune et utile (skip 30s en début et fin
+		// pour éviter intro/générique qui souvent diffèrent entre PSA et SUPPLY).
+		usableMin := math.Max(durRef, durCand) // pour échantillonner sur ref
+		usableMax := math.Min(durRef, durCand) - 30.0
+		_ = usableMin
+		if usableMax > windowSec*3+60 {
+			type measure = pointMeasure
+			measures := []measure{}
+			startMin := 30.0 // skip les 30 premières secondes
+			endMax := usableMax - windowSec
+			// Channel 3 (Center = dialogue) seul, pas de downmix :
+			// "pan=mono|c0=c2" → enveloppe RMS du dialogue uniquement.
+			// Le dialogue est bien plus distinctif que le mix musique/effets/
+			// ambiance pour le matching cross-correlation, et reste calé
+			// au même timing entre PSA et SUPPLY (juste la langue change).
+			// Fallback automatique si la piste a moins de 3 channels.
+			audioFilter := "pan=mono|c0=c2"
+			if endMax > startMin {
+				for i := 0; i < nPoints; i++ {
+					t := startMin + float64(i)*(endMax-startMin)/float64(nPoints-1)
+					envRef, errR := audiosync.ExtractChannelEnvelopeRange(a.ctx, ffmpegEndPath, refMkvPath, t, windowSec, audioFilter)
+					if errR != nil {
+						continue
+					}
+					envCand, errC := audiosync.ExtractChannelEnvelopeRange(a.ctx, ffmpegEndPath, candMkvPath, t, windowSec, audioFilter)
+					if errC != nil {
+						continue
+					}
+					off, c := audiosync.CrossCorrelate(envRef, envCand, 10000) // ±10s
+					measures = append(measures, measure{t: t + windowSec/2, offsetMs: float64(off), confidence: c})
+					wr.EventsEmit(a.ctx, "log", fmt.Sprintf("📍 Point %d/%d @ t=%.0fs : offset=%dms (conf=%.2f)", i+1, nPoints, t+windowSec/2, off, c))
 				}
-				cmd := exec.CommandContext(a.ctx, ffmpegEndPath,
-					"-hide_banner", "-loglevel", "error", "-nostdin", "-y",
-					"-ss", fmt.Sprintf("%.3f", startSec),
-					"-i", src,
-					"-t", fmt.Sprintf("%.3f", windowSec),
-					"-map", "0:a:0",
-					"-ac", "1", "-ar", "16000",
-					"-f", "wav", dst,
-				)
-				out, err := cmd.CombinedOutput()
-				if err != nil {
-					return fmt.Errorf("%v — %s", err, string(out))
-				}
-				return nil
 			}
-			if extractEnd(refMkvPath, tmpRefEnd, durRef) == nil && extractEnd(candMkvPath, tmpCandEnd, durCand) == nil {
-				fpEndA, eEA := chromaprint.Fingerprint(a.ctx, fpcalcPath, tmpRefEnd, int(windowSec))
-				fpEndB, eEB := chromaprint.Fingerprint(a.ctx, fpcalcPath, tmpCandEnd, int(windowSec))
-				if eEA == nil && eEB == nil && len(fpEndA) >= 30 && len(fpEndB) >= 30 {
-					endOffsetMs, endConf, _ := chromaprint.FindOffset(fpEndA, fpEndB, 480)
-					if endConf >= 0.5 {
-						// Drift = différence entre offset à la fin et au début.
-						// FindOffset(PSA, SUPPLY) renvoie offset positif si SUPPLY est
-						// décalée plus tard que PSA. Si drift croît positivement →
-						// SUPPLY accumule du retard = SUPPLY plus LENTE → durée
-						// SUPPLY > durée PSA. La convention TempoRatio est PSA/SUPPLY,
-						// donc < 1 dans ce cas. Approximation :
-						//   durSupply ≈ durRef + driftMs/1000
-						//   TempoRatio = durRef / durSupply ≈ 1 - (driftMs/1000)/spanSec
-						endOffsetInt := int(endOffsetMs)
-						driftMs := float64(endOffsetInt - res.OffsetMs)
-						midRefEnd := durRef - windowSec/2 - 5
-						midRefStart := windowSec / 2
-						spanSec := midRefEnd - midRefStart
-						if spanSec > 60 {
-							realTempo := 1.0 - (driftMs/1000.0)/spanSec
-							if realTempo > 0.95 && realTempo < 1.05 {
-								wr.EventsEmit(a.ctx, "log", fmt.Sprintf("📐 Dual-point sync : offset début=%dms / fin=%dms / drift=%.1fms sur %.0fs → tempo réel=%.6f (vs durée=%.6f)", res.OffsetMs, endOffsetInt, driftMs, spanSec, realTempo, res.TempoRatio))
-								res.TempoRatio = realTempo
-							}
-						}
+			// Stratégie en 2 temps :
+			// 1. Si TOUS les points sont en haute conf (≥0.7) → régression
+			//    linéaire complète (gère le drift linéaire fort, ex: -3ms/s sur
+			//    41 min = écart de 8s en fin d'épisode).
+			// 2. Sinon → filtre médiane outliers + régression sur inliers
+			//    (gère les faux matches type silence/musique répétitive).
+			doRegressionAll := func(pts []measure) (slope, intercept, r2 float64, ok bool) {
+				if len(pts) < 3 {
+					return 0, 0, 0, false
+				}
+				var sumT, sumO, sumTT, sumTO float64
+				nn := float64(len(pts))
+				for _, m := range pts {
+					sumT += m.t
+					sumO += m.offsetMs
+					sumTT += m.t * m.t
+					sumTO += m.t * m.offsetMs
+				}
+				meanT := sumT / nn
+				meanO := sumO / nn
+				denom := sumTT - nn*meanT*meanT
+				if math.Abs(denom) < 1e-6 {
+					return 0, 0, 0, false
+				}
+				slope = (sumTO - nn*meanT*meanO) / denom
+				intercept = meanO - slope*meanT
+				// R² coefficient de détermination
+				var sse, sst float64
+				for _, m := range pts {
+					pred := slope*m.t + intercept
+					sse += (m.offsetMs - pred) * (m.offsetMs - pred)
+					sst += (m.offsetMs - meanO) * (m.offsetMs - meanO)
+				}
+				if sst < 1e-6 {
+					r2 = 1.0
+				} else {
+					r2 = 1.0 - sse/sst
+				}
+				return slope, intercept, r2, true
+			}
+			allHighConf := len(measures) >= 3
+			for _, m := range measures {
+				if m.confidence < 0.7 {
+					allHighConf = false
+					break
+				}
+			}
+			// Phase 1 : régression sur tous les points si tous haute conf.
+			// Convention TempoRatio = T_PSA / T_SUPPLY (>1 si SUPPLY plus court,
+			// <1 si SUPPLY plus long). Le slope du fit linéaire offset(t) :
+			//   - slope > 0 (offset positif croissant) = SUPPLY plus rapide →
+			//     T_SUPPLY < T_PSA → TempoRatio > 1 → atempo > 1 (raccourcit SUPPLY)
+			//   - slope < 0 (offset négatif décroissant) = SUPPLY plus lente →
+			//     T_SUPPLY > T_PSA → TempoRatio < 1 → atempo > 1 aussi
+			// Wait, dans les 2 cas atempo > 1 ? Non :
+			//   - SUPPLY plus rapide : faut RALENTIR (atempo < 1) pour allonger
+			//   - SUPPLY plus lente : faut ACCÉLÉRER (atempo > 1) pour raccourcir
+			// Donc : TempoRatio = 1 + slope/1000 (positif si slope+, négatif si slope-)
+			//        et atempo = 1/TempoRatio
+			// Critère "décalage trop important" → sync auto IMPOSSIBLE.
+			// On préfère lâcher et demander à l'user un MKV synchro via la
+			// card 3 plutôt que de produire un audio mal resamplé.
+			var maxAbsOffset float64
+			for _, m := range measures {
+				if math.Abs(m.offsetMs) > maxAbsOffset {
+					maxAbsOffset = math.Abs(m.offsetMs)
+				}
+			}
+			if maxAbsOffset > 5000 {
+				wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ Décalage audio trop important (%.0fms max) — sync auto IMPOSSIBLE. Fournis un MKV synchro via la card ③.", maxAbsOffset))
+				res.Method = "sync-impossible"
+				res.OffsetMs = 0
+				res.TempoRatio = 1.0
+				res.Error = "Décalage trop important — sync auto impossible. Fournis un MKV synchro via la card ③ Source MKV synchro."
+				return res
+			}
+
+			regressionApplied := false
+			if allHighConf {
+				slope, intercept, r2, ok := doRegressionAll(measures)
+				if ok && r2 >= 0.85 {
+					realTempo := 1.0 + slope/1000.0
+					if realTempo > 0.95 && realTempo < 1.05 {
+						realOffsetMs := int(intercept)
+						wr.EventsEmit(a.ctx, "log", fmt.Sprintf("📐 Multi-point sync (régression complète, R²=%.3f) : %d points → offset=%dms, tempo=%.6f (drift=%.2fms/s)", r2, len(measures), realOffsetMs, realTempo, slope))
+						res.OffsetMs = realOffsetMs
+						res.TempoRatio = realTempo
+						regressionApplied = true
+						// Partage les measures pour usage multi-segment au resample
+						sharedMeasures = measures
+						sharedSlope = slope
+						sharedIntercept = intercept
+						sharedRegressionOK = true
 					}
 				}
+				if !regressionApplied {
+					wr.EventsEmit(a.ctx, "log", fmt.Sprintf("ℹ Régression complète R²=%.3f insuffisant → fallback médiane outliers", r2))
+				}
+			}
+			// Phase 2 : filtre médiane outliers + régression sur inliers
+			// (uniquement si phase 1 n'a pas appliqué un fit linéaire valide).
+			if !regressionApplied && len(measures) >= 3 {
+				// Médiane des offsets
+				offsets := make([]float64, len(measures))
+				for i, m := range measures {
+					offsets[i] = m.offsetMs
+				}
+				sort.Float64s(offsets)
+				var medianOffset float64
+				if len(offsets)%2 == 1 {
+					medianOffset = offsets[len(offsets)/2]
+				} else {
+					medianOffset = (offsets[len(offsets)/2-1] + offsets[len(offsets)/2]) / 2
+				}
+				// Inliers = points proches de la médiane (±2s)
+				inliers := []measure{}
+				outliers := []measure{}
+				for _, m := range measures {
+					if math.Abs(m.offsetMs-medianOffset) <= 2000 {
+						inliers = append(inliers, m)
+					} else {
+						outliers = append(outliers, m)
+					}
+				}
+				if len(outliers) > 0 {
+					wr.EventsEmit(a.ctx, "log", fmt.Sprintf("🚫 Multi-point : %d outlier(s) rejeté(s) (médiane=%.0fms, écart >2s)", len(outliers), medianOffset))
+				}
+				if len(inliers) >= 3 {
+					// Régression linéaire sur inliers
+					var sumT, sumO, sumTT, sumTO float64
+					nn := float64(len(inliers))
+					for _, m := range inliers {
+						sumT += m.t
+						sumO += m.offsetMs
+						sumTT += m.t * m.t
+						sumTO += m.t * m.offsetMs
+					}
+					meanT := sumT / nn
+					meanO := sumO / nn
+					denom := sumTT - nn*meanT*meanT
+					if math.Abs(denom) > 1e-6 {
+						slope := (sumTO - nn*meanT*meanO) / denom
+						intercept := meanO - slope*meanT
+						realTempo := 1.0 + slope/1000.0 // signe inversé : voir convention phase 1
+						realOffsetMs := int(intercept)
+						if realTempo > 0.95 && realTempo < 1.05 {
+							// Si pente faible (drift < 0.5 ms/s sur l'épisode) → offset constant
+							if math.Abs(slope) < 0.5 {
+								avgOffset := int(meanO)
+								wr.EventsEmit(a.ctx, "log", fmt.Sprintf("📐 Multi-point sync : %d inliers, drift négligeable (%.2fms/s) → offset constant=%dms, tempo=1.0", len(inliers), slope, avgOffset))
+								res.OffsetMs = avgOffset
+								res.TempoRatio = 1.0
+							} else {
+								wr.EventsEmit(a.ctx, "log", fmt.Sprintf("📐 Multi-point sync : %d inliers → offset=%dms, tempo=%.6f (drift=%.2fms/s)", len(inliers), realOffsetMs, realTempo, slope))
+								res.OffsetMs = realOffsetMs
+								res.TempoRatio = realTempo
+							}
+						} else {
+							wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ Multi-point : tempo aberrant (%.6f) → offset médian, tempo=1.0", realTempo))
+							res.OffsetMs = int(medianOffset)
+							res.TempoRatio = 1.0
+						}
+					}
+				} else if len(inliers) >= 1 {
+					// Pas assez pour régression, mais on a une médiane fiable
+					wr.EventsEmit(a.ctx, "log", fmt.Sprintf("📐 Multi-point sync : %d inlier(s) → offset médian=%.0fms, tempo=1.0", len(inliers), medianOffset))
+					res.OffsetMs = int(medianOffset)
+					res.TempoRatio = 1.0
+				}
+			} else {
+				wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ Multi-point : seulement %d points mesurés — fallback durée", len(measures)))
 			}
 		}
 	}
@@ -2037,15 +2312,90 @@ func (a *App) CheckPSASync(refMkvPath, candMkvPath, lang string) PSASyncResult {
 			}
 			res.ResampledCodec = outCodec
 			res.ResampledIsAtmos = isAtmos
-			tempoForResample := 1.0 / res.TempoRatio
-			outputPath := candAudio + ".resampled." + outExt
-			rerr := audiosync.ResampleAudioFile(a.ctx, ffmpegPath, candAudio, outputPath, outExt, channels, bitrate, tempoForResample)
-			if rerr != nil {
-				wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ Resample SUPPLY audio : %s", rerr.Error()))
-			} else {
-				res.ResampledAudioPath = outputPath
-				res.ResampledChannels = channels
-				wr.EventsEmit(a.ctx, "log", fmt.Sprintf("🔄 Audio SUPPLY (%s%s) resamplé via atempo=%.6f → %s", outCodec, map[bool]string{true: " ATMOS"}[isAtmos], tempoForResample, filepath.Base(outputPath)))
+			// Si on a au moins 3 measures haute conf + une régression OK →
+			// MULTI-SEGMENT : atempo individuel par segment pour gérer les
+			// drifts non-linéaires (résiduels après régression linéaire).
+			// Sinon → single atempo global (fallback simple).
+			useMultiSegment := sharedRegressionOK && len(sharedMeasures) >= 3 && sharedDurRef > 0
+			if useMultiSegment {
+				segs := []audiosync.SyncSegment{}
+				offsetAt := func(t float64) float64 { return sharedSlope*t + sharedIntercept }
+				supplyAt := func(t float64) float64 { return t + (-offsetAt(t))/1000.0 }
+				addSeg := func(psaA, psaB, supA, supB float64) {
+					if psaB-psaA <= 0.5 || supB-supA <= 0.5 {
+						return
+					}
+					if supA < 0 {
+						supA = 0
+					}
+					segs = append(segs, audiosync.SyncSegment{
+						PsaStart: psaA, PsaEnd: psaB,
+						SupplyStart: supA, SupplyEnd: supB,
+						Atempo: (supB - supA) / (psaB - psaA),
+					})
+				}
+				// Segment 0 : 0 → 1er point
+				if sharedMeasures[0].t > 1 {
+					addSeg(0, sharedMeasures[0].t,
+						supplyAt(0), sharedMeasures[0].t+(-sharedMeasures[0].offsetMs)/1000.0)
+				}
+				// Segments inter-points
+				for i := 0; i < len(sharedMeasures)-1; i++ {
+					a1, b1 := sharedMeasures[i].t, sharedMeasures[i+1].t
+					sA := a1 + (-sharedMeasures[i].offsetMs)/1000.0
+					sB := b1 + (-sharedMeasures[i+1].offsetMs)/1000.0
+					addSeg(a1, b1, sA, sB)
+				}
+				// Segment final : dernier point → fin du PSA
+				last := sharedMeasures[len(sharedMeasures)-1]
+				if sharedDurRef-last.t > 1 {
+					addSeg(last.t, sharedDurRef,
+						last.t+(-last.offsetMs)/1000.0, supplyAt(sharedDurRef))
+				}
+				outputPath := candAudio + ".resampled-multiseg." + outExt
+				totalAtempo := 0.0
+				minA, maxA := math.Inf(1), math.Inf(-1)
+				for _, s := range segs {
+					totalAtempo += s.Atempo
+					if s.Atempo < minA {
+						minA = s.Atempo
+					}
+					if s.Atempo > maxA {
+						maxA = s.Atempo
+					}
+				}
+				avgAtempo := totalAtempo / float64(len(segs))
+				wr.EventsEmit(a.ctx, "log", fmt.Sprintf("🔀 Multi-segment atempo : %d segments (atempo moyen=%.6f, plage [%.6f, %.6f])", len(segs), avgAtempo, minA, maxA))
+				startMS := time.Now()
+				progressCb := func(done, total int) {
+					elapsed := time.Since(startMS).Seconds()
+					eta := elapsed * float64(total-done) / float64(done)
+					wr.EventsEmit(a.ctx, "log", fmt.Sprintf("  ⏱ Segment %d/%d atempo OK (%.0fs écoulé, ~%.0fs restant)", done, total, elapsed, eta))
+				}
+				if rerr := audiosync.ResampleMultiSegment(a.ctx, ffmpegPath, candAudio, outputPath, outExt, channels, bitrate, segs, progressCb); rerr != nil {
+					wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ Multi-segment fail : %s — fallback single atempo", rerr.Error()))
+					useMultiSegment = false
+				} else {
+					res.ResampledAudioPath = outputPath
+					res.ResampledChannels = channels
+					// L'audio multi-segment est déjà aligné sur la timeline PSA :
+					// pas de --sync à appliquer au mux + tempo "déjà bon".
+					res.OffsetMs = 0
+					res.TempoRatio = 1.0
+					wr.EventsEmit(a.ctx, "log", fmt.Sprintf("✓ Audio SUPPLY (%s%s) multi-segment OK → %s", outCodec, map[bool]string{true: " ATMOS"}[isAtmos], filepath.Base(outputPath)))
+				}
+			}
+			if !useMultiSegment {
+				tempoForResample := 1.0 / res.TempoRatio
+				outputPath := candAudio + ".resampled." + outExt
+				rerr := audiosync.ResampleAudioFile(a.ctx, ffmpegPath, candAudio, outputPath, outExt, channels, bitrate, tempoForResample)
+				if rerr != nil {
+					wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ Resample SUPPLY audio : %s", rerr.Error()))
+				} else {
+					res.ResampledAudioPath = outputPath
+					res.ResampledChannels = channels
+					wr.EventsEmit(a.ctx, "log", fmt.Sprintf("🔄 Audio SUPPLY (%s%s) resamplé via atempo=%.6f → %s", outCodec, map[bool]string{true: " ATMOS"}[isAtmos], tempoForResample, filepath.Base(outputPath)))
+				}
 			}
 		}
 	}
