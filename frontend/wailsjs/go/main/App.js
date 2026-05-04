@@ -202,8 +202,8 @@ export function SelectSupFiles() {
   return window['go']['main']['App']['SelectSupFiles']();
 }
 
-export function SyncSupplySubsToPSA(arg1, arg2, arg3, arg4) {
-  return window['go']['main']['App']['SyncSupplySubsToPSA'](arg1, arg2, arg3, arg4);
+export function SyncSupplySubsToPSA(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['SyncSupplySubsToPSA'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function TestHydrackerKey(arg1) {

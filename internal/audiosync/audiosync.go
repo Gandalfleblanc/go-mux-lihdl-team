@@ -119,6 +119,169 @@ func extractEnvelope(ctx context.Context, ffmpeg, mkvPath string, tid, startSec,
 	return env, nil
 }
 
+// CrossCorrelate (export public) — voir crossCorrelate.
+func CrossCorrelate(ref, other []float64, maxLagMs int) (offsetMs int, confidence float64) {
+	return crossCorrelate(ref, other, maxLagMs)
+}
+
+// SyncSegment décrit une fenêtre temporelle dans l'audio source (SUPPLY) qui
+// doit être étirée/compressée pour matcher une fenêtre cible dans la timeline
+// PSA. Atempo > 1 = audio accéléré (durée raccourcie). Atempo < 1 = ralenti.
+type SyncSegment struct {
+	PsaStart    float64 // début du segment dans la timeline PSA (sec)
+	PsaEnd      float64 // fin du segment dans la timeline PSA
+	SupplyStart float64 // début dans l'audio source SUPPLY
+	SupplyEnd   float64 // fin dans l'audio source SUPPLY
+	Atempo      float64 // facteur ffmpeg atempo à appliquer
+}
+
+// ResampleMultiSegment découpe l'audio source en plusieurs segments selon
+// `segments`, applique un atempo individuel à chaque morceau via ffmpeg, puis
+// les concatène en un fichier unique aligné sur la timeline PSA. C'est la seule
+// méthode pour gérer un drift NON-LINÉAIRE — un atempo global ne peut pas
+// rattraper un drift qui varie au cours de l'épisode.
+//
+// Le fichier de sortie a une durée ≈ PsaEnd du dernier segment, et son
+// contenu est aligné avec la timeline PSA (pas besoin de --sync au mux).
+//
+// Si progress != nil, appelle progress(segIdx+1, total) à chaque segment terminé.
+func ResampleMultiSegment(ctx context.Context, ffmpeg, srcPath, dstPath, codecExt string, channels, bitrateKbps int, segments []SyncSegment, progress func(done, total int)) error {
+	if len(segments) == 0 {
+		return errors.New("aucun segment fourni")
+	}
+	codecName := "ac3"
+	switch strings.ToLower(codecExt) {
+	case "eac3":
+		codecName = "eac3"
+	}
+	const baseSR = 48000
+	tmpDir, err := os.MkdirTemp("", "multiseg-")
+	if err != nil {
+		return fmt.Errorf("mkdir temp : %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// 1. Extraire et resampler chaque segment en fichier individuel.
+	segFiles := make([]string, len(segments))
+	for i, seg := range segments {
+		dur := seg.SupplyEnd - seg.SupplyStart
+		if dur <= 0 {
+			return fmt.Errorf("segment %d : durée invalide (%.3f → %.3f)", i, seg.SupplyStart, seg.SupplyEnd)
+		}
+		segOut := filepath.Join(tmpDir, fmt.Sprintf("seg%03d.%s", i, codecExt))
+		newSR := int(float64(baseSR) * seg.Atempo)
+		filter := fmt.Sprintf("asetrate=%d,aresample=%d", newSR, baseSR)
+		args := []string{
+			"-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+			"-ss", fmt.Sprintf("%.4f", seg.SupplyStart),
+			"-i", srcPath,
+			"-t", fmt.Sprintf("%.4f", dur),
+			"-map", "0:a:0",
+			"-filter:a", filter,
+			"-c:a", codecName,
+			"-ac", strconv.Itoa(channels),
+			"-b:a", fmt.Sprintf("%dk", bitrateKbps),
+			segOut,
+		}
+		cmd := exec.CommandContext(ctx, ffmpeg, args...)
+		out, cerr := cmd.CombinedOutput()
+		if cerr != nil {
+			return fmt.Errorf("segment %d (atempo=%.6f) : %v — %s", i, seg.Atempo, cerr, string(out))
+		}
+		segFiles[i] = segOut
+		if progress != nil {
+			progress(i+1, len(segments))
+		}
+	}
+
+	// 2. Construire le fichier de concat list pour ffmpeg.
+	concatList := filepath.Join(tmpDir, "concat.txt")
+	var listBuf strings.Builder
+	for _, f := range segFiles {
+		// echappement quotes ffmpeg
+		listBuf.WriteString("file '")
+		listBuf.WriteString(strings.ReplaceAll(f, "'", "'\\''"))
+		listBuf.WriteString("'\n")
+	}
+	if err := os.WriteFile(concatList, []byte(listBuf.String()), 0644); err != nil {
+		return fmt.Errorf("write concat list : %w", err)
+	}
+
+	// 3. Concaténer (copy stream, pas de re-encode).
+	args := []string{
+		"-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+		"-f", "concat", "-safe", "0",
+		"-i", concatList,
+		"-c:a", "copy",
+		dstPath,
+	}
+	cmd := exec.CommandContext(ctx, ffmpeg, args...)
+	out, cerr := cmd.CombinedOutput()
+	if cerr != nil {
+		return fmt.Errorf("concat : %v — %s", cerr, string(out))
+	}
+	return nil
+}
+
+// ExtractChannelEnvelopeRange : version flexible d'extractEnvelope qui prend
+// une plage temporelle ET un filtre audio custom (ex: "pan=mono|c0=c0" pour
+// extraire UNIQUEMENT le channel 0 = Front Left, sans downmix). Utile pour
+// la sync waveform où le channel surround/center seul donne un signal
+// plus distinctif que le downmix complet.
+func ExtractChannelEnvelopeRange(ctx context.Context, ffmpeg, mkvPath string, startSec, durationSec float64, audioFilter string) ([]float64, error) {
+	args := []string{
+		"-hide_banner", "-loglevel", "error", "-nostdin",
+		"-ss", fmt.Sprintf("%.3f", startSec),
+		"-i", mkvPath,
+		"-map", "0:a:0",
+		"-t", fmt.Sprintf("%.3f", durationSec),
+		"-vn", "-sn",
+	}
+	if audioFilter != "" {
+		args = append(args, "-filter:a", audioFilter)
+	} else {
+		args = append(args, "-ac", "1")
+	}
+	args = append(args,
+		"-ar", strconv.Itoa(pcmRate),
+		"-f", "f32le",
+		"-",
+	)
+	cmd := exec.CommandContext(ctx, ffmpeg, args...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	buf := make([]byte, envWinSize*bytesPerSamp)
+	env := make([]float64, 0, int(durationSec*float64(envRate)))
+	for {
+		_, err := io.ReadFull(stdout, buf)
+		if err != nil {
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+				break
+			}
+			_ = cmd.Wait()
+			return nil, err
+		}
+		var sum float64
+		for i := 0; i < envWinSize; i++ {
+			f := math.Float32frombits(binary.LittleEndian.Uint32(buf[i*bytesPerSamp:]))
+			sum += float64(f) * float64(f)
+		}
+		env = append(env, math.Sqrt(sum/float64(envWinSize)))
+	}
+	if err := cmd.Wait(); err != nil {
+		return nil, err
+	}
+	if len(env) < 50 {
+		return nil, errors.New("piste vide ou trop courte")
+	}
+	return env, nil
+}
+
 // crossCorrelate trouve le lag (en pas de 10 ms) maximisant la corrélation de
 // Pearson entre `other` et `ref`. Retourne :
 //   - offsetMs : décalage à donner à mkvmerge --sync (positif = retarder la piste).

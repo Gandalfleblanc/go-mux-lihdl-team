@@ -108,7 +108,7 @@ export function SelectSubFiles():Promise<Array<string>>;
 
 export function SelectSupFiles():Promise<Array<string>>;
 
-export function SyncSupplySubsToPSA(arg1:string,arg2:string,arg3:number,arg4:number):Promise<Array<main.SyncedSubResult>>;
+export function SyncSupplySubsToPSA(arg1:string,arg2:string,arg3:number,arg4:number,arg5:string):Promise<Array<main.SyncedSubResult>>;
 
 export function TestHydrackerKey(arg1:string):Promise<main.ApiKeyTestResult>;
 
