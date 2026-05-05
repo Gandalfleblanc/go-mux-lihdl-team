@@ -1,14 +1,14 @@
 {
   "version": 1,
-  "generated_at": "2026-05-04T20:20:35Z",
+  "generated_at": "2026-05-05T20:11:49Z",
   "entries": {
     "10234": {
       "tmdb_id": "10234",
-      "url": "https://discord.com/channels/994006546805694474/1491497087030919329/1491497087030919329",
+      "url": "https://discord.com/channels/994006546805694474/1501265958910562487/1501265958910562487",
       "title": "Funny.Games.1997.MULTi.VFI.1080p.BluRay.REMUX.AVC.DTS-HDMA.5.1-HDForever",
-      "updated_at": "2026-04-08T17:56:56.224000+00:00",
-      "thread_id": "1491497087030919329",
-      "last_message_id": "1491497128374046934"
+      "updated_at": "2026-05-05T16:54:56.777000+00:00",
+      "thread_id": "1501265958910562487",
+      "last_message_id": "1501266205279911991"
     },
     "1033148": {
       "tmdb_id": "1033148",
@@ -26,13 +26,21 @@
       "thread_id": "1499099615750918404",
       "last_message_id": "1499099615750918404"
     },
+    "10835": {
+      "tmdb_id": "10835",
+      "url": "https://discord.com/channels/994006546805694474/1500987159988011068/1500987159988011068",
+      "title": "The.Killer.1989.4K.REMASTERED.COMPLETE.FR.BLURAY-SHENLONG44",
+      "updated_at": "2026-05-04T22:27:05.934000+00:00",
+      "thread_id": "1500987159988011068",
+      "last_message_id": "1500987159988011068"
+    },
     "10975": {
       "tmdb_id": "10975",
       "url": "https://discord.com/channels/994006546805694474/1500922593518031058/1500922593518031058",
       "title": "OPERATION.CONDOR.1991.REMASTERED.FRENCH.BLURAY.REMUX-KENOBi3838",
       "updated_at": "2026-05-04T18:10:32.088000+00:00",
       "thread_id": "1500922593518031058",
-      "last_message_id": "1500922663282016448"
+      "last_message_id": "1501283447971254362"
     },
     "11099": {
       "tmdb_id": "11099",
@@ -41,6 +49,14 @@
       "updated_at": "2026-04-07T12:37:27.564000+00:00",
       "thread_id": "1491054299978137701",
       "last_message_id": "1491054349756010758"
+    },
+    "11471": {
+      "tmdb_id": "11471",
+      "url": "https://discord.com/channels/994006546805694474/1500986589596352562/1500986589596352562",
+      "title": "A.Better.Tomorrow.1986.REMASTERED.MULTi.VFI.1080p.BluRay.REMUX.CUSTOM.AVC.DTS-HDMA.7.1-Psaro",
+      "updated_at": "2026-05-04T22:24:49.942000+00:00",
+      "thread_id": "1500986589596352562",
+      "last_message_id": "1500986589596352562"
     },
     "118406": {
       "tmdb_id": "118406",
@@ -106,6 +122,14 @@
       "thread_id": "1491344865781612625",
       "last_message_id": "1491344898891186256"
     },
+    "18305": {
+      "tmdb_id": "18305",
+      "url": "https://discord.com/channels/994006546805694474/1500986763445801060/1500986763445801060",
+      "title": "A.Better.Tomorrow.2.1987.MULTi.VFI.1080p.BluRay.REMUX.CUSTOM.AVC.DTS-HDMA.7.1-Psaro",
+      "updated_at": "2026-05-04T22:25:31.391000+00:00",
+      "thread_id": "1500986763445801060",
+      "last_message_id": "1500986763445801060"
+    },
     "18861": {
       "tmdb_id": "18861",
       "url": "https://discord.com/channels/994006546805694474/1491458244110061718/1491458244110061718",
@@ -113,6 +137,14 @@
       "updated_at": "2026-04-08T15:22:35.350000+00:00",
       "thread_id": "1491458244110061718",
       "last_message_id": "1491458281686700164"
+    },
+    "2074": {
+      "tmdb_id": "2074",
+      "url": "https://discord.com/channels/994006546805694474/1501265537467027617/1501265537467027617",
+      "title": "Flirting.with.Disaster.1996.CUSTOM.DUAL.VF2.1080p.BLURAY.REMUX.AC3.2.0.H264.AVC-LiHDL",
+      "updated_at": "2026-05-05T16:53:16.297000+00:00",
+      "thread_id": "1501265537467027617",
+      "last_message_id": "1501265656153374941"
     },
     "20982": {
       "tmdb_id": "20982",
@@ -138,6 +170,14 @@
       "thread_id": "1493678968359092395",
       "last_message_id": "1497503367294095431"
     },
+    "2994": {
+      "tmdb_id": "2994",
+      "url": "https://discord.com/channels/994006546805694474/1500986143641047160/1500986143641047160",
+      "title": "Diabolik.1968.4K.REMASTERED.CUSTOM.KL.MULTi.1080p.BluRay.REMUX.AVC-Draf",
+      "updated_at": "2026-05-04T22:23:03.618000+00:00",
+      "thread_id": "1500986143641047160",
+      "last_message_id": "1500986143641047160"
+    },
     "317442": {
       "tmdb_id": "317442",
       "url": "https://discord.com/channels/994006546805694474/1491344416923848705/1491344416923848705",
@@ -145,6 +185,14 @@
       "updated_at": "2026-04-08T07:50:16.834000+00:00",
       "thread_id": "1491344416923848705",
       "last_message_id": "1491344500801536211"
+    },
+    "323660": {
+      "tmdb_id": "323660",
+      "url": "https://discord.com/channels/994006546805694474/1501261814699266152/1501261814699266152",
+      "title": "Avengers.Grimm.2015.CUSTOM.MULTi.VFi.1080p.BLURAY.REMUX.AC3.5.1.H264.AVC-LiHDL",
+      "updated_at": "2026-05-05T16:38:28.720000+00:00",
+      "thread_id": "1501261814699266152",
+      "last_message_id": "1501261880780656751"
     },
     "401697": {
       "tmdb_id": "401697",
@@ -154,6 +202,14 @@
       "thread_id": "1495528599216722170",
       "last_message_id": "1495528880101134507"
     },
+    "404947": {
+      "tmdb_id": "404947",
+      "url": "https://discord.com/channels/994006546805694474/1501262068442071050/1501262068442071050",
+      "title": "Sinister.Squad.2016.CUSTOM.DUAL.VFi.1080p.BLURAY.REMUX.AC3.5.1.H264.AVC-LiHDL",
+      "updated_at": "2026-05-05T16:39:29.217000+00:00",
+      "thread_id": "1501262068442071050",
+      "last_message_id": "1501262120497578197"
+    },
     "407448": {
       "tmdb_id": "407448",
       "url": "https://discord.com/channels/994006546805694474/1493678431769198734/1493678431769198734",
@@ -161,6 +217,14 @@
       "updated_at": "2026-04-14T18:24:49.337000+00:00",
       "thread_id": "1493678431769198734",
       "last_message_id": "1497503626111881398"
+    },
+    "41244": {
+      "tmdb_id": "41244",
+      "url": "https://discord.com/channels/994006546805694474/1500986899827920946/1500986899827920946",
+      "title": "Le.Syndicat.du.Crime.3.1989.MULTi.VFI.1080p.BluRay.REMUX.CUSTOM.AVC.DTS-HDMA.7.1-Psaro",
+      "updated_at": "2026-05-04T22:26:03.907000+00:00",
+      "thread_id": "1500986899827920946",
+      "last_message_id": "1500986899827920946"
     },
     "415381": {
       "tmdb_id": "415381",
@@ -172,11 +236,11 @@
     },
     "450766": {
       "tmdb_id": "450766",
-      "url": "https://discord.com/channels/994006546805694474/1491494128775598130/1491494128775598130",
+      "url": "https://discord.com/channels/994006546805694474/1501265748369211423/1501265748369211423",
       "title": "The.Forgiven.2017.CUSTOM.MULTi.VFi.1080p.BLURAY.REMUX.AC3.5.1.H264.AVC-LiHDL",
-      "updated_at": "2026-04-08T17:45:10.921000+00:00",
-      "thread_id": "1491494128775598130",
-      "last_message_id": "1491494174460084334"
+      "updated_at": "2026-05-05T16:54:06.580000+00:00",
+      "thread_id": "1501265748369211423",
+      "last_message_id": "1501265883518074880"
     },
     "458027": {
       "tmdb_id": "458027",
@@ -194,6 +258,14 @@
       "thread_id": "1488564480865468647",
       "last_message_id": "1488564531772002325"
     },
+    "503346": {
+      "tmdb_id": "503346",
+      "url": "https://discord.com/channels/994006546805694474/1501262226927915009/1501262226927915009",
+      "title": "Occupation.2018.CUSTOM.MULTi.VFi.1080p.BLURAY.REMUX.AC3.5.1.H264.AVC-LiHDL",
+      "updated_at": "2026-05-05T16:40:07.003000+00:00",
+      "thread_id": "1501262226927915009",
+      "last_message_id": "1501262323266883689"
+    },
     "50723": {
       "tmdb_id": "50723",
       "url": "https://discord.com/channels/994006546805694474/1491344654820446258/1491344654820446258",
@@ -209,6 +281,14 @@
       "updated_at": "2026-04-18T18:19:39.790000+00:00",
       "thread_id": "1495126684897251339",
       "last_message_id": "1497503474466685018"
+    },
+    "60778": {
+      "tmdb_id": "60778",
+      "url": "https://discord.com/channels/994006546805694474/1501295515470401566/1501295515470401566",
+      "title": "Downtown.1990.CUSTOM.MULTi.VFi.1080p.WEB.DL.H264-LiHDL",
+      "updated_at": "2026-05-05T18:52:23.610000+00:00",
+      "thread_id": "1501295515470401566",
+      "last_message_id": "1501295579232211034"
     },
     "621876": {
       "tmdb_id": "621876",
@@ -233,6 +313,14 @@
       "updated_at": "2026-04-17T21:21:50.922000+00:00",
       "thread_id": "1494810145522192446",
       "last_message_id": "1497503533996572783"
+    },
+    "881957": {
+      "tmdb_id": "881957",
+      "url": "https://discord.com/channels/994006546805694474/1501262445300289747/1501262445300289747",
+      "title": "Captain.Nova.2021.CUSTOM.MULTi.VFi.1080p.BLURAY.REMUX.AC3.5.1.H264.AVC-LiHDL",
+      "updated_at": "2026-05-05T16:40:59.067000+00:00",
+      "thread_id": "1501262445300289747",
+      "last_message_id": "1501262495963418697"
     },
     "91010": {
       "tmdb_id": "91010",
