@@ -41,7 +41,8 @@
         if (psa.isPSA) {
           videoChoice.quality = 'Custom PSA';
           videoChoice.encoder = 'GANDALF';
-          videoChoice.team = 'GANDALF';
+          // Team : films PSA → -LiHDL ; séries PSA → -GANDALF (norme).
+          videoChoice.team = /\bS\d{1,2}E\d{1,3}\b/i.test(psaName) ? 'GANDALF' : 'LiHDL';
           videoChoice.sourceTeam = '';
           if (psa.source) {
             target.source = psa.source;
@@ -284,25 +285,45 @@
   // Si l'utilisateur décoche → FR VFF.
   let useVFi = true;
   // Règle universelle pour les subs : un label "FR Forced" ou "FR VFF Forced"
-  // a default=true ET forced=true. Toutes les autres subs ont les 2 à false.
+  // a default=true ET forced=true. "FR VFQ Forced" devient default+forced
+  // UNIQUEMENT si aucun FR Forced non-VFQ n'est présent (cas releases qui
+  // n'ont qu'une piste VFQ sans VFF).
   function isForcedFRLabel(label) {
     return /^FR( VFF)? Forced\b/.test(label || '');
+  }
+  function isForcedFRVFQLabel(label) {
+    return /^FR VFQ Forced\b/.test(label || '');
   }
   // Applique la règle Forced à tous les subs (internes + externes + secondaires).
   // À appeler après tout changement de label sub.
   function applySubForcedRule() {
+    // 1ère passe : détecte si un FR Forced non-VFQ existe parmi tous les subs.
+    const allSubs = [
+      ...tracks.filter(t => t.type === 'subtitles'),
+      ...externalSubs,
+      ...secondarySelected.filter(t => t.type === 'subtitles'),
+    ];
+    const hasFRForcedNonVFQ = allSubs.some(s => isForcedFRLabel(s.label));
+    // Détermine si un sub donné est default+forced :
+    //   - FR/VFF Forced → toujours
+    //   - FR VFQ Forced → uniquement si pas de FR Forced non-VFQ ailleurs
+    const isDefaultForced = (label) => {
+      if (isForcedFRLabel(label)) return true;
+      if (!hasFRForcedNonVFQ && isForcedFRVFQLabel(label)) return true;
+      return false;
+    };
     tracks = tracks.map(t => {
       if (t.type !== 'subtitles') return t;
-      const f = isForcedFRLabel(t.label);
+      const f = isDefaultForced(t.label);
       return { ...t, default: f, forced: f };
     });
     externalSubs = externalSubs.map(s => {
-      const f = isForcedFRLabel(s.label);
+      const f = isDefaultForced(s.label);
       return { ...s, default: f, forced: f };
     });
     secondarySelected = secondarySelected.map(t => {
       if (t.type !== 'subtitles') return t;
-      const f = isForcedFRLabel(t.label);
+      const f = isDefaultForced(t.label);
       return { ...t, default: f, forced: f };
     });
   }
@@ -1712,10 +1733,12 @@
           if (!isFRsub && !isENGsub) return null;
         }
         const isForcedFR = /^FR( VFF)? Forced\b/.test(label);
-        // En mode UNFR/FASTSUB : 1er sub FR (peu importe Forced ou Full) → default+forced
+        // En mode UNFR/FASTSUB.VOSTFR : sub FR principal → default uniquement
+        // (pas forced — c'est un sub Full visible en permanence, pas un sub
+        // Forced classique pour traduire les rares dialogues étrangers).
         if (isUnfrFastsub && isFRsub) {
           defaultFlag = true;
-          forcedFlag = true;
+          forcedFlag = false;
         } else if (isForcedFR) {
           defaultFlag = true;
           forcedFlag = true;
@@ -1758,20 +1781,21 @@
         const firstFRSub = secondarySelected.find(t => t.type === 'subtitles' && /^FR /.test(t.label || ''));
         if (firstFRSub) {
           firstFRSub.default = true;
-          firstFRSub.forced = true;
-          appendLog(`🇫🇷 ${langFlag} : audio VO + sub FR marqués default (sub aussi forced)`);
+          firstFRSub.forced = false;
+          appendLog(`🇫🇷 ${langFlag} : audio VO + sub FR marqué default (pas forced — sub Full)`);
         }
       } else {
-        // Marque le 1er sub FR externe synchronisé comme default+forced.
+        // Marque le 1er sub FR externe synchronisé comme default (pas forced
+        // en mode FASTSUB.VOSTFR — c'est un sub Full visible en permanence).
         // Priorité Forced > Full pour le default.
         const extFRForced = externalSubs.find(s => s.fromReference && /^FR /.test(s.label || '') && /Forced/.test(s.label || ''));
         const extFRFull = externalSubs.find(s => s.fromReference && /^FR /.test(s.label || '') && !/Forced/.test(s.label || ''));
         const target = extFRForced || extFRFull;
         if (target) {
           target.default = true;
-          target.forced = true;
+          target.forced = false;
           externalSubs = [...externalSubs]; // trigger reactivity
-          appendLog(`🇫🇷 ${langFlag} : audio VO + sub FR synchronisé externe marqués default+forced`);
+          appendLog(`🇫🇷 ${langFlag} : audio VO + sub FR synchronisé externe marqué default (pas forced)`);
         }
       }
     }
@@ -1809,15 +1833,31 @@
     // Plus de 2ᵉ passe sur les subs : par défaut Full, SDH uniquement si
     // mediainfo (ServiceKind=HI) ou track_name explicite (sourds/hearing/SDH).
     secondarySelected = [...secondarySelected];
-    // 3. Réglages série + GANDALF.
-    videoChoice.team = 'GANDALF';
-    if (!target.episode) {
-      target.episode = detectEpisode((sourcePath || '').split('/').pop()) || 'S01E01';
+    // 3. Réglages mode + Team. Custom PSA :
+    //   - Série (tmdbMode === 'tv') → team GANDALF
+    //   - Film (tmdbMode === 'movie') → team LiHDL (norme : films PSA sortent
+    //     sous -LiHDL, séries PSA sous -GANDALF)
+    // Mode Film : on n'impose PAS d'épisode (sinon le filename final aurait
+    // un SxxExx pour un film). Mode TV : detect SxxExx depuis le nom de
+    // fichier, fallback S01E01 si rien détecté.
+    if (tmdbMode === 'movie') {
+      videoChoice.team = 'LiHDL';
+      target.episode = '';
+    } else {
+      videoChoice.team = 'GANDALF';
+      if (!target.episode) {
+        target.episode = detectEpisode((sourcePath || '').split('/').pop()) || 'S01E01';
+      }
     }
     // 4. Norme LiHDL : swap FR VFF ↔ FR VFi selon useVFi (true par défaut sauf
     //    si VFQ détectée). Sans VFQ, la piste FR principale doit être VFi
     //    (même si y'a une AD à côté). Avec VFQ, elle reste VFF.
     applyVFiSwap();
+    // 5. Applique la règle Forced/Default sur tous les subs en faisant
+    //    l'analyse globale (gère le cas "VFQ Forced sans VFF Forced" → VFQ
+    //    devient default+forced). Doit tourner APRÈS le build de
+    //    secondarySelected pour voir tous les subs en même temps.
+    applySubForcedRule();
     appendLog('⚡ Automatisé : ' + secondarySelected.filter(t=>t.type==='audio').length + ' audio(s) + ' + secondarySelected.filter(t=>t.type==='subtitles').length + ' sub(s) depuis SUPPLY/FW');
   }
 
@@ -2151,7 +2191,10 @@
       if (psa.isPSA) {
         videoChoice.quality = 'Custom PSA';
         videoChoice.encoder = 'GANDALF';
-        videoChoice.team = 'GANDALF';
+        // Team : GANDALF par défaut (séries). Pour les films PSA c'est LiHDL —
+        // détecté via absence de pattern SxxExx dans le nom de fichier.
+        const isSeries = /\bS\d{1,2}E\d{1,3}\b/i.test(filename);
+        videoChoice.team = isSeries ? 'GANDALF' : 'LiHDL';
         videoChoice.sourceTeam = ''; // norme : pas de team de source pour PSA
         if (psa.source) {
           target.source = psa.source;
@@ -2799,8 +2842,11 @@
     const filename = path.split('/').pop() || '';
     const cleanedDotted = cleanQueryFromFilename(filename);          // "The.Boys" — pour l'index
     const cleanedSpaces = cleanedDotted.replace(/\./g, ' ').trim();  // "The Boys" — pour l'API TMDB
+    // Détection auto série uniquement via pattern SxxExx — le mode PSA n'impose
+    // PLUS le mode TV (PSA fait aussi des films, l'user peut toggle Film/TV
+    // dans la card de validation TMDB si l'auto-detect se trompe).
     const isSeries = /\bS\d{1,2}E\d{1,3}\b/i.test(filename);
-    const forceTV = isSeries || muxMode === 'psa';
+    const forceTV = isSeries;
     tmdbQuery = cleanedSpaces;
     if (forceTV) tmdbMode = 'tv';
     try {
@@ -2935,6 +2981,27 @@
   // Recherche TMDB manuelle depuis la card "Aucune fiche trouvée" sur l'accueil.
   // Set lastTmdbResult comme la recherche auto, pour que le user reste sur l'accueil
   // et puisse continuer le workflow normalement.
+  // Bascule Film ↔ Série dans la card de validation TMDB. Relance auto la
+  // recherche avec le titre courant si on a déjà une query (cas user qui
+  // s'aperçoit que TMDB a sorti une série étrangère pour son film, ou vice-versa).
+  async function switchTmdbMode(newMode) {
+    if (newMode === tmdbMode) return;
+    tmdbMode = newMode;
+    // Bascule Film ↔ Série : nettoie/restaure target.episode pour que le
+    // filename final reflète le bon mode (Film → année dans le filename ;
+    // Série → SxxExx).
+    if (newMode === 'movie') {
+      target.episode = '';
+    } else if (newMode === 'tv' && !target.episode && sourcePath) {
+      target.episode = detectEpisode(sourcePath.split('/').pop()) || 'S01E01';
+    }
+    if (tmdbQuery && tmdbQuery.trim()) {
+      lastTmdbResult = null;
+      tmdbResults = [];
+      await manualTmdbSearchFromCard();
+    }
+  }
+
   async function manualTmdbSearchFromCard() {
     if (!tmdbQuery.trim()) return;
     tmdbSearching = true;
@@ -4486,18 +4553,22 @@
             </div>
           </div>
           <div class="tmdb-validate-body">
-            <div class="tmdb-validate-poster placeholder">🎞️</div>
+            <div class="tmdb-validate-poster placeholder">{tmdbMode === 'tv' ? '📺' : '🎞️'}</div>
             <div class="tmdb-validate-info">
-              <div class="tmdb-validate-title" style="opacity:0.7;font-style:italic;">Aucun film identifié automatiquement</div>
+              <div class="tmdb-validate-title" style="opacity:0.7;font-style:italic;">Aucun{tmdbMode === 'tv' ? 'e série' : ' film'} identifié{tmdbMode === 'tv' ? 'e' : ''} automatiquement</div>
               <div class="tmdb-validate-desc" style="margin-top:8px;">
-                Édite le titre ci-dessous puis Entrée (ou clique 🔍 Rechercher).<br>
+                Choisis le type, édite le titre puis Entrée (ou clique 🔍 Rechercher).<br>
                 Ou colle un ID TMDB dans le champ <b class="mono">#</b> en haut à droite.
               </div>
-              <div style="display:flex;gap:8px;align-items:center;margin-top:14px;">
+              <div style="display:flex;gap:6px;margin-top:12px;">
+                <button type="button" class="tmdb-mode-toggle" class:active={tmdbMode === 'movie'} on:click={() => tmdbMode = 'movie'}>🎬 Film</button>
+                <button type="button" class="tmdb-mode-toggle" class:active={tmdbMode === 'tv'} on:click={() => tmdbMode = 'tv'}>📺 Série</button>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;margin-top:10px;">
                 <input
                   type="text"
                   bind:value={tmdbQuery}
-                  placeholder="Titre du film…"
+                  placeholder={tmdbMode === 'tv' ? 'Titre de série…' : 'Titre du film…'}
                   style="flex:1;padding:10px 14px;font-size:14px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:#fff;"
                   on:keydown={(e) => e.key === 'Enter' && manualTmdbSearchFromCard()}
                 />
@@ -4506,7 +4577,7 @@
           </div>
           <div class="tmdb-validate-actions">
             <button class="btn btn-accent tmdb-validate-cta" on:click={manualTmdbSearchFromCard} disabled={tmdbSearching || !tmdbQuery.trim()}>
-              {tmdbSearching ? '⏳ Recherche…' : '🔍 Rechercher sur TMDB'}
+              {tmdbSearching ? '⏳ Recherche…' : `🔍 Rechercher ${tmdbMode === 'tv' ? 'la série' : 'le film'} sur TMDB`}
             </button>
           </div>
         </div>
@@ -4516,21 +4587,27 @@
       {#if sourcePath && !tmdbValidated && lastTmdbResult}
         <div class="card tmdb-validate-card">
           <div class="tmdb-validate-header">
-            <div class="tmdb-validate-badge">🎬 FILM IDENTIFIÉ — CONFIRME POUR CONTINUER</div>
-            <div class="tmdb-validate-force-mini" title="Pas le bon film ? Forcer l'ID TMDB">
-              <span class="tmdb-validate-force-mini-hash">#</span>
-              <input
-                type="text"
-                class="tmdb-validate-force-mini-input"
-                bind:value={tmdbIdQuery}
-                placeholder="ID TMDB"
-                inputmode="numeric"
-                pattern="[0-9]*"
-                on:keydown={(e) => e.key === 'Enter' && searchTmdbById()}
-              />
-              <button class="tmdb-validate-force-mini-btn" on:click={searchTmdbById} disabled={tmdbSearching || !tmdbIdQuery} title="Forcer cet ID">
-                {tmdbSearching ? '⏳' : '↻'}
-              </button>
+            <div class="tmdb-validate-badge">{tmdbMode === 'tv' ? '📺 SÉRIE IDENTIFIÉE' : '🎬 FILM IDENTIFIÉ'} — CONFIRME POUR CONTINUER</div>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <div style="display:flex;gap:4px;" title="Basculer entre recherche Film / Série et relancer">
+                <button type="button" class="tmdb-mode-toggle small" class:active={tmdbMode === 'movie'} on:click={() => switchTmdbMode('movie')} disabled={tmdbSearching}>🎬</button>
+                <button type="button" class="tmdb-mode-toggle small" class:active={tmdbMode === 'tv'} on:click={() => switchTmdbMode('tv')} disabled={tmdbSearching}>📺</button>
+              </div>
+              <div class="tmdb-validate-force-mini" title="Pas le bon film ? Forcer l'ID TMDB">
+                <span class="tmdb-validate-force-mini-hash">#</span>
+                <input
+                  type="text"
+                  class="tmdb-validate-force-mini-input"
+                  bind:value={tmdbIdQuery}
+                  placeholder="ID TMDB"
+                  inputmode="numeric"
+                  pattern="[0-9]*"
+                  on:keydown={(e) => e.key === 'Enter' && searchTmdbById()}
+                />
+                <button class="tmdb-validate-force-mini-btn" on:click={searchTmdbById} disabled={tmdbSearching || !tmdbIdQuery} title="Forcer cet ID">
+                  {tmdbSearching ? '⏳' : '↻'}
+                </button>
+              </div>
             </div>
           </div>
           <div class="tmdb-validate-body">
@@ -4632,7 +4709,13 @@
               <input type="text" bind:value={target.title} placeholder="Titre" />
             </div>
             <div class="field">
-              <span class="field-label">{target.episode ? 'Épisode' : 'Année'}</span>
+              <span class="field-label" style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
+                <span>{target.episode ? 'Épisode' : 'Année'}</span>
+                <span style="display:flex;gap:3px;">
+                  <button type="button" class="tmdb-mode-toggle small" class:active={!target.episode} on:click={() => { target.episode = ''; tmdbMode = 'movie'; }} title="Mode Film : année dans le filename">🎬</button>
+                  <button type="button" class="tmdb-mode-toggle small" class:active={!!target.episode} on:click={() => { tmdbMode = 'tv'; if (!target.episode) target.episode = (sourcePath ? detectEpisode(sourcePath.split('/').pop()) : '') || 'S01E01'; }} title="Mode Série : SxxExx dans le filename">📺</button>
+                </span>
+              </span>
               {#if target.episode}
                 <input type="text" bind:value={target.episode} placeholder="S01E01" maxlength="10" />
                 <label class="chk" style="margin-top:6px;font-size:11px;" title="Inclure l'année avant SxxExx (ex: pour remake — Title.2024.S01E01)">
@@ -6392,6 +6475,34 @@
     padding: 10px 22px;
     font-size: 13px; font-weight: 700;
     box-shadow: 0 8px 24px rgba(124, 92, 255, 0.4);
+  }
+  .tmdb-mode-toggle {
+    padding: 6px 14px;
+    font-size: 12px; font-weight: 600;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 6px;
+    color: rgba(255, 255, 255, 0.7);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .tmdb-mode-toggle:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+  }
+  .tmdb-mode-toggle.active {
+    background: rgba(124, 92, 255, 0.2);
+    border-color: rgba(124, 92, 255, 0.5);
+    color: #fff;
+  }
+  .tmdb-mode-toggle.small {
+    padding: 5px 10px;
+    font-size: 13px;
+    line-height: 1;
+  }
+  .tmdb-mode-toggle:disabled {
+    opacity: 0.5;
+    cursor: wait;
   }
   @media (max-width: 760px) {
     .tmdb-validate-body { grid-template-columns: 1fr; }

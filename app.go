@@ -118,7 +118,7 @@ func (a *App) startup(ctx context.Context) {
 
 // AppVersion est lue par le frontend (pill dans le header) et utilisée pour
 // comparer avec la dernière release GitHub lors du check de mise à jour.
-const AppVersion = "v5.6.6"
+const AppVersion = "v5.6.7"
 
 func (a *App) GetVersion() string { return AppVersion }
 
@@ -1177,11 +1177,20 @@ func (a *App) ExtractFRAudios(srcPath string, wantVFF, wantVFQ, wantENG bool, li
 
 		// Choix : extraction lossless si déjà AC3, sinon conversion ffmpeg → AC3.
 		srcCodec := codecIDToLabel(t.Properties.CodecID)
-		isAlreadyAC3 := strings.ToUpper(srcCodec) == "AC3"
+		codecUpper := strings.ToUpper(srcCodec)
+		isAlreadyAC3 := codecUpper == "AC3"
+		isAAC := codecUpper == "AAC"
+		// Codecs préservés tels quels (pas de réencodage destructeur) : AC3 et AAC.
+		// Pour AAC l'utilisateur a explicitement demandé qu'on ne convertisse jamais.
+		keepNative := isAlreadyAC3 || isAAC
 		var tmpPath string
 		var exErr error
-		if isAlreadyAC3 {
-			tmpPath, exErr = mkvtool.ExtractTrackToTemp(a.ctx, binary, srcPath, t.ID, "ac3")
+		if keepNative {
+			ext := "ac3"
+			if isAAC {
+				ext = "aac"
+			}
+			tmpPath, exErr = mkvtool.ExtractTrackToTemp(a.ctx, binary, srcPath, t.ID, ext)
 			if exErr != nil {
 				wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ extract audio #%d (%s) : %s", t.ID, variant, exErr.Error()))
 				continue
@@ -1210,16 +1219,19 @@ func (a *App) ExtractFRAudios(srcPath string, wantVFF, wantVFQ, wantENG bool, li
 			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("✓ %s converti en AC3 (piste #%d, %s)", srcCodec, t.ID, variant))
 		}
 
-		// Le codec final est toujours AC3 (extrait tel quel ou converti).
+		// Codec final : préservé natif (AC3/AAC) ou AC3 si converti.
 		finalCodec := "AC3"
-		// Channels finaux : downmix 7.1→5.1 si conversion
+		if isAAC {
+			finalCodec = "AAC"
+		}
+		// Channels finaux : downmix 7.1→5.1 si conversion (jamais downmix natif).
 		finalChannels := t.Properties.AudioChannels
-		if !isAlreadyAC3 && finalChannels > 6 {
+		if !keepNative && finalChannels > 6 {
 			finalChannels = 6
 		}
 		// Bitrate cible (uniquement si converti — lossless conserve le bitrate source).
 		finalBitrate := 0
-		if !isAlreadyAC3 {
+		if !keepNative {
 			switch {
 			case finalChannels == 1:
 				finalBitrate = 96
@@ -1240,7 +1252,7 @@ func (a *App) ExtractFRAudios(srcPath string, wantVFF, wantVFQ, wantENG bool, li
 			Channels:     finalChannels,
 			TrackName:    t.Properties.TrackName,
 			Language:     t.Properties.Language,
-			WasConverted: !isAlreadyAC3,
+			WasConverted: !keepNative,
 			BitrateKbps:  finalBitrate,
 		}
 		if mt, ok := mediainfoByID[t.ID]; ok {
