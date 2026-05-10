@@ -297,6 +297,13 @@
   // Applique la règle Forced à tous les subs (internes + externes + secondaires).
   // À appeler après tout changement de label sub.
   function applySubForcedRule() {
+    // Mode UNFR/FASTSUB.VOSTFR : pas de doublage FR, le sub FR Full sert de
+    // doublage textuel. Doit être marqué default=true (pas forced — c'est
+    // un sub Full visible en permanence, pas un Forced ponctuel).
+    const langFlag = String(target.flagOverride || '').toUpperCase();
+    const supplyName = String(secondaryPath || '').toUpperCase();
+    const isUnfrFastsub = /FASTSUB|VOSTFR/.test(langFlag) || /UNFR/.test(supplyName);
+
     // 1ère passe : détecte si un FR Forced non-VFQ existe parmi tous les subs.
     const allSubs = [
       ...tracks.filter(t => t.type === 'subtitles'),
@@ -304,27 +311,50 @@
       ...secondarySelected.filter(t => t.type === 'subtitles'),
     ];
     const hasFRForcedNonVFQ = allSubs.some(s => isForcedFRLabel(s.label));
-    // Détermine si un sub donné est default+forced :
-    //   - FR/VFF Forced → toujours
-    //   - FR VFQ Forced → uniquement si pas de FR Forced non-VFQ ailleurs
-    const isDefaultForced = (label) => {
-      if (isForcedFRLabel(label)) return true;
-      if (!hasFRForcedNonVFQ && isForcedFRVFQLabel(label)) return true;
-      return false;
+    // Premier sub FR (peu importe variante/type) en mode UNFR/FASTSUB : on
+    // le mémorise pour le marquer default=true, forced=false.
+    const isFRSub = (label) => /^FR /.test(String(label || ''));
+    let unfrDefaultPath = null;
+    if (isUnfrFastsub) {
+      // Préfère un sub FR externe synchronisé en priorité
+      const ext = externalSubs.find(s => s.fromReference && isFRSub(s.label));
+      if (ext) unfrDefaultPath = 'external:' + ext.path;
+      else {
+        const sec = secondarySelected.find(t => t.type === 'subtitles' && t.keep && isFRSub(t.label));
+        if (sec) unfrDefaultPath = 'secondary:' + sec.id;
+        else {
+          const psa = tracks.find(t => t.type === 'subtitles' && t.keep && isFRSub(t.label));
+          if (psa) unfrDefaultPath = 'tracks:' + psa.id;
+        }
+      }
+    }
+
+    // Détermine (default, forced) pour un sub donné :
+    //   - FR/VFF Forced → default+forced toujours
+    //   - FR VFQ Forced → default+forced uniquement si pas de FR Forced non-VFQ ailleurs
+    //   - Mode UNFR/FASTSUB sub FR principal → default=true forced=false
+    //   - Sinon → false/false
+    const computeFlags = (label, sourceKey) => {
+      if (isForcedFRLabel(label)) return { default: true, forced: true };
+      if (!hasFRForcedNonVFQ && isForcedFRVFQLabel(label)) return { default: true, forced: true };
+      if (isUnfrFastsub && unfrDefaultPath && unfrDefaultPath === sourceKey) {
+        return { default: true, forced: false };
+      }
+      return { default: false, forced: false };
     };
     tracks = tracks.map(t => {
       if (t.type !== 'subtitles') return t;
-      const f = isDefaultForced(t.label);
-      return { ...t, default: f, forced: f };
+      const flags = computeFlags(t.label, 'tracks:' + t.id);
+      return { ...t, default: flags.default, forced: flags.forced };
     });
     externalSubs = externalSubs.map(s => {
-      const f = isDefaultForced(s.label);
-      return { ...s, default: f, forced: f };
+      const flags = computeFlags(s.label, 'external:' + s.path);
+      return { ...s, default: flags.default, forced: flags.forced };
     });
     secondarySelected = secondarySelected.map(t => {
       if (t.type !== 'subtitles') return t;
-      const f = isDefaultForced(t.label);
-      return { ...t, default: f, forced: f };
+      const flags = computeFlags(t.label, 'secondary:' + t.id);
+      return { ...t, default: flags.default, forced: flags.forced };
     });
   }
   // Appelé sur changement de dropdown sub. Mute uniquement la piste concernée.
