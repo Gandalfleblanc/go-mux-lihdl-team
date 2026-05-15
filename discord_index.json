@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-05-14T20:39:17Z",
+  "generated_at": "2026-05-15T20:18:32Z",
   "entries": {
     "10234": {
       "tmdb_id": "10234",
@@ -45,10 +45,10 @@
     "10975": {
       "tmdb_id": "10975",
       "url": "https://discord.com/channels/994006546805694474/1500922593518031058/1500922593518031058",
-      "title": "OPERATION.CONDOR.1991.REMASTERED.FRENCH.BLURAY.REMUX-KENOBi3838",
+      "title": "Operation.Condor.1991.CUSTOM.INTERNATIONAL.CUT.MULTi.VFF.1080p.BluRay.REMUX.DTS-HD.MA.5.1.H264-LiHDL",
       "updated_at": "2026-05-04T18:10:32.088000+00:00",
       "thread_id": "1500922593518031058",
-      "last_message_id": "1503743616739442699"
+      "last_message_id": "1504742503503495270"
     },
     "11024": {
       "tmdb_id": "11024",
@@ -433,6 +433,14 @@
       "updated_at": "2026-05-06T17:21:34.115000+00:00",
       "thread_id": "1501635046497456138",
       "last_message_id": "1501635156144820284"
+    },
+    "696393": {
+      "tmdb_id": "696393",
+      "url": "https://discord.com/channels/994006546805694474/1504584985255088188/1504584985255088188",
+      "title": "Cold.Storage.2026.MULTi.VFF.1080p.BluRay.REMUX.DTS-HD.MA.5.1.AVC-REBiRTH",
+      "updated_at": "2026-05-14T20:43:34.322000+00:00",
+      "thread_id": "1504584985255088188",
+      "last_message_id": "1504584985255088188"
     },
     "75624": {
       "tmdb_id": "75624",
