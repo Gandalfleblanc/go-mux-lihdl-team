@@ -105,7 +105,7 @@ var SubtitleLabels = []string{
 // Dropdowns pour la piste vidéo.
 var (
 	VideoQualities = []string{"HDLight", "WEBRip", "WEB", "WEB.Light", "Custom PSA"}
-	VideoEncoders  = []string{"GANDALF", "FilmZ", "Serveurperso", "Arcaldia", "Nox"}
+	VideoEncoders  = []string{"GANDALF", "FilmZ", "Nizo", "JEROMELENAIN", "Arcaldia"}
 	VideoSources   = []string{"REMUX LiHDL", "REMUX CUSTOM LiHDL", "WEBRip"}
 	VideoTeams     = []string{"LiHDL", "GANDALF"}
 )
