@@ -40,7 +40,7 @@
         const psa = parsePsaSourceInfo(psaName);
         if (psa.isPSA) {
           videoChoice.quality = 'Custom PSA';
-          videoChoice.encoder = 'GANDALF';
+          videoChoice.encoder = config.default_encoder || 'GANDALF';
           // Team : films PSA → -LiHDL ; séries PSA → -GANDALF (norme).
           videoChoice.team = /\bS\d{1,2}E\d{1,3}\b/i.test(psaName) ? 'GANDALF' : 'LiHDL';
           videoChoice.sourceTeam = '';
@@ -2220,7 +2220,7 @@
       const psa = parsePsaSourceInfo(filename);
       if (psa.isPSA) {
         videoChoice.quality = 'Custom PSA';
-        videoChoice.encoder = 'GANDALF';
+        videoChoice.encoder = config.default_encoder || 'GANDALF';
         // Team : GANDALF par défaut (séries). Pour les films PSA c'est LiHDL —
         // détecté via absence de pattern SxxExx dans le nom de fichier.
         const isSeries = /\bS\d{1,2}E\d{1,3}\b/i.test(filename);
@@ -5313,6 +5313,20 @@
           {/if}
           <div class="field-hint">
             Utilisée pour authentifier les requêtes vers l'API UNFR.
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Encodeur</div>
+        <div class="field"><label>Ton pseudo encodeur (remplace « By GANDALF » dans le nom de piste vidéo)</label>
+          <div class="field-row">
+            <select bind:value={config.default_encoder} style="flex:1;">
+              {#each options.video_encoders as e}<option>{e}</option>{/each}
+            </select>
+          </div>
+          <div class="field-hint">
+            Appliqué automatiquement à chaque chargement de source. Tu peux toujours le changer ponctuellement dans « Réglages piste vidéo ».
           </div>
         </div>
       </div>
