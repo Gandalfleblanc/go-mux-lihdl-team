@@ -26,7 +26,7 @@
     muxMode = mode;
     if (mode === 'psa') {
       // Défauts mode PSA : série WEBRip Team GANDALF
-      videoChoice.team = 'GANDALF';
+      videoChoice.team = 'ASTROBOY';
       if (!target.source || target.source === 'HDLight') target.source = 'WEBRip';
       if (sourcePath && !target.episode) {
         target.episode = detectEpisode(sourcePath.split('/').pop()) || 'S01E01';
@@ -40,9 +40,9 @@
         const psa = parsePsaSourceInfo(psaName);
         if (psa.isPSA) {
           videoChoice.quality = 'Custom PSA';
-          videoChoice.encoder = config.default_encoder || 'GANDALF';
+          videoChoice.encoder = config.default_encoder || 'ASTROBOY';
           // Team : films PSA → -LiHDL ; séries PSA → -GANDALF (norme).
-          videoChoice.team = /\bS\d{1,2}E\d{1,3}\b/i.test(psaName) ? 'GANDALF' : 'LiHDL';
+          videoChoice.team = /\bS\d{1,2}E\d{1,3}\b/i.test(psaName) ? 'ASTROBOY' : 'LiHDL';
           videoChoice.sourceTeam = '';
           if (psa.source) {
             target.source = psa.source;
@@ -54,7 +54,7 @@
             else if (vc === 'H264') vc = 'x264';
             target.video_codec = vc;
           }
-          appendLog(`✓ PSA re-détecté au switch : ${psa.source || '?'} ${target.video_codec || '?'} → Custom PSA / GANDALF`);
+          appendLog(`✓ PSA re-détecté au switch : ${psa.source || '?'} ${target.video_codec || '?'} → Custom PSA / ASTROBOY`);
         }
         // Auto-décoche audios + subs non-FR/non-ENG sur les tracks déjà chargés.
         if (tracks.length > 0) {
@@ -95,7 +95,7 @@
     serveurperso_url: 'https://www.serveurperso.com/stats/search.php',
     output_dir: '',
     mkvmerge_path: '',
-    default_encoder: 'GANDALF',
+    default_encoder: 'ASTROBOY',
     default_team: 'LiHDL',
     default_quality: 'HDLight',
     default_source: 'REMUX LiHDL',
@@ -135,7 +135,7 @@
 
   let videoChoice = {
     quality: 'HDLight',
-    encoder: 'GANDALF',
+    encoder: 'ASTROBOY',
     sourceType: 'COMPLETE BluRay', // ex-source split
     sourceTeam: '',                 // team de la source (ex: Alkaline) — éditable
     team: 'LiHDL',                  // team de sortie (dans le filename)
@@ -1874,7 +1874,7 @@
       videoChoice.team = 'LiHDL';
       target.episode = '';
     } else {
-      videoChoice.team = 'GANDALF';
+      videoChoice.team = 'ASTROBOY';
       if (!target.episode) {
         target.episode = detectEpisode((sourcePath || '').split('/').pop()) || 'S01E01';
       }
@@ -2165,7 +2165,10 @@
     const src = sourceTeam
       ? `${videoChoice.sourceType} ${sourceTeam}`
       : videoChoice.sourceType;
-    const team = videoChoice.team || '';
+    // Si la team == l'encodeur (ex: PSA ASTROBOY/ASTROBOY), on omet la team
+    // pour éviter la duplication "Custom PSA ASTROBOY By ASTROBOY" → on garde
+    // juste "Custom PSA By ASTROBOY".
+    const team = (videoChoice.team && videoChoice.team !== videoChoice.encoder) ? videoChoice.team : '';
     return `${videoChoice.quality}${team ? ' ' + team : ''} By ${videoChoice.encoder} (Source ${src})`;
   }
 
@@ -2220,11 +2223,11 @@
       const psa = parsePsaSourceInfo(filename);
       if (psa.isPSA) {
         videoChoice.quality = 'Custom PSA';
-        videoChoice.encoder = config.default_encoder || 'GANDALF';
+        videoChoice.encoder = config.default_encoder || 'ASTROBOY';
         // Team : GANDALF par défaut (séries). Pour les films PSA c'est LiHDL —
         // détecté via absence de pattern SxxExx dans le nom de fichier.
         const isSeries = /\bS\d{1,2}E\d{1,3}\b/i.test(filename);
-        videoChoice.team = isSeries ? 'GANDALF' : 'LiHDL';
+        videoChoice.team = isSeries ? 'ASTROBOY' : 'LiHDL';
         videoChoice.sourceTeam = ''; // norme : pas de team de source pour PSA
         if (psa.source) {
           target.source = psa.source;
@@ -2245,7 +2248,7 @@
         } else if (/\b720p\b/i.test(filename)) {
           target.resolution = '720p';
         }
-        appendLog(`✓ PSA détecté : ${psa.source || '?'} ${target.resolution} ${target.video_codec || '?'} → Custom PSA / GANDALF`);
+        appendLog(`✓ PSA détecté : ${psa.source || '?'} ${target.resolution} ${target.video_codec || '?'} → Custom PSA / ASTROBOY`);
       }
     } else if (muxMode === 'lihdl') {
       // Mode LiHDL : auto-detect du sourceType depuis le nom (REMUX CUSTOM > REMUX > BluRay…)
@@ -3729,6 +3732,13 @@
     try { config = await GetConfig(); } catch {}
     try { options = await GetLihdlOptions(); } catch {}
     try { mkvmergePath = await LocateMkvmerge(); } catch {}
+
+    // Migration : ancien encodeur GANDALF renommé ASTROBOY. Met à jour la
+    // config sauvegardée pour que le dropdown ne montre pas une option orpheline.
+    if (config.default_encoder === 'GANDALF') {
+      config.default_encoder = 'ASTROBOY';
+      try { await SaveConfig(config); } catch {}
+    }
 
     // Best-effort : fetch l'index Discord remote (cache 24 h, silencieux si pas configuré).
     DiscordIndexRefreshRemote().catch((e) => {
