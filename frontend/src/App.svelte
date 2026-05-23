@@ -3900,7 +3900,7 @@
       <img class="brand-logo-img" src={logo} alt="LiHDL" />
       <div>
         <div class="brand-name">GO Mux LiHDL Team</div>
-        <div class="brand-version">{appVersion || 'v?'} · BY GANDALF</div>
+        <div class="brand-version">{appVersion || 'v?'} · BY ASTROBOY</div>
       </div>
     </div>
 
