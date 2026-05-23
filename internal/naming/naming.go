@@ -105,9 +105,9 @@ var SubtitleLabels = []string{
 // Dropdowns pour la piste vidéo.
 var (
 	VideoQualities = []string{"HDLight", "WEBRip", "WEB", "WEB.Light", "Custom PSA"}
-	VideoEncoders  = []string{"GANDALF", "FilmZ", "Nizo", "JEROMELENAIN", "Arcaldia"}
+	VideoEncoders  = []string{"ASTROBOY", "FilmZ", "Nizo", "JEROMELENAIN", "Arcaldia"}
 	VideoSources   = []string{"REMUX LiHDL", "REMUX CUSTOM LiHDL", "WEBRip"}
-	VideoTeams     = []string{"LiHDL", "GANDALF"}
+	VideoTeams     = []string{"LiHDL", "ASTROBOY"}
 )
 
 // VideoTrackName construit le nom de piste vidéo LiHDL :
