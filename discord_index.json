@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-06-11T21:24:52Z",
+  "generated_at": "2026-06-12T21:03:34Z",
   "entries": {
     "10234": {
       "tmdb_id": "10234",
@@ -857,6 +857,14 @@
       "updated_at": "2026-01-12T10:54:48.906000+00:00",
       "thread_id": "1460225500118257766",
       "last_message_id": "1509631630799671307"
+    },
+    "73990": {
+      "tmdb_id": "73990",
+      "url": "https://discord.com/channels/994006546805694474/1514854873152360530/1514854873152360530",
+      "title": "G.I.Samurai.1979.4K.REMASTERED.UNCUT.CUSTOM.MULTi.VFi.1080p.BluRay.REMUX.AC3.2.0.DTS-HD.MA.5.1.H264-",
+      "updated_at": "2026-06-12T04:52:26.402000+00:00",
+      "thread_id": "1514854873152360530",
+      "last_message_id": "1514854901534949527"
     },
     "75048": {
       "tmdb_id": "75048",
