@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-06-12T21:03:34Z",
+  "generated_at": "2026-06-13T20:19:46Z",
   "entries": {
     "10234": {
       "tmdb_id": "10234",
@@ -284,11 +284,11 @@
     },
     "1327819": {
       "tmdb_id": "1327819",
-      "url": "https://discord.com/channels/994006546805694474/1510004998703022251/1510004998703022251",
-      "title": "The.Carpenters.Son.2025.MULTi.1080p.BluRay.REMUX.CUSTOM.AVC-BraD",
-      "updated_at": "2026-05-29T19:40:46.227000+00:00",
-      "thread_id": "1510004998703022251",
-      "last_message_id": "1510004998703022251"
+      "url": "https://discord.com/channels/994006546805694474/1513263663484502156/1513263663484502156",
+      "title": "Hoppers.2026.MULTi.VFQ.1080p.Bluray.REMUX.AVC-BDHD",
+      "updated_at": "2026-06-07T19:29:32.454000+00:00",
+      "thread_id": "1513263663484502156",
+      "last_message_id": "1515123764575338619"
     },
     "1352624": {
       "tmdb_id": "1352624",
@@ -337,6 +337,14 @@
       "updated_at": "2026-05-28T13:12:35.939000+00:00",
       "thread_id": "1509544924289175573",
       "last_message_id": "1509544974771949568"
+    },
+    "1455079": {
+      "tmdb_id": "1455079",
+      "url": "https://discord.com/channels/994006546805694474/1515428836802826340/1515428836802826340",
+      "title": "You.Me.And.Tuscany.2026.MULTi.VFQ.1080p.BluRay.REMUX.TrueHD.7.1.AVC-REBiRTH",
+      "updated_at": "2026-06-13T18:53:10+00:00",
+      "thread_id": "1515428836802826340",
+      "last_message_id": "1515428836802826340"
     },
     "1464374": {
       "tmdb_id": "1464374",
