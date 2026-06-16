@@ -143,6 +143,31 @@ func ExtractTrackToTemp(ctx context.Context, mkvmergePath, mkvPath string, track
 	return tmpPath, nil
 }
 
+// ExtractChaptersXML extrait les chapitres d'un MKV en format XML standard via
+// "mkvextract chapters". Retourne une erreur si mkvextract introuvable ou si
+// l'extraction échoue. Retourne (false, nil) si le MKV ne contient AUCUN
+// chapitre (pas d'erreur, juste rien à écrire).
+func ExtractChaptersXML(ctx context.Context, mkvmergePath, mkvPath, outputXMLPath string) (bool, error) {
+	extractBin := findMkvextract(mkvmergePath)
+	if extractBin == "" {
+		return false, errors.New("mkvextract introuvable (à côté de mkvmerge ni sur PATH)")
+	}
+	cmd := exec.CommandContext(ctx, extractBin, "chapters", mkvPath)
+	out, err := cmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("mkvextract chapters : %w", err)
+	}
+	// MKV sans chapitres : mkvextract ne sort rien (ou un XML vide). On évite
+	// d'écrire un fichier vide → l'appelant verra "false" et n'affichera pas le log.
+	if len(out) < 50 || !strings.Contains(string(out), "<ChapterAtom") {
+		return false, nil
+	}
+	if err := os.WriteFile(outputXMLPath, out, 0644); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // findMkvextract cherche le binaire mkvextract à côté de mkvmerge.
 func findMkvextract(mkvmergePath string) string {
 	if mkvmergePath == "" {
@@ -266,6 +291,7 @@ type MuxParams struct {
 	SecondaryAudios []SecondaryTrack // audios à reprendre depuis le secondaire
 	SecondarySubs   []SecondaryTrack // subs à reprendre depuis le secondaire
 	NoChapters      bool             // si true, ajoute --no-chapters sur l'input primaire
+	ChaptersXMLPath string           // si non-vide, force --chapters <path> sur l'output (ignore NoChapters)
 }
 
 // MuxProgress est émis pendant le mux (0..100).
@@ -475,6 +501,14 @@ func buildArgs(p MuxParams) []string {
 		args = append(args, "--no-chapters")
 	}
 	args = append(args, p.InputPath)
+
+	// Chapitres externes (--chapters) ajoutés APRÈS l'input primaire pour qu'ils
+	// soient une source globale, indépendamment des chapitres natifs de l'input
+	// (qui sont retirés par --no-chapters si NoChapters=true). À placer en tête
+	// des sources de chapitres pour mkvmerge.
+	if p.ChaptersXMLPath != "" {
+		args = append(args, "--chapters", p.ChaptersXMLPath)
+	}
 
 	// ---- Fichier secondaire (fileID 1) — audios + subs uniquement ----
 	if hasSecondary {

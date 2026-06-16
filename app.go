@@ -118,7 +118,7 @@ func (a *App) startup(ctx context.Context) {
 
 // AppVersion est lue par le frontend (pill dans le header) et utilisée pour
 // comparer avec la dernière release GitHub lors du check de mise à jour.
-const AppVersion = "v5.7.1"
+const AppVersion = "v5.7.2"
 
 func (a *App) GetVersion() string { return AppVersion }
 
@@ -3010,6 +3010,21 @@ func (a *App) Mux(req MuxRequest) error {
 	a.opCtx, a.opCancel = ctx, cancel
 	a.mu.Unlock()
 
+	// Pré-extraction des chapitres de l'input PSA : si la source contient des
+	// chapitres ET qu'on ne les supprime pas (NoChapters=false), on les extrait
+	// en .xml temporaire et on le passe à mkvmerge via --chapters. Garantit
+	// que les chapitres sont effectivement dans le .mkv final (même si la
+	// copie native via mkvmerge échoue silencieusement sur certains MKV).
+	chaptersTmpPath := ""
+	if !req.NoChapters {
+		tmpXML := req.OutputPath + ".chapters-tmp.xml"
+		if ok, exErr := mkvtool.ExtractChaptersXML(ctx, binary, req.InputPath, tmpXML); exErr == nil && ok {
+			chaptersTmpPath = tmpXML
+			defer os.Remove(tmpXML)
+			wr.EventsEmit(a.ctx, "log", "📑 Chapitres pré-extraits de la source → injectés dans le mux")
+		}
+	}
+
 	wr.EventsEmit(a.ctx, "log", "🔧 Lancement mkvmerge → "+filepath.Base(req.OutputPath))
 	err := mkvtool.Mux(ctx, binary, mkvtool.MuxParams{
 		InputPath:       req.InputPath,
@@ -3022,6 +3037,7 @@ func (a *App) Mux(req MuxRequest) error {
 		SecondaryAudios: req.SecondaryAudios,
 		SecondarySubs:   req.SecondarySubs,
 		NoChapters:      req.NoChapters,
+		ChaptersXMLPath: chaptersTmpPath,
 	},
 		func(p mkvtool.MuxProgress) {
 			wr.EventsEmit(a.ctx, "mux:progress", p)
