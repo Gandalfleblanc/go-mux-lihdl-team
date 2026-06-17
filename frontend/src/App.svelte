@@ -96,6 +96,8 @@
     output_dir: '',
     mkvmerge_path: '',
     default_encoder: 'ASTROBOY',
+    custom_audio_labels: [],
+    custom_subtitle_labels: [],
     default_team: 'LiHDL',
     default_quality: 'HDLight',
     default_source: 'REMUX LiHDL',
@@ -3128,6 +3130,56 @@
     mkvmergePath = await LocateMkvmerge();
   }
 
+  // --- Labels audio/sub personnalisés (mergés avec les labels figés LiHDL) ---
+  let newAudioLabel = '';
+  let newSubtitleLabel = '';
+
+  async function addCustomAudioLabel() {
+    const lbl = newAudioLabel.trim();
+    if (!lbl) return;
+    if (!config.custom_audio_labels) config.custom_audio_labels = [];
+    if (config.custom_audio_labels.includes(lbl)) {
+      appendLog('⚠ Label audio déjà présent : ' + lbl);
+      return;
+    }
+    config.custom_audio_labels = [...config.custom_audio_labels, lbl];
+    newAudioLabel = '';
+    await SaveConfig(config);
+    options = await GetLihdlOptions();
+    appendLog('✓ Label audio ajouté : ' + lbl);
+  }
+
+  async function removeCustomAudioLabel(idx) {
+    const lbl = (config.custom_audio_labels || [])[idx];
+    config.custom_audio_labels = (config.custom_audio_labels || []).filter((_, i) => i !== idx);
+    await SaveConfig(config);
+    options = await GetLihdlOptions();
+    if (lbl) appendLog('🗑 Label audio supprimé : ' + lbl);
+  }
+
+  async function addCustomSubtitleLabel() {
+    const lbl = newSubtitleLabel.trim();
+    if (!lbl) return;
+    if (!config.custom_subtitle_labels) config.custom_subtitle_labels = [];
+    if (config.custom_subtitle_labels.includes(lbl)) {
+      appendLog('⚠ Label sub déjà présent : ' + lbl);
+      return;
+    }
+    config.custom_subtitle_labels = [...config.custom_subtitle_labels, lbl];
+    newSubtitleLabel = '';
+    await SaveConfig(config);
+    options = await GetLihdlOptions();
+    appendLog('✓ Label sub ajouté : ' + lbl);
+  }
+
+  async function removeCustomSubtitleLabel(idx) {
+    const lbl = (config.custom_subtitle_labels || [])[idx];
+    config.custom_subtitle_labels = (config.custom_subtitle_labels || []).filter((_, i) => i !== idx);
+    await SaveConfig(config);
+    options = await GetLihdlOptions();
+    if (lbl) appendLog('🗑 Label sub supprimé : ' + lbl);
+  }
+
   // === Index Discord (admin) ===
   async function doDiscordScan() {
     if (discordScanRunning) return;
@@ -3543,7 +3595,7 @@
         secondary_path: secondaryPath,
         secondary_audios: secAudios,
         secondary_subs: secSubs,
-        no_chapters: muxMode === 'lihdl', // LiHDL : on retire les chapitres ; PSA : on les garde
+        no_chapters: false, // PSA ET LiHDL : on garde toujours les chapitres natifs de la source
       });
       success = true;
     } catch (e) {
@@ -5342,6 +5394,48 @@
       </div>
 
       <div class="card">
+        <div class="card-title">Labels audio personnalisés</div>
+        <div class="field"><label>Ajouter une langue/qualité audio (format figé : « LANG VARIANTE : CODEC CANAUX »)</label>
+          <div class="field-row">
+            <input type="text" bind:value={newAudioLabel} placeholder="ex: BRE VO : AC3 5.1" on:keydown={(e) => e.key === 'Enter' && addCustomAudioLabel()} />
+            <button class="btn-test" on:click={addCustomAudioLabel} disabled={!newAudioLabel.trim()}>+ Ajouter</button>
+          </div>
+          <div class="field-hint">Mergé avec les labels figés LiHDL. Visible immédiatement dans les dropdowns audio.</div>
+        </div>
+        {#if config.custom_audio_labels && config.custom_audio_labels.length > 0}
+          <div class="custom-labels-list">
+            {#each config.custom_audio_labels as lbl, i}
+              <span class="custom-label-pill">
+                <span class="mono">{lbl}</span>
+                <button class="custom-label-remove" on:click={() => removeCustomAudioLabel(i)} title="Supprimer ce label">✕</button>
+              </span>
+            {/each}
+          </div>
+        {/if}
+      </div>
+
+      <div class="card">
+        <div class="card-title">Labels sous-titres personnalisés</div>
+        <div class="field"><label>Ajouter une langue de sous-titre (format figé : « LANG VARIANTE : FORMAT »)</label>
+          <div class="field-row">
+            <input type="text" bind:value={newSubtitleLabel} placeholder="ex: BRE Full : SRT" on:keydown={(e) => e.key === 'Enter' && addCustomSubtitleLabel()} />
+            <button class="btn-test" on:click={addCustomSubtitleLabel} disabled={!newSubtitleLabel.trim()}>+ Ajouter</button>
+          </div>
+          <div class="field-hint">Mergé avec les labels figés LiHDL. Visible immédiatement dans les dropdowns sous-titres.</div>
+        </div>
+        {#if config.custom_subtitle_labels && config.custom_subtitle_labels.length > 0}
+          <div class="custom-labels-list">
+            {#each config.custom_subtitle_labels as lbl, i}
+              <span class="custom-label-pill">
+                <span class="mono">{lbl}</span>
+                <button class="custom-label-remove" on:click={() => removeCustomSubtitleLabel(i)} title="Supprimer ce label">✕</button>
+              </span>
+            {/each}
+          </div>
+        {/if}
+      </div>
+
+      <div class="card">
         <div class="card-title">Dossiers de sortie</div>
         <div class="field"><label>⚡ MUX LiHDL (films)</label>
           <div class="field-row">
@@ -7072,6 +7166,24 @@
   .field-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
   .field-row > input, .field-row > select { flex: 1; min-width: 0; }
   .field-hint { font-size: 11px; color: var(--text3); margin-top: 4px; line-height: 1.5; }
+  .custom-labels-list {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    padding: 10px 0 4px;
+  }
+  .custom-label-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 8px 4px 10px;
+    background: rgba(124, 92, 255, 0.12);
+    border: 1px solid rgba(124, 92, 255, 0.3);
+    border-radius: 4px;
+    font-size: 12px;
+  }
+  .custom-label-remove {
+    background: transparent; border: 0; cursor: pointer;
+    color: rgba(255, 255, 255, 0.5);
+    padding: 0 3px; font-size: 13px; line-height: 1;
+  }
+  .custom-label-remove:hover { color: var(--red-hot, #ff5a4a); }
 
   /* Tracks — glass rows */
   .tracks-section {
