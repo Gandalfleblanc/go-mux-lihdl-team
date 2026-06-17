@@ -52,6 +52,8 @@ export namespace config {
 	    github_repo: string;
 	    github_branch: string;
 	    github_index_file_path: string;
+	    custom_audio_labels: string[];
+	    custom_subtitle_labels: string[];
 	
 	    static createFrom(source: any = {}) {
 	        return new Config(source);
@@ -83,6 +85,8 @@ export namespace config {
 	        this.github_repo = source["github_repo"];
 	        this.github_branch = source["github_branch"];
 	        this.github_index_file_path = source["github_index_file_path"];
+	        this.custom_audio_labels = source["custom_audio_labels"];
+	        this.custom_subtitle_labels = source["custom_subtitle_labels"];
 	    }
 	}
 

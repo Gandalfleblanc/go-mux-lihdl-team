@@ -144,28 +144,28 @@ func ExtractTrackToTemp(ctx context.Context, mkvmergePath, mkvPath string, track
 }
 
 // ExtractChaptersXML extrait les chapitres d'un MKV en format XML standard via
-// "mkvextract chapters". Retourne une erreur si mkvextract introuvable ou si
-// l'extraction échoue. Retourne (false, nil) si le MKV ne contient AUCUN
-// chapitre (pas d'erreur, juste rien à écrire).
-func ExtractChaptersXML(ctx context.Context, mkvmergePath, mkvPath, outputXMLPath string) (bool, error) {
+// "mkvextract chapters". Retourne (count, error) — count = nombre de
+// <ChapterAtom> trouvés (0 si MKV sans chapitres). Pas d'erreur si 0 chapitres ;
+// le fichier de sortie n'est créé que si count > 0.
+func ExtractChaptersXML(ctx context.Context, mkvmergePath, mkvPath, outputXMLPath string) (int, error) {
 	extractBin := findMkvextract(mkvmergePath)
 	if extractBin == "" {
-		return false, errors.New("mkvextract introuvable (à côté de mkvmerge ni sur PATH)")
+		return 0, errors.New("mkvextract introuvable (à côté de mkvmerge ni sur PATH)")
 	}
 	cmd := exec.CommandContext(ctx, extractBin, "chapters", mkvPath)
-	out, err := cmd.Output()
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return false, fmt.Errorf("mkvextract chapters : %w", err)
+		return 0, fmt.Errorf("mkvextract chapters : %w (%s)", err, string(out))
 	}
-	// MKV sans chapitres : mkvextract ne sort rien (ou un XML vide). On évite
-	// d'écrire un fichier vide → l'appelant verra "false" et n'affichera pas le log.
-	if len(out) < 50 || !strings.Contains(string(out), "<ChapterAtom") {
-		return false, nil
+	// Compte les <ChapterAtom> ; si 0 → MKV sans chapitres.
+	count := strings.Count(string(out), "<ChapterAtom")
+	if count == 0 {
+		return 0, nil
 	}
 	if err := os.WriteFile(outputXMLPath, out, 0644); err != nil {
-		return false, err
+		return 0, err
 	}
-	return true, nil
+	return count, nil
 }
 
 // findMkvextract cherche le binaire mkvextract à côté de mkvmerge.

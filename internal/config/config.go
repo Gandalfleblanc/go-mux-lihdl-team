@@ -46,6 +46,12 @@ type Config struct {
 	GitHubRepo          string `json:"github_repo"`             // ex: Gandalfleblanc/go-mux-lihdl-team
 	GitHubBranch        string `json:"github_branch"`           // default: main
 	GitHubIndexFilePath string `json:"github_index_file_path"`  // ex: discord_index.json
+
+	// Labels personnalisés ajoutés par l'utilisateur — mergés avec les listes
+	// hardcodées de naming.go. Format identique aux labels figés
+	// (ex: "BRE VO : AC3 5.1", "BRE Full : SRT").
+	CustomAudioLabels    []string `json:"custom_audio_labels"`
+	CustomSubtitleLabels []string `json:"custom_subtitle_labels"`
 }
 
 // DiscordIndexPath retourne le chemin du JSON local de l'index Discord

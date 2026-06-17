@@ -118,7 +118,7 @@ func (a *App) startup(ctx context.Context) {
 
 // AppVersion est lue par le frontend (pill dans le header) et utilisée pour
 // comparer avec la dernière release GitHub lors du check de mise à jour.
-const AppVersion = "v5.7.2"
+const AppVersion = "v5.7.3"
 
 func (a *App) GetVersion() string { return AppVersion }
 
@@ -141,14 +141,38 @@ type LihdlOptions struct {
 }
 
 func (a *App) GetLihdlOptions() LihdlOptions {
+	cfg := config.Load()
 	return LihdlOptions{
-		AudioLabels:    naming.AudioLabels,
-		SubtitleLabels: naming.SubtitleLabels,
+		AudioLabels:    mergeLabels(naming.AudioLabels, cfg.CustomAudioLabels),
+		SubtitleLabels: mergeLabels(naming.SubtitleLabels, cfg.CustomSubtitleLabels),
 		VideoQualities: naming.VideoQualities,
 		VideoEncoders:  naming.VideoEncoders,
 		VideoSources:   naming.VideoSources,
 		VideoTeams:     naming.VideoTeams,
 	}
+}
+
+// mergeLabels concatène les labels figés + custom, en dédupant (case-sensitive)
+// et en préservant l'ordre original (figés d'abord, custom à la fin).
+func mergeLabels(builtin, custom []string) []string {
+	seen := make(map[string]bool, len(builtin)+len(custom))
+	out := make([]string, 0, len(builtin)+len(custom))
+	for _, l := range builtin {
+		if l == "" || seen[l] {
+			continue
+		}
+		seen[l] = true
+		out = append(out, l)
+	}
+	for _, l := range custom {
+		l = strings.TrimSpace(l)
+		if l == "" || seen[l] {
+			continue
+		}
+		seen[l] = true
+		out = append(out, l)
+	}
+	return out
 }
 
 // --- Helpers fichier ---
@@ -3018,10 +3042,15 @@ func (a *App) Mux(req MuxRequest) error {
 	chaptersTmpPath := ""
 	if !req.NoChapters {
 		tmpXML := req.OutputPath + ".chapters-tmp.xml"
-		if ok, exErr := mkvtool.ExtractChaptersXML(ctx, binary, req.InputPath, tmpXML); exErr == nil && ok {
+		count, exErr := mkvtool.ExtractChaptersXML(ctx, binary, req.InputPath, tmpXML)
+		if exErr != nil {
+			wr.EventsEmit(a.ctx, "log", "⚠ Extraction chapitres : "+exErr.Error())
+		} else if count > 0 {
 			chaptersTmpPath = tmpXML
 			defer os.Remove(tmpXML)
-			wr.EventsEmit(a.ctx, "log", "📑 Chapitres pré-extraits de la source → injectés dans le mux")
+			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("📑 %d chapitre(s) extraits de la source → injectés dans le mux", count))
+		} else {
+			wr.EventsEmit(a.ctx, "log", "ℹ Source sans chapitres natifs — rien à injecter")
 		}
 	}
 
