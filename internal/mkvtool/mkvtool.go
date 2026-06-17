@@ -193,36 +193,39 @@ func findMkvextract(mkvmergePath string) string {
 }
 
 // DetectSubSDHFromContent détecte un sous-titre SDH en cherchant divers
-// marqueurs spécifiques aux malentendants. Conservateur : par défaut Full.
+// marqueurs spécifiques aux malentendants. Seuils sensibles pour ne pas rater
+// les SDH (un sub Full ne contient quasi jamais ces marqueurs).
 //
 // Une piste est SDH si l'un OU plusieurs de :
-//   - 15+ crochets contenant un mot descriptif sound-effect ([Bruit], [Music])
-//   - 10+ notes de musique (♪, ♬, 🎵, 🎶)
-//   - 15+ parenthèses descriptives ((soupir), (rire), (musique), (frapper)…)
-//   - 30+ locuteurs en MAJUSCULES suivis de `:` (HOMME : / FEMME : / etc.)
-//   - score combiné (somme) ≥ 25 (cas mélangés)
+//   - 5+ crochets descriptifs ([bruit], [knock], [KNOCK ON DOOR] majuscules…)
+//   - 3+ notes de musique (♪, ♬, 🎵, 🎶)
+//   - 5+ parenthèses descriptives ((soupir), (rire)…)
+//   - 10+ locuteurs en MAJUSCULES suivis de `:` (HOMME :, JOHN :, MARC :)
+//   - score combiné (somme) ≥ 10 (cas mélangés)
 func DetectSubSDHFromContent(content string) (isSDH bool, score int) {
-	// Liste de mots-clés sound-effect (FR + EN), partagée entre crochets et parenthèses.
-	sfxKeywords := `bruit|son|sound|music|musique|chant|sing|sirène|siren|rire|rit\b|laugh|applaudisse|applause|gasp|soupir|sigh|sanglot|sob|cri|crie\b|scream|shout|chuchot|whisper|cogner|knock|frapper|fracas|crash|bang|bell|sonner|honk|klaxon|footstep|pas\b|respira|breathing|sniff|reniflé|moteur|engine|téléphone|telephone|sonnerie|ringtone|ordinateur|computer|vent|wind|eau|water|silence|porte|door|verre|glass|coup|hit|pleur|cry|halète|pant|tousse|cough|éternue|sneeze|fredonne|hum|grogne|growl|craquement|creak|tonnerre|thunder|explosion|tic-tac|tick|battement|beat|gémit|gémir|murmur|hurle|hurler|aboie|aboyer|miaul|chante|chanter|claquement|sifflement|whistle|grincement|squeak`
-	bracketsRe := regexp.MustCompile(`(?i)\[(` + sfxKeywords + `)`)
-	// Parenthèses descriptives : utilisés en SDH FR pour les actions/onomatopées.
+	// Mots-clés sound-effect FR + EN (large couverture pour minimiser les faux négatifs).
+	sfxKeywords := `bruit|son|sound|music|musique|chant|sing|song|sirène|siren|rire|rit\b|laugh|applaudisse|applause|cheer|gasp|soupir|sigh|sanglot|sob|cri|crie\b|scream|shout|yell|chuchot|whisper|cogner|knock|frapper|fracas|crash|bang|bell|sonner|honk|klaxon|footstep|pas\b|respira|breathing|breath|sniff|reniflé|moteur|engine|téléphone|telephone|phone|sonnerie|ringtone|ringing|ordinateur|computer|vent|wind|eau|water|silence|porte|door|verre|glass|coup|hit|pleur|cry|halète|pant|tousse|cough|éternue|sneeze|fredonne|hum|grogne|growl|craquement|creak|tonnerre|thunder|explosion|boom|tic-tac|tick|battement|beat|beating|gémit|gémir|moan|murmur|hurle|hurler|aboie|aboyer|bark|miaul|meow|chante|chanter|claquement|slam|sifflement|whistle|grincement|squeak|grunt|chatter|murmure|whispering|footsteps|clatter|clinking|rustle|rustling|ticking|fire|feu|grognement|chuckle|giggle|coup\b|chuckling|whispers|whimper|yelp|bark|barking|tires|tire|brake|braking|crackling|crackle|rumble|rumbling|sizzle|sizzling|click|clicking|tap|tapping`
+	// Crochets contenant un keyword OU du texte en majuscules (style SDH ENG "[KNOCK ON DOOR]").
+	bracketsKwRe := regexp.MustCompile(`(?i)\[(` + sfxKeywords + `)`)
+	bracketsUpperRe := regexp.MustCompile(`\[[A-Z][A-Z ,'.\-]{2,40}\]`)
 	parensRe := regexp.MustCompile(`(?i)\((` + sfxKeywords + `)`)
 	musicRe := regexp.MustCompile(`[♪♬🎵🎶]`)
-	// Locuteurs en MAJUSCULES suivis de `:` (en début de ligne ou après tiret).
-	// Ex: "HOMME :", "FEMME :", "JOHN :", "(NARRATEUR) :"
+	// Locuteurs en MAJUSCULES suivis de `:` (début de ligne ou après tiret).
 	speakerRe := regexp.MustCompile(`(?m)^(?:- )?[A-ZÀ-Ý][A-ZÀ-Ý' \-]{2,30} ?: `)
+	// Indication style "(en chuchotant)" / "(s'éloigne)" hors keyword strict.
+	parensGericRe := regexp.MustCompile(`(?i)\((?:en |s')[a-zà-ÿ]{3,20}\)`)
 
-	bracketsCount := len(bracketsRe.FindAllStringIndex(content, -1))
-	parensCount := len(parensRe.FindAllStringIndex(content, -1))
+	bracketsCount := len(bracketsKwRe.FindAllStringIndex(content, -1)) + len(bracketsUpperRe.FindAllStringIndex(content, -1))
+	parensCount := len(parensRe.FindAllStringIndex(content, -1)) + len(parensGericRe.FindAllStringIndex(content, -1))
 	musicCount := len(musicRe.FindAllStringIndex(content, -1))
 	speakerCount := len(speakerRe.FindAllStringIndex(content, -1))
 
 	score = bracketsCount + parensCount + musicCount + speakerCount
-	isSDH = bracketsCount >= 15 ||
-		musicCount >= 10 ||
-		parensCount >= 15 ||
-		speakerCount >= 30 ||
-		score >= 25
+	isSDH = bracketsCount >= 5 ||
+		musicCount >= 3 ||
+		parensCount >= 5 ||
+		speakerCount >= 10 ||
+		score >= 10
 	return
 }
 

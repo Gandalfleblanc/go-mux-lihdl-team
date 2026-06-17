@@ -118,7 +118,7 @@ func (a *App) startup(ctx context.Context) {
 
 // AppVersion est lue par le frontend (pill dans le header) et utilisée pour
 // comparer avec la dernière release GitHub lors du check de mise à jour.
-const AppVersion = "v5.7.4"
+const AppVersion = "v5.7.5"
 
 func (a *App) GetVersion() string { return AppVersion }
 
@@ -1540,7 +1540,15 @@ func (a *App) CheckSubsSync(reqs []SubSyncRequest, sourceMkvPath, referenceMkvPa
 		// qui s'accumule en cours d'épisode, intro coupée, scènes différentes).
 		// Un offset constant ne suffit pas dans ces cas.
 		res, err := alass.Sync(a.ctx, alassPath, sourceMkvPath, entries[mainIdx].inputPath, outputPath, false, fpsGuessDisabledForReq(mainReq), binDir)
-		if err != nil {
+		// Garde-fou : décalage > 30s = forcément un faux match alass (silence,
+		// musique répétitive, intro PSA différente). Pour un mux LiHDL où la
+		// source et le sub viennent du même épisode, le vrai décalage dépasse
+		// rarement quelques secondes. On rejette → sub brut.
+		const maxReasonableShiftMs = 30000
+		if err == nil && res != nil && (res.OffsetMs > maxReasonableShiftMs || res.OffsetMs < -maxReasonableShiftMs) {
+			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ alass %s : décalage aberrant (%d ms > ±30s) → rejeté, sub brut utilisé", filepath.Base(mainReq.Path), res.OffsetMs))
+			results[mainIdx] = SubSyncCheck{Path: mainReq.Path, Error: fmt.Sprintf("décalage aberrant %d ms rejeté", res.OffsetMs)}
+		} else if err != nil {
 			results[mainIdx] = SubSyncCheck{Path: mainReq.Path, Error: err.Error()}
 			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ alass %s : %s", filepath.Base(mainReq.Path), err.Error()))
 		} else {
@@ -1584,6 +1592,12 @@ func (a *App) CheckSubsSync(reqs []SubSyncRequest, sourceMkvPath, referenceMkvPa
 		// Sinon : alass multi-split standard (gère drift non-linéaire).
 		wr.EventsEmit(a.ctx, "log", fmt.Sprintf("🔎 alass multi-split (%d lignes) : %s", e.count, filepath.Base(e.req.Path)))
 		res, err := alass.Sync(a.ctx, alassPath, sourceMkvPath, e.inputPath, outputPath, false, fpsGuessDisabledForReq(e.req), binDir)
+		const maxReasonableShiftMs = 30000
+		if err == nil && res != nil && (res.OffsetMs > maxReasonableShiftMs || res.OffsetMs < -maxReasonableShiftMs) {
+			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ alass %s : décalage aberrant (%d ms > ±30s) → rejeté, sub brut utilisé", filepath.Base(e.req.Path), res.OffsetMs))
+			results[i] = SubSyncCheck{Path: e.req.Path, Error: fmt.Sprintf("décalage aberrant %d ms rejeté", res.OffsetMs)}
+			continue
+		}
 		if err != nil {
 			results[i] = SubSyncCheck{Path: e.req.Path, Error: err.Error()}
 			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ alass %s : %s", filepath.Base(e.req.Path), err.Error()))
