@@ -500,6 +500,10 @@ func buildArgs(p MuxParams) []string {
 	if p.NoChapters {
 		args = append(args, "--no-chapters")
 	}
+	// Toujours retirer les tags Matroska (globaux + par piste) de l'input
+	// primaire : ce sont des metadata résiduelles (titre, artiste, …) souvent
+	// remplis n'importe comment par les sources. Norme LiHDL : MKV propre.
+	args = append(args, "--no-global-tags", "--no-track-tags")
 	args = append(args, p.InputPath)
 
 	// Chapitres externes (--chapters) ajoutés APRÈS l'input primaire pour qu'ils
@@ -567,6 +571,9 @@ func buildArgs(p MuxParams) []string {
 		} else {
 			args = append(args, "--no-subtitles")
 		}
+		// Pas de chapitres / tags depuis le secondaire (les chapitres viennent
+		// du primaire ou de ChaptersXMLPath ; les tags sont toujours nettoyés).
+		args = append(args, "--no-chapters", "--no-global-tags", "--no-track-tags")
 		args = append(args, p.SecondaryPath)
 	}
 
