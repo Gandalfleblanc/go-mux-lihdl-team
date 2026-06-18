@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-06-17T21:12:39Z",
+  "generated_at": "2026-06-18T21:23:02Z",
   "entries": {
     "10234": {
       "tmdb_id": "10234",
@@ -690,6 +690,22 @@
       "thread_id": "1495528599216722170",
       "last_message_id": "1495528880101134507"
     },
+    "40352": {
+      "tmdb_id": "40352",
+      "url": "https://discord.com/channels/994006546805694474/1517020776115732520/1517020776115732520",
+      "title": "Warriors.of.the.Year.2072.1984.CUSTOM.MULTi.VFF.1080p.BluRay.DTS-HD.MA.2.0.H264-LiHDL",
+      "updated_at": "2026-06-18T04:18:57.909000+00:00",
+      "thread_id": "1517020776115732520",
+      "last_message_id": "1517020813935513650"
+    },
+    "40368": {
+      "tmdb_id": "40368",
+      "url": "https://discord.com/channels/994006546805694474/1517020942453182595/1517020942453182595",
+      "title": "Nightmare.1981.CUSTOM.UNCUT.MULTi.VFi.1080p.BluRay.REMUX.AC3.2.0.H264-LiHDL",
+      "updated_at": "2026-06-18T04:19:37.567000+00:00",
+      "thread_id": "1517020942453182595",
+      "last_message_id": "1517020995091955874"
+    },
     "404947": {
       "tmdb_id": "404947",
       "url": "https://discord.com/channels/994006546805694474/1501262068442071050/1501262068442071050",
@@ -761,6 +777,14 @@
       "updated_at": "2026-05-28T13:11:52.570000+00:00",
       "thread_id": "1509544742386667580",
       "last_message_id": "1509544808472117279"
+    },
+    "475210": {
+      "tmdb_id": "475210",
+      "url": "https://discord.com/channels/994006546805694474/1517082016213110794/1517082016213110794",
+      "title": "How.It.Ends.2018.MULTi.TRUEFRENCH.1080p.WEB.H264.EAC3-RiFiFi",
+      "updated_at": "2026-06-18T08:22:18.686000+00:00",
+      "thread_id": "1517082016213110794",
+      "last_message_id": "1517082040846258206"
     },
     "47533": {
       "tmdb_id": "47533",
