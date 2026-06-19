@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-06-18T21:23:02Z",
+  "generated_at": "2026-06-19T20:27:36Z",
   "entries": {
     "10234": {
       "tmdb_id": "10234",
@@ -729,6 +729,14 @@
       "updated_at": "2026-05-26T21:22:49.679000+00:00",
       "thread_id": "1508943518725312522",
       "last_message_id": "1508943518725312522"
+    },
+    "41166": {
+      "tmdb_id": "41166",
+      "url": "https://discord.com/channels/994006546805694474/1517387681892401284/1517387681892401284",
+      "title": "Plenty.1985.CUSTOM.DUAL.VFi.1080p.BluRay.REMUX.AC3.2.0.DTS-HD.MA.2.0.H264-LiHDL",
+      "updated_at": "2026-06-19T04:36:55.063000+00:00",
+      "thread_id": "1517387681892401284",
+      "last_message_id": "1517387757738135705"
     },
     "41244": {
       "tmdb_id": "41244",
