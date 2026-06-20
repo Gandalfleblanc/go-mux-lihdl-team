@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-06-19T20:27:36Z",
+  "generated_at": "2026-06-20T20:19:09Z",
   "entries": {
     "10234": {
       "tmdb_id": "10234",
@@ -753,6 +753,14 @@
       "updated_at": "2026-04-14T17:44:18.247000+00:00",
       "thread_id": "1493668235038556170",
       "last_message_id": "1493668299958128690"
+    },
+    "42604": {
+      "tmdb_id": "42604",
+      "url": "https://discord.com/channels/994006546805694474/1517954345117941910/1517954345117941910",
+      "title": "Goodbye.Colombus.1969.CUSTOM.MULTi.VFi.1080p.WEB-DL.AC3.2.0.H264-LiHDL",
+      "updated_at": "2026-06-20T18:08:38.104000+00:00",
+      "thread_id": "1517954345117941910",
+      "last_message_id": "1517954372875583619"
     },
     "4300": {
       "tmdb_id": "4300",
