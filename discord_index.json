@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-06-29T19:38:23Z",
+  "generated_at": "2026-06-30T19:39:58Z",
   "entries": {
     "10234": {
       "tmdb_id": "10234",
@@ -49,6 +49,14 @@
       "updated_at": "2026-05-04T22:27:05.934000+00:00",
       "thread_id": "1500987159988011068",
       "last_message_id": "1500987159988011068"
+    },
+    "10877": {
+      "tmdb_id": "10877",
+      "url": "https://discord.com/channels/994006546805694474/1521511162280153301/1521511162280153301",
+      "title": "Exit.Wounds.2001.MULTi.VF2.1080p.BluRay.REMUX.CUSTOM.AVC-BuddyMovieRepack",
+      "updated_at": "2026-06-30T13:42:09.398000+00:00",
+      "thread_id": "1521511162280153301",
+      "last_message_id": "1521511223126921427"
     },
     "10974": {
       "tmdb_id": "10974",
