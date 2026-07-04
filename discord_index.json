@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-07-03T20:17:28Z",
+  "generated_at": "2026-07-04T20:11:42Z",
   "entries": {
     "10234": {
       "tmdb_id": "10234",
@@ -570,6 +570,14 @@
       "thread_id": "1493678968359092395",
       "last_message_id": "1497503367294095431"
     },
+    "28489": {
+      "tmdb_id": "28489",
+      "url": "https://discord.com/channels/994006546805694474/1522855768469278720/1522855768469278720",
+      "title": "Syndicate.Sadists.1975.CUSTOM.MULTi.VFF.1080p.BluRay.REMUX.AC3.2.0.DTS-HD.MA.5.1.H264-LiHDL",
+      "updated_at": "2026-07-04T06:45:08.495000+00:00",
+      "thread_id": "1522855768469278720",
+      "last_message_id": "1522855807388090474"
+    },
     "28498": {
       "tmdb_id": "28498",
       "url": "https://discord.com/channels/994006546805694474/1508943715014541414/1508943715014541414",
@@ -913,6 +921,14 @@
       "updated_at": "2026-05-26T21:26:14.386000+00:00",
       "thread_id": "1508944377328959589",
       "last_message_id": "1508944377328959589"
+    },
+    "49967": {
+      "tmdb_id": "49967",
+      "url": "https://discord.com/channels/994006546805694474/1522854911786877028/1522854911786877028",
+      "title": "One.Armed.Boxer.1972.CUSTOM.MULTi.VFi.1080p.BluRay.REMUX.AC3.2.0.H264-LiHDL",
+      "updated_at": "2026-07-04T06:41:44.246000+00:00",
+      "thread_id": "1522854911786877028",
+      "last_message_id": "1522854998445129789"
     },
     "502425": {
       "tmdb_id": "502425",
