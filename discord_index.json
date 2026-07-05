@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-07-04T20:11:42Z",
+  "generated_at": "2026-07-05T20:17:41Z",
   "entries": {
     "10234": {
       "tmdb_id": "10234",
@@ -482,6 +482,14 @@
       "thread_id": "1508944274908254381",
       "last_message_id": "1508944274908254381"
     },
+    "19131": {
+      "tmdb_id": "19131",
+      "url": "https://discord.com/channels/994006546805694474/1523220100537253888/1523220100537253888",
+      "title": "Scotland.Yard.Hunts.Dr.Mabuse.1963.CUSTOM.MULTi.VFF.1080p.BluRay.REMUX.AC3.2.0.DTS.5.1.H264-LiHDL",
+      "updated_at": "2026-07-05T06:52:52.029000+00:00",
+      "thread_id": "1523220100537253888",
+      "last_message_id": "1523220120212603020"
+    },
     "19348": {
       "tmdb_id": "19348",
       "url": "https://discord.com/channels/994006546805694474/1513955692912836699/1513955692912836699",
@@ -945,6 +953,22 @@
       "updated_at": "2026-05-05T16:40:07.003000+00:00",
       "thread_id": "1501262226927915009",
       "last_message_id": "1501262323266883689"
+    },
+    "50382": {
+      "tmdb_id": "50382",
+      "url": "https://discord.com/channels/994006546805694474/1523416346166169600/1523416346166169600",
+      "title": "Monster.in.The.Closet.1986.CUSTOM.MULTi.VFi.1080p.BluRay.REMUX.AC3.2.0.H264-LiHDL",
+      "updated_at": "2026-07-05T19:52:40.633000+00:00",
+      "thread_id": "1523416346166169600",
+      "last_message_id": "1523416368295182436"
+    },
+    "50677": {
+      "tmdb_id": "50677",
+      "url": "https://discord.com/channels/994006546805694474/1523219944161153044/1523219944161153044",
+      "title": "Eyes.of.an.Angel.1991.CUSTOM.DUAL.VFi.1080p.WEB-DL.AC3.2.0.EAC3.2.0.H264-LiHDL",
+      "updated_at": "2026-07-05T06:52:14.746000+00:00",
+      "thread_id": "1523219944161153044",
+      "last_message_id": "1523219971209957417"
     },
     "50723": {
       "tmdb_id": "50723",
