@@ -1709,7 +1709,13 @@
     const prevDelayByID = {};
     const prevTempoByID = {};
     const prevKeepFalseByID = {};
+    // Lookup complet des pistes précédentes pour préserver TOUTES les modifs
+    // manuelles user (label, default, forced, language, order). Sans ça, MUX
+    // AUTO qui rappelle automate() juste avant doMux() écrase tout ce que
+    // l'user a changé dans les dropdowns/checkboxes.
+    const prevTrackByID = {};
     for (const t of secondarySelected) {
+      prevTrackByID[t.id] = t;
       if (t.type === 'audio') {
         if (t.delayMs) prevDelayByID[t.id] = t.delayMs;
         if (t.tempoRatio && t.tempoRatio !== 1.0) prevTempoByID[t.id] = t.tempoRatio;
@@ -1717,6 +1723,16 @@
       // keep:false préservé pour audio ET subs (syncSupplySubsToPSA décoche
       // les subs SUPPLY après alass).
       if (t.keep === false) prevKeepFalseByID[t.id] = true;
+    }
+    const hadPrevSelection = Object.keys(prevTrackByID).length > 0;
+    // Si l'user a DÉJÀ configuré secondarySelected (via 1er automate + modifs
+    // manuelles), on skip complètement le rebuild. Les modifs (suppressions
+    // via ✕, réordonnements ↑↓, changements de labels) sont préservées.
+    // Le rebuild ne se fait qu'au 1er appel (secondarySelected vide) — après
+    // reset, changement de SUPPLY, ou nouveau chargement.
+    if (hadPrevSelection) {
+      appendLog('⚡ Automatisé (rappel) : ' + secondarySelected.filter(t=>t.type==='audio').length + ' audio(s) + ' + secondarySelected.filter(t=>t.type==='subtitles').length + ' sub(s) — modifs manuelles préservées');
+      return;
     }
     // Détecte si syncSupplySubsToPSA a déjà tourné (= externalSubs avec
     // fromReference et label SRT) pour empêcher le re-marquage default+forced
@@ -1727,6 +1743,14 @@
     const seenLangSubs = {};
     let order = 100; // après la vidéo (qui sera order=0..99)
     secondarySelected = secondaryTracks.map(t => {
+      // Si la piste existait déjà dans secondarySelected (= 2ᵉ+ appel automate,
+      // typiquement via MUX AUTO), on la restitue TELLE QUELLE pour préserver
+      // toutes les modifs manuelles de l'user (label, default, forced, etc.).
+      // Seules les pistes nouvelles ou après un RESET passent par le calcul auto.
+      const prev = prevTrackByID[t.id];
+      if (prev) {
+        return { ...prev, codec: t.codec, codec_id: t.codec_id };
+      }
       let label, language, defaultFlag = false, forcedFlag = !!t.forced_track;
       let keepFlag = true;
       if (t.type === 'audio') {
@@ -1795,14 +1819,16 @@
       };
     }).filter(Boolean);
     // Marque la 1ère piste audio FR comme default.
+    // Si secondarySelected préexistait (2ᵉ+ appel automate), on skip les
+    // règles auto pour ne PAS écraser les modifs manuelles de l'user.
     const firstFr = secondarySelected.find(t => t.type === 'audio' && t.language === 'fre');
-    if (firstFr) firstFr.default = true;
+    if (firstFr && !hadPrevSelection) firstFr.default = true;
     // Cas FASTSUB / VOSTFR : pas de doublage FR, on a la VO + sub FR. Donc :
     // - 1ère audio (typiquement ENG VO) → default
     // - 1er sub FR → default + forced (affiché auto sur la VO)
     const langFlag = String(target.flagOverride || '').toUpperCase();
     const isFastsubVO = /FASTSUB|VOSTFR/.test(langFlag);
-    if (isFastsubVO && !firstFr) {
+    if (isFastsubVO && !firstFr && !hadPrevSelection) {
       const firstAudio = secondarySelected.find(t => t.type === 'audio');
       if (firstAudio) firstAudio.default = true;
       // Si syncSupplySubsToPSA a ajouté un sub FR synchronisé en externe,
@@ -1834,11 +1860,14 @@
 
     // Heuristique : si on a 2+ pistes FR audio et qu'une est en 2.0,
     // on la marque automatiquement comme AD (FR AD : <codec> 2.0).
-    const frAudios = secondarySelected.filter(t => t.type === 'audio' && /^FR /.test(t.label || ''));
-    if (frAudios.length >= 2) {
-      for (const t of frAudios) {
-        if (/ 2\.0/.test(t.label || '') && !/^FR AD/.test(t.label)) {
-          t.label = t.label.replace(/^FR (VFF|VFQ|VFi|VOF) /, 'FR AD ');
+    // Skip si secondarySelected préexistait (préserve les modifs manuelles).
+    if (!hadPrevSelection) {
+      const frAudios = secondarySelected.filter(t => t.type === 'audio' && /^FR /.test(t.label || ''));
+      if (frAudios.length >= 2) {
+        for (const t of frAudios) {
+          if (/ 2\.0/.test(t.label || '') && !/^FR AD/.test(t.label)) {
+            t.label = t.label.replace(/^FR (VFF|VFQ|VFi|VOF) /, 'FR AD ');
+          }
         }
       }
     }
