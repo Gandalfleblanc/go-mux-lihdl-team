@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-07-29T20:14:35Z",
+  "generated_at": "2026-07-30T20:16:48Z",
   "entries": {
     "10033": {
       "tmdb_id": "10033",
@@ -33,6 +33,14 @@
       "updated_at": "2026-07-11T04:30:18.360000+00:00",
       "thread_id": "1525358551042625598",
       "last_message_id": "1525358612665598122"
+    },
+    "10419": {
+      "tmdb_id": "10419",
+      "url": "https://discord.com/channels/994006546805694474/1532318986488909894/1532318986488909894",
+      "title": "Swing.Kids.1993.MULTI.VFF.1080p.WEB.AC3.5.1.H264-MuXoR",
+      "updated_at": "2026-07-30T09:28:35.489000+00:00",
+      "thread_id": "1532318986488909894",
+      "last_message_id": "1532319026737578215"
     },
     "1043197": {
       "tmdb_id": "1043197",
@@ -106,6 +114,14 @@
       "thread_id": "1508937721559650356",
       "last_message_id": "1508937721559650356"
     },
+    "11074": {
+      "tmdb_id": "11074",
+      "url": "https://discord.com/channels/994006546805694474/1532314985756229733/1532314985756229733",
+      "title": "Piege.En.Eaux.Troubles.1993.REPACK.MULTI.VF2.1080p.BLURAY.REMUX.TrueHD.5.1.AVC-Raf66",
+      "updated_at": "2026-07-30T09:12:41.640000+00:00",
+      "thread_id": "1532314985756229733",
+      "last_message_id": "1532315011710455889"
+    },
     "11099": {
       "tmdb_id": "11099",
       "url": "https://discord.com/channels/994006546805694474/1491054299978137701/1491054299978137701",
@@ -161,6 +177,14 @@
       "updated_at": "2026-05-14T16:14:54.773000+00:00",
       "thread_id": "1504517374965977229",
       "last_message_id": "1504517422722322433"
+    },
+    "116": {
+      "tmdb_id": "116",
+      "url": "https://discord.com/channels/994006546805694474/1532305909416591472/1532305909416591472",
+      "title": "Match.Point.2005.MULTI.VFF.1080p.BluRay.REMUX.DTS.5.1.AVC-MA42",
+      "updated_at": "2026-07-30T08:36:37.672000+00:00",
+      "thread_id": "1532305909416591472",
+      "last_message_id": "1532305942551466035"
     },
     "1167307": {
       "tmdb_id": "1167307",
@@ -474,6 +498,22 @@
       "thread_id": "1532014563438891079",
       "last_message_id": "1532014611216470106"
     },
+    "15705": {
+      "tmdb_id": "15705",
+      "url": "https://discord.com/channels/994006546805694474/1532374237132623912/1532374237132623912",
+      "title": "Incendiary.2008.CUSTOM.MULTi.VFi.1080p.BLURAY.REMUX.AC3.2.0.H264.AVC-LiHDL",
+      "updated_at": "2026-07-30T13:08:08.269000+00:00",
+      "thread_id": "1532374237132623912",
+      "last_message_id": "1532374299510444264"
+    },
+    "1599": {
+      "tmdb_id": "1599",
+      "url": "https://discord.com/channels/994006546805694474/1532420290292748398/1532420290292748398",
+      "title": "I.Heart.Huckabees.2004.MULTI.1080p.WEBRip.AVC.DD5.1.x264-TAD",
+      "updated_at": "2026-07-30T16:11:08.198000+00:00",
+      "thread_id": "1532420290292748398",
+      "last_message_id": "1532420386103361788"
+    },
     "1620": {
       "tmdb_id": "1620",
       "url": "https://discord.com/channels/994006546805694474/1525358751236882462/1525358751236882462",
@@ -585,6 +625,22 @@
       "updated_at": "2026-07-05T06:52:52.029000+00:00",
       "thread_id": "1523220100537253888",
       "last_message_id": "1523220120212603020"
+    },
+    "1921": {
+      "tmdb_id": "1921",
+      "url": "https://discord.com/channels/994006546805694474/1532318683484131429/1532318683484131429",
+      "title": "Sweet.November.2001.MULTI.VF2.1080p.WEB.AC3.5.1.H264-GLaDOS",
+      "updated_at": "2026-07-30T09:27:23.247000+00:00",
+      "thread_id": "1532318683484131429",
+      "last_message_id": "1532318712881873007"
+    },
+    "192136": {
+      "tmdb_id": "192136",
+      "url": "https://discord.com/channels/994006546805694474/1532305268535197828/1532305268535197828",
+      "title": "Mandela.Un.Long.Chemin.Vers.La.Liberte.2013.VFF.1080p.Bluray.REMUX.DTS.HD.MA.5.1.AVC-OZEF",
+      "updated_at": "2026-07-30T08:34:04.874000+00:00",
+      "thread_id": "1532305268535197828",
+      "last_message_id": "1532305337183375411"
     },
     "19348": {
       "tmdb_id": "19348",
@@ -706,6 +762,14 @@
       "thread_id": "1525358946666156043",
       "last_message_id": "1525359030011301889"
     },
+    "254172": {
+      "tmdb_id": "254172",
+      "url": "https://discord.com/channels/994006546805694474/1532314063751614534/1532314063751614534",
+      "title": "Pere.et.Fille.2015.MULTI.VFF.1080p.BluRay.REMUX.DTS.HD.MA.5.1.AVC-Dvdweed",
+      "updated_at": "2026-07-30T09:09:01.817000+00:00",
+      "thread_id": "1532314063751614534",
+      "last_message_id": "1532314094487732356"
+    },
     "254302": {
       "tmdb_id": "254302",
       "url": "https://discord.com/channels/994006546805694474/1525013318476238899/1525013318476238899",
@@ -762,6 +826,14 @@
       "thread_id": "1502933481582493786",
       "last_message_id": "1502933565518647368"
     },
+    "2928": {
+      "tmdb_id": "2928",
+      "url": "https://discord.com/channels/994006546805694474/1532306670942818495/1532306670942818495",
+      "title": "Michael.1996.MULTI.VF2.1080p.BLURAY.REMUX.DTS.HD.MA.5.1.AVC-ARTHECL0WN",
+      "updated_at": "2026-07-30T08:39:39.234000+00:00",
+      "thread_id": "1532306670942818495",
+      "last_message_id": "1532306701783535820"
+    },
     "29778": {
       "tmdb_id": "29778",
       "url": "https://discord.com/channels/994006546805694474/1508944545558036643/1508944545558036643",
@@ -777,6 +849,14 @@
       "updated_at": "2026-05-04T22:23:03.618000+00:00",
       "thread_id": "1500986143641047160",
       "last_message_id": "1500986143641047160"
+    },
+    "3033": {
+      "tmdb_id": "3033",
+      "url": "https://discord.com/channels/994006546805694474/1532309339212091596/1532309339212091596",
+      "title": "Ni.Dieux.Ni.Demons.1998.REPACK.MULTI.VFF.1080p.BluRay.HDLight.AC3.2.0.x264-REDISDEAD",
+      "updated_at": "2026-07-30T08:50:15.399000+00:00",
+      "thread_id": "1532309339212091596",
+      "last_message_id": "1532309370413645916"
     },
     "3080": {
       "tmdb_id": "3080",
@@ -841,6 +921,14 @@
       "updated_at": "2026-05-11T17:35:18.574000+00:00",
       "thread_id": "1503450443857137704",
       "last_message_id": "1503478366987227237"
+    },
+    "332567": {
+      "tmdb_id": "332567",
+      "url": "https://discord.com/channels/994006546805694474/1532374428757786706/1532374428757786706",
+      "title": "The.Shallows.2016.CUSTOM.MULTi.VF2.1080p.BLURAY.REMUX.DTS.HDMA.5.1.H264.AVC-LiHDL",
+      "updated_at": "2026-07-30T13:08:53.956000+00:00",
+      "thread_id": "1532374428757786706",
+      "last_message_id": "1532374483267223783"
     },
     "33851": {
       "tmdb_id": "33851",
@@ -1042,6 +1130,14 @@
       "thread_id": "1493668235038556170",
       "last_message_id": "1493668299958128690"
     },
+    "420622": {
+      "tmdb_id": "420622",
+      "url": "https://discord.com/channels/994006546805694474/1532308676025651261/1532308676025651261",
+      "title": "My.Wonder.Women.2017.MULTI.VFI.1080p.BLURAY.REMUX.DTS.HD.MA.5.1.AVC-Dvdweed",
+      "updated_at": "2026-07-30T08:47:37.283000+00:00",
+      "thread_id": "1532308676025651261",
+      "last_message_id": "1532308712319094884"
+    },
     "42604": {
       "tmdb_id": "42604",
       "url": "https://discord.com/channels/994006546805694474/1517954345117941910/1517954345117941910",
@@ -1058,6 +1154,14 @@
       "thread_id": "1508937535328620614",
       "last_message_id": "1508937535328620614"
     },
+    "441282": {
+      "tmdb_id": "441282",
+      "url": "https://discord.com/channels/994006546805694474/1532310477240139986/1532310477240139986",
+      "title": "Nomis.2018.MULTI.VFF.1080p.Bluray.REMUX.TrueHD.5.1.AVC-OZEF",
+      "updated_at": "2026-07-30T08:54:46.726000+00:00",
+      "thread_id": "1532310477240139986",
+      "last_message_id": "1532310515605573672"
+    },
     "450766": {
       "tmdb_id": "450766",
       "url": "https://discord.com/channels/994006546805694474/1501265748369211423/1501265748369211423",
@@ -1066,6 +1170,14 @@
       "thread_id": "1501265748369211423",
       "last_message_id": "1501265883518074880"
     },
+    "454227": {
+      "tmdb_id": "454227",
+      "url": "https://discord.com/channels/994006546805694474/1532313005042176092/1532313005042176092",
+      "title": "Outlaw.King.Le.Roi.Hors.La.Loi.2018.MULTI.VFF.1080p.WEB.AC3.5.1.x264-ARK01",
+      "updated_at": "2026-07-30T09:04:49.401000+00:00",
+      "thread_id": "1532313005042176092",
+      "last_message_id": "1532313035568447498"
+    },
     "458027": {
       "tmdb_id": "458027",
       "url": "https://discord.com/channels/994006546805694474/1492460026973917325/1492460026973917325",
@@ -1073,6 +1185,14 @@
       "updated_at": "2026-04-11T09:43:18.997000+00:00",
       "thread_id": "1492460026973917325",
       "last_message_id": "1499372799104520242"
+    },
+    "458723": {
+      "tmdb_id": "458723",
+      "url": "https://discord.com/channels/994006546805694474/1532321002544169081/1532321002544169081",
+      "title": "Us.2019.MULTI.VFF.1080p.Bluray.REMUX.TrueHD.7.1.AVC-OZEF",
+      "updated_at": "2026-07-30T09:36:36.154000+00:00",
+      "thread_id": "1532321002544169081",
+      "last_message_id": "1532321032843694131"
     },
     "464723": {
       "tmdb_id": "464723",
@@ -1354,6 +1474,14 @@
       "thread_id": "1514854873152360530",
       "last_message_id": "1514854901534949527"
     },
+    "745881": {
+      "tmdb_id": "745881",
+      "url": "https://discord.com/channels/994006546805694474/1532319680197558282/1532319680197558282",
+      "title": "The.Medium.2021.MULTi.VFi.1080p.BluRay.ISO.DTS.HD.MA.5.1.AVC-UTT",
+      "updated_at": "2026-07-30T09:31:20.882000+00:00",
+      "thread_id": "1532319680197558282",
+      "last_message_id": "1532319812498231406"
+    },
     "75048": {
       "tmdb_id": "75048",
       "url": "https://discord.com/channels/994006546805694474/1509253140506218496/1509253140506218496",
@@ -1385,6 +1513,14 @@
       "updated_at": "2026-07-10T12:49:18.954000+00:00",
       "thread_id": "1525121743130198157",
       "last_message_id": "1525218682685489276"
+    },
+    "77635": {
+      "tmdb_id": "77635",
+      "url": "https://discord.com/channels/994006546805694474/1532307226289770496/1532307226289770496",
+      "title": "Miss.Bala.2011.MULTI.VFF.1080p.BLURAY.REMUX.DTS.HD.MA.5.1.AVC-TAC",
+      "updated_at": "2026-07-30T08:41:51.639000+00:00",
+      "thread_id": "1532307226289770496",
+      "last_message_id": "1532307282455691314"
     },
     "778106": {
       "tmdb_id": "778106",
@@ -1537,6 +1673,14 @@
       "updated_at": "2026-05-27T19:23:27.932000+00:00",
       "thread_id": "1509275868046954546",
       "last_message_id": "1509275884870307960"
+    },
+    "9827": {
+      "tmdb_id": "9827",
+      "url": "https://discord.com/channels/994006546805694474/1532314467742912684/1532314467742912684",
+      "title": "Phantoms.1998.REPACK.MULTI.VF2.1080p.BLURAY.REMUX.DTS.HD.MA.5.1.AVC-Raf66",
+      "updated_at": "2026-07-30T09:10:38.136000+00:00",
+      "thread_id": "1532314467742912684",
+      "last_message_id": "1532314531651387632"
     },
     "98567": {
       "tmdb_id": "98567",
