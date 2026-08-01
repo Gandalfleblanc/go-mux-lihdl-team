@@ -2558,29 +2558,35 @@
   }
 
   async function addExternalSubs(paths) {
-    let maxOrder = 0;
-    for (const t of tracks) maxOrder = Math.max(maxOrder, t.order ?? 0);
-    for (const s of externalSubs) maxOrder = Math.max(maxOrder, s.order ?? 0);
-
+    // Construire d'abord la liste sans order, puis trier par priorité LiHDL
+    // pour éviter que l'ordre du dialog (Subtitles03/02/01) ne se retrouve
+    // affiché tel quel — on veut FR Forced → FR Full → ENG etc.
+    const newSubs = [];
     for (const p of paths) {
       const name = basename(p);
-      maxOrder += 10;
       let size = -1;
       try { size = await FileSize(p); } catch {}
       const forcedByName = /forced/i.test(name);
       const forcedBySize = isLikelyForcedBySize(name, size);
       const forced = forcedByName || forcedBySize;
-      // Si auto-détecté forced mais le label suggéré dit "Full", corrige en "Forced".
       let label = suggestSubLabelFromFilename(name);
       if (forced && label && label.includes(' Full ')) {
         label = label.replace(' Full ', ' Forced ');
       }
-      externalSubs = [...externalSubs, {
+      newSubs.push({
         path: p, name, size,
         keep: true, default: false,
         forced, label,
-        order: maxOrder,
-      }];
+      });
+    }
+    newSubs.sort((a, b) => subLabelPriority(a.label) - subLabelPriority(b.label));
+    let maxOrder = 0;
+    for (const t of tracks) maxOrder = Math.max(maxOrder, t.order ?? 0);
+    for (const s of externalSubs) maxOrder = Math.max(maxOrder, s.order ?? 0);
+    for (const s of newSubs) {
+      maxOrder += 10;
+      s.order = maxOrder;
+      externalSubs = [...externalSubs, s];
     }
     if (paths.length > 0) {
       appendLog('✓ ' + paths.length + ' sous-titre(s) ajouté(s)');
