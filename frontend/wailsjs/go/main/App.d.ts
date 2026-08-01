@@ -28,6 +28,8 @@ export function CheckVFQ(arg1:string):Promise<boolean>;
 
 export function DetectAudioOffset(arg1:string,arg2:number,arg3:number):Promise<audiosync.DetectionResult>;
 
+export function DetectSubSDH(arg1:string):Promise<Record<string, any>>;
+
 export function DiscordIndexLookup(arg1:string):Promise<string>;
 
 export function DiscordIndexPushGitHub():Promise<string>;

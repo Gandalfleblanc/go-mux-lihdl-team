@@ -42,6 +42,10 @@ export function DetectAudioOffset(arg1, arg2, arg3) {
   return window['go']['main']['App']['DetectAudioOffset'](arg1, arg2, arg3);
 }
 
+export function DetectSubSDH(arg1) {
+  return window['go']['main']['App']['DetectSubSDH'](arg1);
+}
+
 export function DiscordIndexLookup(arg1) {
   return window['go']['main']['App']['DiscordIndexLookup'](arg1);
 }
