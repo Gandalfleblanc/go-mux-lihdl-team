@@ -544,6 +544,10 @@
           return;
         }
         subs.length = 0;
+        // Tri par priorité LiHDL : FR Forced (0) → FR Full (10) → FR SDH (20)
+        // → ENG Forced → ENG Full → ENG SDH. Sans ça, les orders incrémentaux
+        // suivraient l'ordre d'extraction (ENG en 1er si backend le renvoie ainsi).
+        filteredSubs.sort((a, b) => subLabelPriority(a.label) - subLabelPriority(b.label));
         subs.push(...filteredSubs);
         let maxOrder = 0;
         for (const t of tracks) maxOrder = Math.max(maxOrder, t.order ?? 0);
