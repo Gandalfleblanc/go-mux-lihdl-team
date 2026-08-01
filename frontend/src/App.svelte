@@ -5,7 +5,7 @@
   import {
     GetVersion, GetConfig, SaveConfig, GetLihdlOptions,
     SelectMkvFile, SelectMkvFiles, SelectSubFiles, SelectSupFiles, SelectAudioFiles, SelectOutputDir, LocateMkvmerge, OpenFolder, SearchTmdbTV, SearchTmdbMovie, AnalyzeMkvSecondary, MoveToTrash, MoveDirContentsToTrash, LookupHydrackerURL, TestHydrackerKey, TestUnfrKey, OpenURL, GetMkvBasicInfo, ExtractRefSubs, ExtractFRAudios, CheckSubsSync, CheckPSASync, ExtractFirstAudioFromMkv, SyncSupplySubsToPSA,
-    AnalyzeMkv, SearchTmdb, TestTmdbKey, FileSize,
+    AnalyzeMkv, SearchTmdb, TestTmdbKey, FileSize, DetectSubSDH,
     Mux, CancelMux,
     CheckUpdate, InstallUpdate,
     ListAudioTracksForSync, MuxAudioSync, DetectAudioOffset,
@@ -2572,6 +2572,21 @@
       let label = suggestSubLabelFromFilename(name);
       if (forced && label && label.includes(' Full ')) {
         label = label.replace(' Full ', ' Forced ');
+      }
+      // Détection SDH par analyse contenu (crochets [BRUIT], ♪, locuteurs
+      // MAJUSCULES:, parenthèses (soupir)…) — indépendante du nom. Skip si
+      // déjà Forced (sub court) ou pas SRT texte.
+      if (!forced && label && label.includes(' Full ') && /\.(srt|ass|ssa)$/i.test(name)) {
+        try {
+          const res = await DetectSubSDH(p);
+          if (res && res.is_sdh) {
+            const newLabel = label.replace(' Full ', ' SDH ');
+            if (options.subtitle_labels.includes(newLabel)) {
+              label = newLabel;
+              appendLog(`♿ SDH détecté (score ${res.score}) → ${name} : ${label}`);
+            }
+          }
+        } catch {}
       }
       newSubs.push({
         path: p, name, size,

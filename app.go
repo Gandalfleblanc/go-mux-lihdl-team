@@ -118,7 +118,7 @@ func (a *App) startup(ctx context.Context) {
 
 // AppVersion est lue par le frontend (pill dans le header) et utilisée pour
 // comparer avec la dernière release GitHub lors du check de mise à jour.
-const AppVersion = "v5.7.8"
+const AppVersion = "v5.7.9"
 
 func (a *App) GetVersion() string { return AppVersion }
 
@@ -184,6 +184,18 @@ func (a *App) FileSize(path string) int64 {
 		return -1
 	}
 	return info.Size()
+}
+
+// DetectSubSDH lit un fichier SRT/ASS/SSA texte et retourne le verdict SDH
+// (crochets [BRUIT], notes ♪, locuteurs MAJUSCULES:, parenthèses (soupir)…).
+// Utilisé côté frontend pour reclasser un sub Full → SDH juste après l'ajout.
+func (a *App) DetectSubSDH(path string) map[string]any {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return map[string]any{"is_sdh": false, "score": 0, "error": err.Error()}
+	}
+	isSDH, score := mkvtool.DetectSubSDHFromContent(string(data))
+	return map[string]any{"is_sdh": isSDH, "score": score}
 }
 
 // --- Dialogs système ---
