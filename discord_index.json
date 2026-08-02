@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-08-01T20:11:27Z",
+  "generated_at": "2026-08-02T20:12:12Z",
   "entries": {
     "10033": {
       "tmdb_id": "10033",
@@ -330,6 +330,14 @@
       "thread_id": "1513945811191468163",
       "last_message_id": "1513945811191468163"
     },
+    "1282960": {
+      "tmdb_id": "1282960",
+      "url": "https://discord.com/channels/994006546805694474/1533558479724216360/1533558479724216360",
+      "title": "Detained.2024.CUSTOM.MULTi.VFi.1080p.BluRay.REMUX.EAC3.2.0.DTS-HD.MA.5.1.H264-LiHDL",
+      "updated_at": "2026-08-02T19:33:53.705000+00:00",
+      "thread_id": "1533558479724216360",
+      "last_message_id": "1533558551623241890"
+    },
     "1286185": {
       "tmdb_id": "1286185",
       "url": "https://discord.com/channels/994006546805694474/1508404584685633616/1508404584685633616",
@@ -489,6 +497,14 @@
       "updated_at": "2026-05-25T09:42:56.079000+00:00",
       "thread_id": "1508404996935385188",
       "last_message_id": "1508404996935385188"
+    },
+    "1473262": {
+      "tmdb_id": "1473262",
+      "url": "https://discord.com/channels/994006546805694474/1533558320244195510/1533558320244195510",
+      "title": "Black.Panthers.Of.WWII.2025.CUSTOM.DUAL.VFi.1080p.BluRay.REMUX.AC3.2.0.DTS-HD.MA.5.1.H264-LiHDL",
+      "updated_at": "2026-08-02T19:33:15.682000+00:00",
+      "thread_id": "1533558320244195510",
+      "last_message_id": "1533558360614637648"
     },
     "1480382": {
       "tmdb_id": "1480382",
@@ -1528,7 +1544,7 @@
       "title": "Arthur.and.Merlin.Knights.of.Camelot.2020.CUSTOM.MULTi.VFi.1080p.BluRay.REMUX.AC3.2.0.DTS-HD.MA.5.1.",
       "updated_at": "2026-08-01T19:52:18.483000+00:00",
       "thread_id": "1533200725633405210",
-      "last_message_id": "1533204717986119893"
+      "last_message_id": "1533211217404104784"
     },
     "635744": {
       "tmdb_id": "635744",
