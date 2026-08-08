@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-08-07T19:53:32Z",
+  "generated_at": "2026-08-08T19:33:35Z",
   "entries": {
     "10033": {
       "tmdb_id": "10033",
@@ -850,6 +850,14 @@
       "thread_id": "1533006603123425401",
       "last_message_id": "1533006643233816657"
     },
+    "266639": {
+      "tmdb_id": "266639",
+      "url": "https://discord.com/channels/994006546805694474/1535639212366237788/1535639212366237788",
+      "title": "Jem.and.the.Holograms.2015.CUSTOM.MULTi.VFi.1080p.BLURAY.REMUX.AC3.5.1.H264.AVC-LiHDL",
+      "updated_at": "2026-08-08T13:21:59.025000+00:00",
+      "thread_id": "1535639212366237788",
+      "last_message_id": "1535639247611232276"
+    },
     "270303": {
       "tmdb_id": "270303",
       "url": "https://discord.com/channels/994006546805694474/1532709807579201557/1532709807579201557",
@@ -929,6 +937,14 @@
       "updated_at": "2026-07-30T08:39:39.234000+00:00",
       "thread_id": "1532306670942818495",
       "last_message_id": "1532306701783535820"
+    },
+    "2977": {
+      "tmdb_id": "2977",
+      "url": "https://discord.com/channels/994006546805694474/1535638886301040731/1535638886301040731",
+      "title": "Becoming.Jane.2007.CUSTOM.MULTi.VFi.1080p.BLURAY.REMUX.DTS.5.1.H264.VC1-LiHDL",
+      "updated_at": "2026-08-08T13:20:41.285000+00:00",
+      "thread_id": "1535638886301040731",
+      "last_message_id": "1535638934128828498"
     },
     "29778": {
       "tmdb_id": "29778",
@@ -1041,6 +1057,14 @@
       "updated_at": "2026-07-30T13:08:53.956000+00:00",
       "thread_id": "1532374428757786706",
       "last_message_id": "1532374483267223783"
+    },
+    "33542": {
+      "tmdb_id": "33542",
+      "url": "https://discord.com/channels/994006546805694474/1535599189210435624/1535599189210435624",
+      "title": "Rumble.in.the.Bronx.1995.CUSTOM.MULTi.VF2.1080p.BLURAY.REMUX.AAC.2.0.H264.AVC-LiHDL",
+      "updated_at": "2026-08-08T10:42:56.761000+00:00",
+      "thread_id": "1535599189210435624",
+      "last_message_id": "1535599258882015338"
     },
     "33851": {
       "tmdb_id": "33851",
@@ -1289,6 +1313,14 @@
       "updated_at": "2026-05-05T16:54:06.580000+00:00",
       "thread_id": "1501265748369211423",
       "last_message_id": "1501265883518074880"
+    },
+    "45145": {
+      "tmdb_id": "45145",
+      "url": "https://discord.com/channels/994006546805694474/1535710391433302196/1535710391433302196",
+      "title": "Johnny Suede (Johnny Suède) 1991 1080p AMZN WEB-DL Custom MULTI VFI (ChatKnight)",
+      "updated_at": "2026-08-08T18:04:49.437000+00:00",
+      "thread_id": "1535710391433302196",
+      "last_message_id": "1535710449390067763"
     },
     "454227": {
       "tmdb_id": "454227",
@@ -1666,6 +1698,14 @@
       "thread_id": "1494810145522192446",
       "last_message_id": "1497503533996572783"
     },
+    "766431": {
+      "tmdb_id": "766431",
+      "url": "https://discord.com/channels/994006546805694474/1535537856527994910/1535537856527994910",
+      "title": "Hostile.Territory.2022.CUSTOM.MULTi.VFi.1080p.BluRay.REMUX.EAC3.2.0.DTS-HD.MA.5.1.H264-LiHDL",
+      "updated_at": "2026-08-08T06:39:13.910000+00:00",
+      "thread_id": "1535537856527994910",
+      "last_message_id": "1535537879269515324"
+    },
     "774714": {
       "tmdb_id": "774714",
       "url": "https://discord.com/channels/994006546805694474/1525121743130198157/1525121743130198157",
@@ -1721,6 +1761,14 @@
       "updated_at": "2026-05-26T21:20:06.233000+00:00",
       "thread_id": "1508942833183363092",
       "last_message_id": "1508942833183363092"
+    },
+    "82532": {
+      "tmdb_id": "82532",
+      "url": "https://discord.com/channels/994006546805694474/1535639050327953408/1535639050327953408",
+      "title": "Jeff.Who.Lives.At.Home.2011.CUSTOM.MULTi.VFi.1080p.BLURAY.REMUX.AC3.5.1.H264.AVC-LiHDL",
+      "updated_at": "2026-08-08T13:21:20.392000+00:00",
+      "thread_id": "1535639050327953408",
+      "last_message_id": "1535639089167208538"
     },
     "8289": {
       "tmdb_id": "8289",
@@ -1785,6 +1833,14 @@
       "updated_at": "2026-04-14T17:45:46.344000+00:00",
       "thread_id": "1493668604544291006",
       "last_message_id": "1493668642003484722"
+    },
+    "9390": {
+      "tmdb_id": "9390",
+      "url": "https://discord.com/channels/994006546805694474/1535639381136777216/1535639381136777216",
+      "title": "Jerry.Maguire.1996.CUSTOM.MULTi.VF2.1080p.BLURAY.REMUX.AC3.5.1.H264.AVC-LiHDL",
+      "updated_at": "2026-08-08T13:22:39.263000+00:00",
+      "thread_id": "1535639381136777216",
+      "last_message_id": "1535639429065220168"
     },
     "9567": {
       "tmdb_id": "9567",
