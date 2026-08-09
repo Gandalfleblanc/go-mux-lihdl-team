@@ -86,13 +86,14 @@ type Track struct {
 }
 
 type TrackProperties struct {
-	Language        string `json:"language"`
-	TrackName       string `json:"track_name"`
-	AudioChannels   int    `json:"audio_channels"`
-	CodecID         string `json:"codec_id"`
-	DefaultTrack    bool   `json:"default_track"`
-	ForcedTrack     bool   `json:"forced_track"`
-	PixelDimensions string `json:"pixel_dimensions"` // ex "1920x1080"
+	Language           string `json:"language"`
+	TrackName          string `json:"track_name"`
+	AudioChannels      int    `json:"audio_channels"`
+	CodecID            string `json:"codec_id"`
+	DefaultTrack       bool   `json:"default_track"`
+	ForcedTrack        bool   `json:"forced_track"`
+	FlagVisualImpaired bool   `json:"flag_visual_impaired"` // flag Matroska AD
+	PixelDimensions    string `json:"pixel_dimensions"`     // ex "1920x1080"
 }
 
 // Identify exécute "mkvmerge -J <file>" et décode le JSON.

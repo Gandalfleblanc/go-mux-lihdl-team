@@ -382,27 +382,37 @@
       : t);
     appendLog('🇫🇷 Film français (TMDB) → labels FR VFF/VFi/VFQ convertis en FR VOF');
 
-    // Sur un film français : 2+ pistes FR + une en 2.0 → c'est l'audiodescription (FR AD).
-    // Le flag malvoyant + l'insertion de WiTH.AD dans le nom de fichier sont gérés en aval.
-    const toAD = (lbl) => /^FR (VFF|VFQ|VFi|VOF) /.test(lbl || '') && / 2\.0/.test(lbl || '')
-      ? lbl.replace(/^FR (VFF|VFQ|VFi|VOF) /, 'FR AD ')
-      : lbl;
-    const frInternal = tracks.filter(t => t.type === 'audio' && /^FR /.test(t.label || ''));
-    if (frInternal.length >= 2) {
-      tracks = tracks.map(t => t.type === 'audio' ? { ...t, label: toAD(t.label || '') } : t);
-    }
-    const frSecondary = secondarySelected.filter(t => t.type === 'audio' && /^FR /.test(t.label || ''));
-    if (frSecondary.length >= 2) {
-      secondarySelected = secondarySelected.map(t => t.type === 'audio' ? { ...t, label: toAD(t.label || '') } : t);
-    }
-    if (externalAudios.filter(a => /^FR /.test(a.label || '')).length >= 2) {
-      externalAudios = externalAudios.map(a => ({ ...a, label: toAD(a.label || '') }));
-    }
+    // Reclassification en FR AD : UNIQUEMENT si vrais marqueurs (flag Matroska
+    // visual_impaired OU track_name explicite AD/audiodescription/descriptive).
+    // L'ancienne heuristique "2 pistes FR + une 2.0" faisait des faux positifs
+    // (ex: VFF 5.1 + VFQ 2.0 = cas normal, PAS une AD).
+    const toADIfMarked = (t, lbl) => {
+      if (!looksLikeAD(t)) return lbl;
+      if (!/^FR (VFF|VFQ|VFi|VOF) /.test(lbl || '')) return lbl;
+      return lbl.replace(/^FR (VFF|VFQ|VFi|VOF) /, 'FR AD ');
+    };
+    tracks = tracks.map(t => t.type === 'audio' ? { ...t, label: toADIfMarked(t, t.label || '') } : t);
+    secondarySelected = secondarySelected.map(t => t.type === 'audio' ? { ...t, label: toADIfMarked(t, t.label || '') } : t);
     if (tracks.some(t => /^FR AD /.test(t.label || '')) ||
-        secondarySelected.some(t => /^FR AD /.test(t.label || '')) ||
-        externalAudios.some(a => /^FR AD /.test(a.label || ''))) {
-      appendLog('🦮 2ᵉ piste FR 2.0 détectée → labellisée FR AD (audiodescription)');
+        secondarySelected.some(t => /^FR AD /.test(t.label || ''))) {
+      appendLog('🦮 Piste FR AD détectée via flag/track_name explicite');
     }
+  }
+
+  // Détecte une piste AD (audiodescription) via marqueurs EXPLICITES uniquement :
+  //   1. flag Matroska flag_visual_impaired = true
+  //   2. track_name contient AD / audio desc / audiodescription / audiodescrit / descriptive
+  // Sans marqueur → PAS une AD (évite les faux positifs VFF 5.1 + VFQ 2.0).
+  function looksLikeAD(t) {
+    if (!t) return false;
+    if (t.flag_visual_impaired === true || t.visualImpaired === true) return true;
+    const name = String(t.track_name || t.trackName || '').toLowerCase();
+    if (!name) return false;
+    if (/\baudiodescri/.test(name)) return true;
+    if (/\bdescriptive\b/.test(name)) return true;
+    if (/\baudio\s*desc/.test(name)) return true;
+    if (/\bad\b/.test(name) && /(audiodesc|malvoyant|visual|descriptive|décrit|decrit)/.test(name)) return true;
+    return false;
   }
 
   // Toggle VFi : applique le swap immédiat sur toutes les pistes audio FR.
@@ -1862,16 +1872,15 @@
       }
     }
 
-    // Heuristique : si on a 2+ pistes FR audio et qu'une est en 2.0,
-    // on la marque automatiquement comme AD (FR AD : <codec> 2.0).
-    // Skip si secondarySelected préexistait (préserve les modifs manuelles).
+    // Reclassification FR AD : uniquement via marqueurs explicites
+    // (flag_visual_impaired ou track_name AD/audiodescription). L'ancienne
+    // heuristique "2 pistes + 2.0" créait des faux positifs sur VFF+VFQ.
     if (!hadPrevSelection) {
-      const frAudios = secondarySelected.filter(t => t.type === 'audio' && /^FR /.test(t.label || ''));
-      if (frAudios.length >= 2) {
-        for (const t of frAudios) {
-          if (/ 2\.0/.test(t.label || '') && !/^FR AD/.test(t.label)) {
-            t.label = t.label.replace(/^FR (VFF|VFQ|VFi|VOF) /, 'FR AD ');
-          }
+      for (const t of secondarySelected) {
+        if (t.type !== 'audio') continue;
+        if (!/^FR (VFF|VFQ|VFi|VOF) /.test(t.label || '')) continue;
+        if (looksLikeAD(t)) {
+          t.label = t.label.replace(/^FR (VFF|VFQ|VFi|VOF) /, 'FR AD ');
         }
       }
     }
@@ -3741,17 +3750,16 @@
       applyVFiSwap();
     }
 
-    // Heuristique : 2+ pistes FR audio + une en 2.0 → AD (audiodescription)
-    const frAudios = tracks.filter(t => t.type === 'audio' && /^FR /.test(t.label || ''));
-    if (frAudios.length >= 2) {
-      tracks = tracks.map(t => {
-        if (t.type !== 'audio') return t;
-        if (/^FR (VFF|VFQ|VFi|VOF) /.test(t.label || '') && / 2\.0/.test(t.label)) {
-          return { ...t, label: t.label.replace(/^FR (VFF|VFQ|VFi|VOF) /, 'FR AD ') };
-        }
-        return t;
-      });
-    }
+    // Reclassification FR AD : uniquement via marqueurs explicites
+    // (flag_visual_impaired ou track_name AD/audiodescription).
+    tracks = tracks.map(t => {
+      if (t.type !== 'audio') return t;
+      if (!/^FR (VFF|VFQ|VFi|VOF) /.test(t.label || '')) return t;
+      if (looksLikeAD(t)) {
+        return { ...t, label: t.label.replace(/^FR (VFF|VFQ|VFi|VOF) /, 'FR AD ') };
+      }
+      return t;
+    });
 
     // Subs externes : applique aussi la règle FR Forced → keep + default + forced
     // (les externes ne passent pas par automateLihdl ci-dessus, on les traite ici).

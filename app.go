@@ -118,7 +118,7 @@ func (a *App) startup(ctx context.Context) {
 
 // AppVersion est lue par le frontend (pill dans le header) et utilisée pour
 // comparer avec la dernière release GitHub lors du check de mise à jour.
-const AppVersion = "v5.7.9"
+const AppVersion = "v5.8.0"
 
 func (a *App) GetVersion() string { return AppVersion }
 
@@ -437,12 +437,13 @@ func (a *App) AnalyzeMkv(path string) {
 				"type":             t.Type,
 				"codec":            t.Codec,
 				"language":         t.Properties.Language,
-				"track_name":       t.Properties.TrackName,
-				"audio_channels":   t.Properties.AudioChannels,
-				"codec_id":         t.Properties.CodecID,
-				"default_track":    t.Properties.DefaultTrack,
-				"forced_track":     t.Properties.ForcedTrack,
-				"pixel_dimensions": t.Properties.PixelDimensions,
+				"track_name":            t.Properties.TrackName,
+				"audio_channels":        t.Properties.AudioChannels,
+				"codec_id":              t.Properties.CodecID,
+				"default_track":         t.Properties.DefaultTrack,
+				"forced_track":          t.Properties.ForcedTrack,
+				"flag_visual_impaired":  t.Properties.FlagVisualImpaired,
+				"pixel_dimensions":      t.Properties.PixelDimensions,
 			}
 			if mt, ok := mediainfoByID[t.ID]; ok {
 				row["mi_title"] = mt.Title
@@ -531,15 +532,16 @@ func (a *App) AnalyzeMkvSecondary(path string) {
 				continue
 			}
 			row := map[string]any{
-				"id":             t.ID,
-				"type":           t.Type,
-				"codec":          t.Codec,
-				"language":       t.Properties.Language,
-				"track_name":     t.Properties.TrackName,
-				"audio_channels": t.Properties.AudioChannels,
-				"codec_id":       t.Properties.CodecID,
-				"default_track":  t.Properties.DefaultTrack,
-				"forced_track":   t.Properties.ForcedTrack,
+				"id":                    t.ID,
+				"type":                  t.Type,
+				"codec":                 t.Codec,
+				"language":              t.Properties.Language,
+				"track_name":            t.Properties.TrackName,
+				"audio_channels":        t.Properties.AudioChannels,
+				"codec_id":              t.Properties.CodecID,
+				"default_track":         t.Properties.DefaultTrack,
+				"forced_track":          t.Properties.ForcedTrack,
+				"flag_visual_impaired":  t.Properties.FlagVisualImpaired,
 			}
 			if mt, ok := mediainfoByID[t.ID]; ok {
 				row["mi_title"] = mt.Title
