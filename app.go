@@ -118,7 +118,7 @@ func (a *App) startup(ctx context.Context) {
 
 // AppVersion est lue par le frontend (pill dans le header) et utilisée pour
 // comparer avec la dernière release GitHub lors du check de mise à jour.
-const AppVersion = "v5.8.0"
+const AppVersion = "v5.8.1"
 
 func (a *App) GetVersion() string { return AppVersion }
 
@@ -2208,14 +2208,32 @@ func (a *App) CheckPSASync(refMkvPath, candMkvPath, lang string) PSASyncResult {
 			// Critère "décalage trop important" → sync auto IMPOSSIBLE.
 			// On préfère lâcher et demander à l'user un MKV synchro via la
 			// card 3 plutôt que de produire un audio mal resamplé.
+			// Filtre les points à faible confidence (< 0.5) : un match
+			// chromaprint sur silence/générique fait des offsets délirants
+			// (ex: -8710ms conf=0.03) qui feraient déclencher à tort le
+			// garde-fou alors que les 4 autres points sont parfaits.
+			const minConfForGuard = 0.5
 			var maxAbsOffset float64
+			nValid := 0
 			for _, m := range measures {
+				if m.confidence < minConfForGuard {
+					continue
+				}
+				nValid++
 				if math.Abs(m.offsetMs) > maxAbsOffset {
 					maxAbsOffset = math.Abs(m.offsetMs)
 				}
 			}
+			if nValid == 0 {
+				wr.EventsEmit(a.ctx, "log", "⚠ Aucun point de sync fiable (tous en conf < 0.5) — sync auto IMPOSSIBLE. Fournis un MKV synchro via la card ③.")
+				res.Method = "sync-impossible"
+				res.OffsetMs = 0
+				res.TempoRatio = 1.0
+				res.Error = "Aucun point fiable — sync auto impossible. Fournis un MKV synchro via la card ③ Source MKV synchro."
+				return res
+			}
 			if maxAbsOffset > 5000 {
-				wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ Décalage audio trop important (%.0fms max) — sync auto IMPOSSIBLE. Fournis un MKV synchro via la card ③.", maxAbsOffset))
+				wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ Décalage audio trop important (%.0fms max sur %d points fiables) — sync auto IMPOSSIBLE. Fournis un MKV synchro via la card ③.", maxAbsOffset, nValid))
 				res.Method = "sync-impossible"
 				res.OffsetMs = 0
 				res.TempoRatio = 1.0
