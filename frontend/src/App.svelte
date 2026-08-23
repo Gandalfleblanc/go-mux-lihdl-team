@@ -3796,7 +3796,14 @@
     if (forcedFRDone) appendLog('↑ FR Forced placé en 1er dans les sous-titres');
 
     videoChoice.team = 'LiHDL';
-    target.episode = '';
+    // Ne pas vider l'épisode en mode Série (sinon SxxExx disparaît du filename
+    // après MUX AUTO et le nom se retrouve avec l'année à la place, ex:
+    // House.Of.The.Dragon.2022... au lieu de House.Of.The.Dragon.S03E02...).
+    if (tmdbMode === 'movie') {
+      target.episode = '';
+    } else if (!target.episode) {
+      target.episode = detectEpisode((sourcePath || '').split('/').pop()) || 'S01E01';
+    }
 
     // Norme LiHDL : ré-applique l'ordre des pistes (FR VFi/VFF avant FR VFQ)
     // ET réassigne le flag default sur la 1ère piste audio en ordre LiHDL.
