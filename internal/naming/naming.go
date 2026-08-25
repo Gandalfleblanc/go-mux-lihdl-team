@@ -105,7 +105,7 @@ var SubtitleLabels = []string{
 // Dropdowns pour la piste vidéo.
 var (
 	VideoQualities = []string{"HDLight", "WEBRip", "WEB", "WEB.Light", "Custom PSA"}
-	VideoEncoders  = []string{"ASTROBOY", "FilmZ", "Nizo", "JEROMELENAIN", "Arcaldia"}
+	VideoEncoders  = []string{"ASTROBOY", "FilmZ", "Nizo", "JEROMELENAIN", "Arcaldia", "Terminator17754"}
 	VideoSources   = []string{"REMUX LiHDL", "REMUX CUSTOM LiHDL", "WEBRip"}
 	VideoTeams     = []string{"LiHDL", "ASTROBOY"}
 )

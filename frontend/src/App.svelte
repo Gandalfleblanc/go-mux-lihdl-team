@@ -863,6 +863,7 @@
   // Réinitialiser tous les états de la session courante (source, secondaire,
   // pistes, sous-titres externes, TMDB, status). Ne supprime pas les fichiers.
   function resetAll() {
+    lihdlAutomatedOnce = false;
     sourcePath = '';
     sourceInfo = null;
     tracks = [];
@@ -2246,6 +2247,7 @@
 
   // --- actions ---
   function openMkv(path) {
+    lihdlAutomatedOnce = false;
     sourcePath = path;
     sourceInfo = null;
     tracks = [];
@@ -2463,6 +2465,11 @@
       if (t.type === 'video')     base.label = '';
       return base;
     });
+    // Les labels ont été pré-remplis via suggestAudioLabelFlat (qui appelle
+    // le même inferAudioLabel qu'automateLihdl). À partir de là, tout appel
+    // ultérieur d'automateLihdl doit PRÉSERVER les modifs manuelles de l'user
+    // (ex: correction FR VFi → FR AD) au lieu de tout recalculer.
+    lihdlAutomatedOnce = true;
     // Auto-config mode PSA : la PSA fournit la vidéo, le SUPPLY/FW/Super U
     // fournit les audios+subs. Donc on décoche d'office les audios PSA
     // (seront remplacés) et on ne garde que les subs FR + ENG.
@@ -3673,9 +3680,14 @@
 
   // ⚡ MUX MANUEL LiHDL : auto-label de toutes les pistes internes + réglages film.
   // Navigue automatiquement vers Cible une fois les labels appliqués.
+  let lihdlAutomatedOnce = false;
   function automateLihdl(navigateToCible = true) {
     if (!sourcePath) { appendLog('⚠ Charge un fichier d\'abord'); return; }
     if (tracks.length === 0) { appendLog('⚠ Pistes pas encore analysées — patiente'); return; }
+    // 2e appel ou + : préserve les modifs manuelles de l'user (label, keep,
+    // default, forced) au lieu de tout recalculer via inferAudioLabel — sinon
+    // un FR VFi corrigé à la main en FR AD reviendrait à FR VFi au MUX AUTO.
+    const preserveUserEdits = lihdlAutomatedOnce;
     let firstFRdone = false;
     let nbAudio = 0, nbSubs = 0;
     // Si des audios FR externes (extraits) sont présents, le default ira dessus —
@@ -3701,25 +3713,28 @@
         mi_service_kind_name: t.mi_service_kind_name,
       };
       if (t.type === 'audio') {
-        const newLabel = inferAudioLabel(raw);
+        const newLabel = preserveUserEdits && t.label ? t.label : inferAudioLabel(raw);
         const isFR = /^FR /.test(newLabel);
         // Préserve keep: false (piste FR remplacée par extraction) ; sinon true.
         const newKeep = t.keep === false ? false : true;
         // Default : si externes FR présentes, jamais de default sur interne.
-        const isDefault = !hasExternalFRAudio && newKeep && isFR && !firstFRdone;
+        // En preserveUserEdits, on garde le default choisi par l'user.
+        const isDefault = preserveUserEdits ? !!t.default
+          : (!hasExternalFRAudio && newKeep && isFR && !firstFRdone);
         if (isDefault) firstFRdone = true;
         if (newKeep) nbAudio++;
-        return { ...t, label: newLabel, keep: newKeep, default: isDefault, forced: false };
+        const newForced = preserveUserEdits ? !!t.forced : false;
+        return { ...t, label: newLabel, keep: newKeep, default: isDefault, forced: newForced };
       } else { // subtitles
-        const newLabel = inferSubLabel(raw, 0);
+        const newLabel = preserveUserEdits && t.label ? t.label : inferSubLabel(raw, 0);
         const isForcedFR = /^FR( VFF)? Forced\b/.test(newLabel);
         nbSubs++;
         return {
           ...t,
           label: newLabel,
-          keep: true,
-          default: isForcedFR,
-          forced: isForcedFR,
+          keep: preserveUserEdits ? (t.keep !== false) : true,
+          default: preserveUserEdits ? !!t.default : isForcedFR,
+          forced: preserveUserEdits ? !!t.forced : isForcedFR,
         };
       }
     });
@@ -3811,7 +3826,12 @@
     // dans l'ordre SOURCE (souvent FR VFQ si le mkv a VFQ avant VFF).
     applyLihdlTrackOrder();
 
-    appendLog(`⚡ LiHDL automatisé : ${nbAudio} audio(s) + ${nbSubs} sub(s) labellisés → Cible`);
+    if (preserveUserEdits) {
+      appendLog(`⚡ LiHDL automatisé (rappel) : ${nbAudio} audio(s) + ${nbSubs} sub(s) — modifs manuelles préservées`);
+    } else {
+      appendLog(`⚡ LiHDL automatisé : ${nbAudio} audio(s) + ${nbSubs} sub(s) labellisés → Cible`);
+    }
+    lihdlAutomatedOnce = true;
     if (navigateToCible) screen = 'cible';
   }
 
