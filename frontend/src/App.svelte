@@ -247,7 +247,7 @@
 
   // Dropdowns pour le filename (ordre : résolution.source).
   const RESOLUTION_OPTIONS = ['720p', '1080p', '2160p'];
-  const TARGET_SOURCE_OPTIONS = ['HDLight', 'WEBLight', 'WEB-DL', 'WEBRip'];
+  const TARGET_SOURCE_OPTIONS = ['HDLight', 'WEBLight', 'WEB-DL', 'WEBRip', 'REMUX'];
   // Dropdown élargi pour le type de source de la piste vidéo.
   const VIDEO_SOURCE_TYPE_OPTIONS = [
     'REMUX', 'REMUX CUSTOM',
@@ -4976,7 +4976,6 @@
             <div class="vfq-toggle" style:margin-top="6px">
               <span class="srt-label">🔍 Sous-titres SRT :</span>
               <button class="vfq-link" type="button" on:click={() => OpenURL(hydrackerURL || `https://hydracker.com/titles?search=${encodeURIComponent(lastTmdbResult.titre_fr || lastTmdbResult.titre_vo || '')}`)}>Hydra ↗</button>
-              <button class="vfq-link" type="button" on:click={() => OpenURL(`https://unfr.pw/?d=fiche&movieid=${lastTmdbResult.tmdb_id}`)}>UNFR ↗</button>
             </div>
           {/if}
         </div>
