@@ -1985,10 +1985,14 @@
     const dim = v.pixelDims || '';
     const m = /(\d+)x(\d+)/.exec(dim);
     if (!m) return '';
+    const w = parseInt(m[1], 10);
     const h = parseInt(m[2], 10);
-    if (h >= 2100) return '2160p';
-    if (h >= 1070) return '1080p';
-    if (h >= 700)  return '720p';
+    // 4K anamorphique très courant : 3840x1920 (2:1) ou 3840x1600 (2.4:1).
+    // La hauteur peut descendre à 1600 en cropped, la largeur reste ~3840.
+    // On détecte 2160p par largeur >= 3800 OU hauteur >= 2000.
+    if (w >= 3800 || h >= 2000) return '2160p';
+    if (w >= 1900 || h >= 1070) return '1080p';
+    if (w >= 1200 || h >= 700)  return '720p';
     if (h >= 560)  return '576p';
     return h + 'p';
   }
@@ -2477,6 +2481,16 @@
     // ultérieur d'automateLihdl doit PRÉSERVER les modifs manuelles de l'user
     // (ex: correction FR VFi → FR AD) au lieu de tout recalculer.
     lihdlAutomatedOnce = true;
+    // Auto-set résolution depuis les dimensions vidéo réelles (pas juste le
+    // filename) — couvre les cas anamorphiques 4K (3840x1920 = 2160p) et les
+    // fichiers mal nommés. Prime sur toute détection filename précédente.
+    const detectedRes = resolutionFromTracks();
+    if (detectedRes) {
+      if (target.resolution !== detectedRes) {
+        appendLog(`✓ Résolution auto : ${target.resolution || '?'} → ${detectedRes} (via dimensions vidéo réelles)`);
+      }
+      target.resolution = detectedRes;
+    }
     // Auto-config mode PSA : la PSA fournit la vidéo, le SUPPLY/FW/Super U
     // fournit les audios+subs. Donc on décoche d'office les audios PSA
     // (seront remplacés) et on ne garde que les subs FR + ENG.
