@@ -118,7 +118,7 @@ func (a *App) startup(ctx context.Context) {
 
 // AppVersion est lue par le frontend (pill dans le header) et utilisée pour
 // comparer avec la dernière release GitHub lors du check de mise à jour.
-const AppVersion = "v5.8.4"
+const AppVersion = "v5.8.5"
 
 func (a *App) GetVersion() string { return AppVersion }
 
@@ -463,6 +463,50 @@ func (a *App) AnalyzeMkv(path string) {
 				row["mi_hdr_profile"] = mt.HDRFormatProfile
 				row["mi_hdr_string"] = mt.HDRFormatString
 			}
+			// Subs texte FR/ENG : extraire pour détecter SDH + Forced par nombre
+			// de cues. Un vrai FR Forced fait < 100 cues (dialogues étrangers
+			// courts seulement), un Full en fait typiquement 500+. Le flag
+			// mkvmerge forced_track n'est PAS toujours mis par les rippers,
+			// d'où la nécessité d'un backup par comptage.
+			if t.Type == "subtitles" {
+				lang := strings.ToLower(t.Properties.Language)
+				codecID := strings.ToUpper(t.Properties.CodecID)
+				isText := strings.Contains(codecID, "TEXT") || strings.Contains(codecID, "UTF") ||
+					strings.Contains(codecID, "ASS") || strings.Contains(codecID, "SSA")
+				isFR := lang == "fre" || lang == "fra" || lang == "fr"
+				isEN := lang == "eng" || lang == "en"
+				if isText && (isFR || isEN) {
+					tmpPath, exErr := mkvtool.ExtractTrackToTemp(a.ctx, binary, path, t.ID, "srt")
+					if exErr == nil {
+						content, _ := os.ReadFile(tmpPath)
+						os.Remove(tmpPath)
+						nCues := strings.Count(string(content), "-->")
+						row["cue_count"] = nCues
+						forcedHint := nCues > 0 && nCues < 100
+						row["sub_forced_hint"] = forcedHint
+						if isFR {
+							isSDH, score := mkvtool.DetectSubSDHFromContent(string(content))
+							row["sdh_detected"] = isSDH
+							row["sdh_score"] = score
+							variant := "Full"
+							if forcedHint {
+								variant = "Forced"
+							} else if isSDH {
+								variant = "SDH"
+							}
+							wr.EventsEmit(a.ctx, "log", fmt.Sprintf("✓ sub #%d FR : %d cues, SDH score %d → %s", t.ID, nCues, score, variant))
+						} else {
+							variant := "Full"
+							if forcedHint {
+								variant = "Forced"
+							}
+							wr.EventsEmit(a.ctx, "log", fmt.Sprintf("✓ sub #%d ENG : %d cues → %s", t.ID, nCues, variant))
+						}
+					} else {
+						wr.EventsEmit(a.ctx, "log", "⚠ extract sub #"+itoa(t.ID)+" : "+exErr.Error())
+					}
+				}
+			}
 			tracksPayload = append(tracksPayload, row)
 		}
 		wr.EventsEmit(a.ctx, "log", "🔔 emit analyze:start n="+itoa(len(tracksPayload)))
@@ -569,10 +613,20 @@ func (a *App) AnalyzeMkvSecondary(path string) {
 					if exErr == nil {
 						content, _ := os.ReadFile(tmpPath)
 						os.Remove(tmpPath)
+						nCues := strings.Count(string(content), "-->")
+						row["cue_count"] = nCues
+						forcedHint := nCues > 0 && nCues < 100
+						row["sub_forced_hint"] = forcedHint
 						isSDH, score := mkvtool.DetectSubSDHFromContent(string(content))
 						row["sdh_detected"] = isSDH
 						row["sdh_score"] = score
-						wr.EventsEmit(a.ctx, "log", fmt.Sprintf("✓ sub #%d FR : score SDH = %d → %s", t.ID, score, map[bool]string{true: "SDH", false: "Full"}[isSDH]))
+						variant := "Full"
+						if forcedHint {
+							variant = "Forced"
+						} else if isSDH {
+							variant = "SDH"
+						}
+						wr.EventsEmit(a.ctx, "log", fmt.Sprintf("✓ sub #%d FR : %d cues, SDH score %d → %s", t.ID, nCues, score, variant))
 					} else {
 						wr.EventsEmit(a.ctx, "log", "⚠ extract sub #"+itoa(t.ID)+" : "+exErr.Error())
 					}

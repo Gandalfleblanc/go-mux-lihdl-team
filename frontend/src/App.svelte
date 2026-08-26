@@ -1446,7 +1446,9 @@
       String(track.mi_service_kind_name || ''),
     ].join(' ').toLowerCase();
     const codecId = String(track.codec_id || track.codec || '').toUpperCase();
-    const forced = !!track.forced_track;
+    // Forced : flag Matroska OU hint content (cue_count < 100) OU nom explicite.
+    // sub_forced_hint est calculé par le backend pour les subs texte FR/ENG.
+    const forced = !!track.forced_track || !!track.sub_forced_hint;
     const isHI = /^hi$/i.test(String(track.mi_service_kind || ''));
     let fmt = 'SRT';
     if (codecId.includes('PGS') || codecId.includes('HDMV')) fmt = 'PGS';
@@ -1457,12 +1459,12 @@
       else                                       prefix = 'FR';
     } else if (lang === 'eng' || lang === 'en') prefix = 'ENG';
     // Règle simplifiée : Forced > SDH (explicite uniquement) > Full (défaut).
-    // SDH ne se déclenche QUE si mediainfo dit ServiceKind=HI OU si le nom
-    // de piste contient un mot-clé Sourds/Malentendants explicite.
+    // SDH ne se déclenche QUE si mediainfo dit ServiceKind=HI, sdh_detected
+    // du backend, OU si le nom de piste contient un mot-clé explicite.
     let kind = 'Full';
     if (forced || /forc(é|e)/i.test(hints)) {
       kind = 'Forced';
-    } else if (isHI || /\bsdh\b|sourds|hearing|malentend/i.test(hints)) {
+    } else if (isHI || !!track.sdh_detected || /\bsdh\b|sourds|hearing|malentend/i.test(hints)) {
       kind = 'SDH';
     }
     return `${prefix} ${kind} : ${fmt}`;
@@ -2442,7 +2444,12 @@
         pixelDims: t.pixel_dimensions || '',
         keep: true,
         default: !!t.default_track,
-        forced: !!t.forced_track,
+        // Le flag Matroska forced_track n'est PAS toujours mis par les rippers.
+        // sub_forced_hint (backend, basé sur cue count < 100) sert de backup.
+        forced: !!t.forced_track || !!t.sub_forced_hint,
+        sub_forced_hint: !!t.sub_forced_hint,
+        cue_count: typeof t.cue_count === 'number' ? t.cue_count : -1,
+        sdh_detected: !!t.sdh_detected,
         name: t.track_name || '',
         order: i * 10,
         // Champs mediainfo (peuvent être absents) — utilisés par automateLihdl
@@ -3702,6 +3709,9 @@
         codec_id: t.codecId,
         codec: t.codec,
         forced_track: t.forced,
+        sub_forced_hint: t.sub_forced_hint,
+        cue_count: t.cue_count,
+        sdh_detected: t.sdh_detected,
         mi_title: t.mi_title,
         mi_format: t.mi_format,
         mi_format_profile: t.mi_format_profile,
