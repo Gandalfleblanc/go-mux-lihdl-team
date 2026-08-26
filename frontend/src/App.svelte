@@ -864,6 +864,7 @@
   // pistes, sous-titres externes, TMDB, status). Ne supprime pas les fichiers.
   function resetAll() {
     lihdlAutomatedOnce = false;
+    seriesLabelOverrides = {};
     sourcePath = '';
     sourceInfo = null;
     tracks = [];
@@ -965,6 +966,71 @@
   // Queue batch : liste de .mkv en attente de mux.
   let queue = [];
   let bottomPaneTab = 'journal'; // 'journal' | 'queue' — tab actif dans la card secondaire en bas droite
+  // Auto-continue : après un mux OK, charge le prochain de la queue et relance
+  // MUX AUTO automatiquement (chain complet, épisode après épisode).
+  let queueAutoContinue = false;
+  // Overrides série : snapshot des labels/keep/default/forced du dernier mux
+  // réussi, indexés par ${type}-${lang}-${nthOfSameLang}. Rejoués sur les
+  // épisodes suivants pour propager les corrections manuelles de l'user
+  // (ex: FR VFi → FR AD sur ép1 s'applique à ép2, ép3, …).
+  let seriesLabelOverrides = {};
+  function snapshotSeriesOverrides() {
+    const langCounters = { audio: {}, subtitles: {} };
+    const snap = {};
+    for (const t of tracks) {
+      if (t.type !== 'audio' && t.type !== 'subtitles') continue;
+      const lang = (t.lang || '').toLowerCase();
+      langCounters[t.type][lang] = (langCounters[t.type][lang] || 0) + 1;
+      const n = langCounters[t.type][lang];
+      snap[`${t.type}-${lang}-${n}`] = {
+        label: t.label,
+        keep: t.keep !== false,
+        default: !!t.default,
+        forced: !!t.forced,
+      };
+    }
+    seriesLabelOverrides = snap;
+  }
+  function applySeriesOverrides() {
+    if (Object.keys(seriesLabelOverrides).length === 0) return { applied: 0, dropped: 0 };
+    const langCounters = { audio: {}, subtitles: {} };
+    let applied = 0, dropped = 0;
+    tracks = tracks.map(t => {
+      if (t.type !== 'audio' && t.type !== 'subtitles') return t;
+      const lang = (t.lang || '').toLowerCase();
+      langCounters[t.type][lang] = (langCounters[t.type][lang] || 0) + 1;
+      const n = langCounters[t.type][lang];
+      const ov = seriesLabelOverrides[`${t.type}-${lang}-${n}`];
+      if (ov) {
+        applied++;
+        return { ...t, label: ov.label, keep: ov.keep, default: ov.default, forced: ov.forced };
+      }
+      // Pas d'override pour cette piste → l'user l'avait supprimée/décochée
+      // sur l'épisode précédent. On force keep=false pour propager la
+      // "suppression" (garde la piste dans la liste pour permettre re-check
+      // manuel si besoin, mais elle ne rentrera pas dans le mux).
+      if (t.keep !== false) {
+        dropped++;
+        return { ...t, keep: false, default: false, forced: false };
+      }
+      return t;
+    });
+    return { applied, dropped };
+  }
+  function waitForAnalyzeComplete(timeoutMs = 30000) {
+    return new Promise((resolve, reject) => {
+      const started = Date.now();
+      const timer = setInterval(() => {
+        if (tracks.length > 0 && sourceInfo) {
+          clearInterval(timer);
+          setTimeout(resolve, 600); // laisse suggestLabels+overrides s'appliquer
+        } else if (Date.now() - started > timeoutMs) {
+          clearInterval(timer);
+          reject(new Error('analyze timeout'));
+        }
+      }, 200);
+    });
+  }
 
   function queueAdd(paths) {
     if (!paths || !paths.length) return;
@@ -2482,6 +2548,16 @@
     // ultérieur d'automateLihdl doit PRÉSERVER les modifs manuelles de l'user
     // (ex: correction FR VFi → FR AD) au lieu de tout recalculer.
     lihdlAutomatedOnce = true;
+    // Rejoue les overrides série (labels/keep/default/forced du précédent mux
+    // dans le batch). Permet de propager les corrections manuelles ET les
+    // suppressions de pistes à travers tous les épisodes de la série.
+    const res = applySeriesOverrides();
+    if (res.applied > 0 || res.dropped > 0) {
+      const parts = [];
+      if (res.applied > 0) parts.push(`${res.applied} label(s) rejoué(s)`);
+      if (res.dropped > 0) parts.push(`${res.dropped} piste(s) auto-décochée(s) (retirées sur ép. précédent)`);
+      appendLog(`⤴ ${parts.join(', ')} depuis l'épisode précédent (queue)`);
+    }
     // Auto-set résolution depuis les dimensions vidéo réelles (pas juste le
     // filename) — couvre les cas anamorphiques 4K (3840x1920 = 2160p) et les
     // fichiers mal nommés. Prime sur toute détection filename précédente.
@@ -3862,10 +3938,28 @@
     if (autoMuxStatusTimer) { clearTimeout(autoMuxStatusTimer); autoMuxStatusTimer = null; }
     automateLihdl(false); // pas de navigation, on reste sur source pour la barre de progress
     await new Promise(r => setTimeout(r, 200));
+    // Snapshot des labels/keep/default/forced JUSTE avant le mux → propagé
+    // aux épisodes suivants de la queue si Auto-continue est actif.
+    snapshotSeriesOverrides();
     const ok = await doMux();
     autoMuxStatus = ok ? 'success' : 'error';
     // Pas d'auto-clear timer : la barre verte/rouge reste visible jusqu'au prochain mux ou reset manuel.
     if (ok) await autoResetAfterMux(true);
+    // Auto-continue : charge le prochain épisode et relance MUX AUTO.
+    if (ok && queueAutoContinue && queue.length > 0) {
+      const nextPath = queue[0];
+      queue = queue.slice(1);
+      appendLog(`🤖 Auto-continue : chargement de ${nextPath.split('/').pop()} (${queue.length} restant(s))…`);
+      openMkv(nextPath);
+      try {
+        await waitForAnalyzeComplete();
+        await muxAutoLihdl(); // récursion — la queue diminue à chaque tour
+      } catch (e) {
+        appendLog('❌ Auto-continue interrompu : ' + String(e));
+      }
+    } else if (ok && queueAutoContinue && queue.length === 0) {
+      appendLog('✅ Auto-continue : queue vidée — série terminée');
+    }
   }
 
   // MUX AUTO : automate puis lance le mux directement, sans passer par Cible.
@@ -5086,6 +5180,10 @@
                   <div class="queue-empty-title">File vide</div>
                 </div>
               {:else}
+                <label class="queue-auto-toggle" title="Après chaque mux OK, charge automatiquement l'épisode suivant et relance MUX AUTO. Les corrections manuelles de labels sont propagées aux épisodes suivants.">
+                  <input type="checkbox" bind:checked={queueAutoContinue} disabled={muxing} />
+                  <span>🤖 Auto-continuer (série complète)</span>
+                </label>
                 <ul class="queue-list">
                   {#each queue as p, i}
                     <li class="queue-row" class:current={p === sourcePath}>
@@ -6030,6 +6128,22 @@
     margin-top: 6px;
     flex-shrink: 0;
   }
+  .queue-auto-toggle {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 10px;
+    margin-bottom: 6px;
+    background: rgba(124, 92, 255, 0.12);
+    border: 1px solid rgba(124, 92, 255, 0.32);
+    border-radius: 6px;
+    font-size: 11px; font-weight: 600; color: var(--text);
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .queue-auto-toggle:has(input:checked) {
+    background: rgba(124, 92, 255, 0.28);
+    border-color: rgba(124, 92, 255, 0.6);
+  }
+  .queue-auto-toggle input { margin: 0; cursor: pointer; }
   .journal-scroll {
     flex: 1 1 auto;
     min-height: 0;
