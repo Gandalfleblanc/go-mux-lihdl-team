@@ -1413,8 +1413,9 @@
     const trackName = String(track.track_name || '').toUpperCase();
     const isAtmos = features.includes('JOC') || trackName.includes('ATMOS');
     // Service kind mediainfo : VI = Visual Impaired (audiodescription), HI = Hearing Impaired
+    // Descripteurs FR/EN courants : audiodescription, descriptive, malvoyant, décrit, audio description
     const isAD = /^vi$/i.test(String(track.mi_service_kind || '')) ||
-                 /audio.?descrip|\bad\b|vmal|malvoyant|visual.?impair/i.test(hints);
+                 /audio.?descrip|audiodescri|descriptive|\bad\b|vmal|malvoyant|visual.?impair|d[eé]crit/i.test(hints);
     // Préfixe langue + variante FR
     let prefix = 'ENG VO';
     if (lang === 'fre' || lang === 'fra' || lang === 'fr') {
@@ -2900,29 +2901,24 @@
     return options.audio_labels.includes(candidate) ? candidate : '';
   }
   function suggestSubLabelFlat(t) {
-    const lang = (t.lang || '').toLowerCase();
-    const codec = ((t.codec || '') + ' ' + (t.codecId || '')).toUpperCase();
-    const isPGS = codec.includes('PGS') || codec.includes('HDMV');
-    const fmt = isPGS ? 'PGS' : 'SRT';
-    const forced = !!t.forced;
-    // SDH : mediainfo ServiceKind=HI OU sdh_detected du backend (FR uniquement)
-    // OU track_name explicite (sourds/hearing/SDH/malentendants).
-    const isHI = /^hi$/i.test(String(t.mi_service_kind || '')) ||
-                 /hearing|impair|deaf/i.test(String(t.mi_service_kind_name || ''));
-    const nameHints = String(t.track_name || '') + ' ' + String(t.mi_title || '');
-    const isSDHName = /\bsdh\b|sourds|hearing|malentend/i.test(nameHints);
-    const isSDH = !!t.sdh_detected || isHI || isSDHName;
-    let kind;
-    if (forced) kind = 'Forced';
-    else if (isSDH) kind = 'SDH';
-    else kind = 'Full';
-    if (lang === 'fre' || lang === 'fra' || lang === 'fr') {
-      return `FR ${kind} : ${fmt}`;
-    }
-    if (lang === 'eng' || lang === 'en') {
-      return `ENG ${kind} : ${fmt}`;
-    }
-    return '';
+    // Adapte la track interne (camelCase) au format attendu par inferSubLabel
+    // (snake_case + hints mediainfo/backend). Bénéficie AUTOMATIQUEMENT des
+    // détections VFQ/VFF (canadian/quebec/vff), Forced (flag+cue count),
+    // SDH (mediainfo/sdh_detected/track_name) au chargement initial.
+    const raw = {
+      language: t.lang,
+      track_name: t.name,
+      codec_id: t.codecId,
+      codec: t.codec,
+      forced_track: t.forced,
+      sub_forced_hint: t.sub_forced_hint,
+      sdh_detected: t.sdh_detected,
+      mi_title: t.mi_title,
+      mi_service_kind: t.mi_service_kind,
+      mi_service_kind_name: t.mi_service_kind_name,
+    };
+    const candidate = inferSubLabel(raw, 0);
+    return options.subtitle_labels.includes(candidate) ? candidate : '';
   }
 
   // Construit le titre "Titre FR (Année)" — TOUJOURS le titre français TMDB
