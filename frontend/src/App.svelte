@@ -927,16 +927,36 @@
         }
       }
     } else {
-      // LiHDL : vide tout le contenu du dossier "LiHDL en cours" (norme :
-      // tous les fichiers source/référence/SUPPLY/subs externes y vivent).
-      const lihdlEnCoursDir = '/Users/gandalf/Downloads/LiHDL en cours';
-      try {
-        const n = await MoveDirContentsToTrash(lihdlEnCoursDir);
-        if (n > 0) {
-          appendLog(`🗑 ${n} élément(s) du dossier "LiHDL en cours" envoyé(s) à la corbeille`);
+      // LiHDL : par défaut, vide tout le contenu du dossier "LiHDL en cours"
+      // (norme : tous les fichiers source/référence/SUPPLY/subs externes y vivent).
+      // MAIS en auto-continue de queue avec des épisodes restants, on ne
+      // trash QUE les fichiers de l'épisode courant sinon les épisodes
+      // suivants (aussi dans "LiHDL en cours") partiraient à la corbeille.
+      if (queueAutoContinue && queue.length > 0) {
+        const filesForThisEp = [
+          sourcePath,
+          referencePath,
+          ...externalSubs.map(s => s.path).filter(Boolean),
+          ...externalAudios.map(a => a.path).filter(Boolean),
+        ].filter(Boolean);
+        if (filesForThisEp.length > 0) {
+          try {
+            await MoveToTrash(filesForThisEp);
+            appendLog(`🗑 ${filesForThisEp.length} fichier(s) de l'épisode courant envoyé(s) à la corbeille (queue préservée)`);
+          } catch (e) {
+            appendLog('⚠ corbeille fichiers épisode : ' + String(e));
+          }
         }
-      } catch (e) {
-        appendLog('⚠ vidage "LiHDL en cours" : ' + String(e));
+      } else {
+        const lihdlEnCoursDir = '/Users/gandalf/Downloads/LiHDL en cours';
+        try {
+          const n = await MoveDirContentsToTrash(lihdlEnCoursDir);
+          if (n > 0) {
+            appendLog(`🗑 ${n} élément(s) du dossier "LiHDL en cours" envoyé(s) à la corbeille`);
+          }
+        } catch (e) {
+          appendLog('⚠ vidage "LiHDL en cours" : ' + String(e));
+        }
       }
     }
     // Reset UI désactivé après mux : on garde l'état + le log visibles pour
@@ -3949,10 +3969,19 @@
     if (ok && queueAutoContinue && queue.length > 0) {
       const nextPath = queue[0];
       queue = queue.slice(1);
+      // Mémorise la validation TMDB avant openMkv (qui la reset).
+      const prevTmdb = lastTmdbResult;
       appendLog(`🤖 Auto-continue : chargement de ${nextPath.split('/').pop()} (${queue.length} restant(s))…`);
       openMkv(nextPath);
       try {
         await waitForAnalyzeComplete();
+        // Auto-valide la fiche TMDB (même série sur tous les épisodes de la
+        // queue → pas besoin de re-demander confirmation à chaque épisode).
+        if (prevTmdb) {
+          lastTmdbResult = prevTmdb;
+          tmdbValidated = true;
+          appendLog(`🤖 Auto-continue : fiche TMDB « ${prevTmdb.titre_fr || prevTmdb.titre_vo} » ré-appliquée`);
+        }
         await muxAutoLihdl(); // récursion — la queue diminue à chaque tour
       } catch (e) {
         appendLog('❌ Auto-continue interrompu : ' + String(e));
