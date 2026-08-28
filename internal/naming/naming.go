@@ -39,6 +39,7 @@ var AudioLabels = []string{
 	"ENG VO : AAC 5.1",
 	"ENG VO : AC3 2.0",
 	"ENG VO : AC3 5.1",
+	"ENG VO : EAC3 2.0",
 	"ENG VO : EAC3 5.1",
 	"ENG VO : EAC3 5.1 ATMOS",
 	"ITA VO : AC3 5.1",
