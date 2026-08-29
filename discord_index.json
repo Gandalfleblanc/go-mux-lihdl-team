@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-08-28T03:31:24Z",
+  "generated_at": "2026-08-29T02:01:07Z",
   "entries": {
     "10033": {
       "tmdb_id": "10033",
@@ -33,6 +33,14 @@
       "updated_at": "2026-07-11T04:30:18.360000+00:00",
       "thread_id": "1525358551042625598",
       "last_message_id": "1525358612665598122"
+    },
+    "1037264": {
+      "tmdb_id": "1037264",
+      "url": "https://discord.com/channels/994006546805694474/1542793034423341147/1542793034423341147",
+      "title": "La.Disparition.de.Josef.Mengele.2025.MULTi.VFi.1080p.BLURAY.REMUX-DJF",
+      "updated_at": "2026-08-28T07:08:43.115000+00:00",
+      "thread_id": "1542793034423341147",
+      "last_message_id": "1542793034423341147"
     },
     "10419": {
       "tmdb_id": "10419",
@@ -474,6 +482,14 @@
       "thread_id": "1529727882492907581",
       "last_message_id": "1529727908292329563"
     },
+    "13988": {
+      "tmdb_id": "13988",
+      "url": "https://discord.com/channels/994006546805694474/1542893349713748140/1542893349713748140",
+      "title": "The.Art.of.War.II.Betrayal.2008.CUSTOM.MULTi.VFi.1080p.WEB.DL.E.AC3.5.1.H264-LiHDL",
+      "updated_at": "2026-08-28T13:47:20.144000+00:00",
+      "thread_id": "1542893349713748140",
+      "last_message_id": "1542893418169106506"
+    },
     "14003": {
       "tmdb_id": "14003",
       "url": "https://discord.com/channels/994006546805694474/1530828402699800656/1530828402699800656",
@@ -730,6 +746,14 @@
       "thread_id": "1523220100537253888",
       "last_message_id": "1523220120212603020"
     },
+    "19197": {
+      "tmdb_id": "19197",
+      "url": "https://discord.com/channels/994006546805694474/1542857733005385768/1542857733005385768",
+      "title": "Mum.and.Dad.2008.Custom.VFF.MULTI.1080i.BluRay.REMUX.DTS-HD.MA.2.0.AVC-RAPTOR",
+      "updated_at": "2026-08-28T11:25:48.459000+00:00",
+      "thread_id": "1542857733005385768",
+      "last_message_id": "1542857733005385768"
+    },
     "1921": {
       "tmdb_id": "1921",
       "url": "https://discord.com/channels/994006546805694474/1532318683484131429/1532318683484131429",
@@ -873,6 +897,14 @@
       "updated_at": "2026-06-09T17:20:00.891000+00:00",
       "thread_id": "1513955842917929153",
       "last_message_id": "1513955881077706873"
+    },
+    "24756": {
+      "tmdb_id": "24756",
+      "url": "https://discord.com/channels/994006546805694474/1542893560226119730/1542893560226119730",
+      "title": "The.Art.of.War.III.Retribution.2009.CUSTOM.MULTi.VFi.1080p.WEB.DL.AC3.2.0.H264-LiHDL",
+      "updated_at": "2026-08-28T13:48:10.334000+00:00",
+      "thread_id": "1542893560226119730",
+      "last_message_id": "1542893596150210622"
     },
     "249": {
       "tmdb_id": "249",
