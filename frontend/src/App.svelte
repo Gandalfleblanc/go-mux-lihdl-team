@@ -1539,7 +1539,11 @@
     const isHI = /^hi$/i.test(String(track.mi_service_kind || ''));
     let fmt = 'SRT';
     if (codecId.includes('PGS') || codecId.includes('HDMV')) fmt = 'PGS';
-    let prefix = 'ENG';
+    // Prefix : uniquement FR/ENG dans les labels LiHDL. Pour toute autre
+    // langue (hun/ita/jpn/kor/spa/…), on met le code langue en majuscules
+    // — sortira des options.subtitle_labels donc suggestSubLabelFlat le
+    // filtre à '' et le sub ne sera pas confondu avec ENG.
+    let prefix = (lang || '').toUpperCase();
     if (lang === 'fre' || lang === 'fra' || lang === 'fr') {
       if (/canad|québ|quebec|vfq/i.test(hints)) prefix = 'FR VFQ';
       else if (/vff|france/i.test(hints))       prefix = 'FR VFF';
