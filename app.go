@@ -118,7 +118,7 @@ func (a *App) startup(ctx context.Context) {
 
 // AppVersion est lue par le frontend (pill dans le header) et utilisée pour
 // comparer avec la dernière release GitHub lors du check de mise à jour.
-const AppVersion = "v6.0.4"
+const AppVersion = "v6.0.5"
 
 func (a *App) GetVersion() string { return AppVersion }
 
@@ -1498,11 +1498,12 @@ type SubSyncRequest struct {
 // SubSyncCheck décrit le résultat d'une synchronisation alass entre un SRT et
 // la vidéo source LiHDL. Si OK, le SRT a été corrigé dans SyncedPath.
 type SubSyncCheck struct {
-	Path       string `json:"path"`        // chemin du SRT original
-	SyncedPath string `json:"synced_path"` // chemin du SRT corrigé (à utiliser dans le mux)
-	OffsetMs   int    `json:"offset_ms"`   // décalage moyen détecté/appliqué (informatif)
-	FpsRatio   string `json:"fps_ratio"`   // ex "25/23.976" si drift FPS détecté, sinon ""
-	Error      string `json:"error"`       // message d'erreur si l'opération a planté
+	Path             string `json:"path"`               // chemin du SRT original
+	SyncedPath       string `json:"synced_path"`        // chemin du SRT corrigé (à utiliser dans le mux)
+	OffsetMs         int    `json:"offset_ms"`          // décalage moyen détecté/appliqué (informatif)
+	FpsRatio         string `json:"fps_ratio"`          // ex "25/23.976" si drift FPS détecté, sinon ""
+	Error            string `json:"error"`              // message d'erreur si l'opération a planté
+	RejectedOffsetMs int    `json:"rejected_offset_ms"` // shift alass écarté car > seuil (0 si pas rejeté). Sub original utilisé au mux.
 }
 
 // CheckSubsSync utilise alass-cli pour resynchroniser chaque SRT vers la vidéo
@@ -1615,7 +1616,7 @@ func (a *App) CheckSubsSync(reqs []SubSyncRequest, sourceMkvPath, referenceMkvPa
 		const maxReasonableShiftMs = 30000
 		if err == nil && res != nil && (res.OffsetMs > maxReasonableShiftMs || res.OffsetMs < -maxReasonableShiftMs) {
 			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ alass %s : décalage aberrant (%d ms > ±30s) → rejeté, sub brut utilisé", filepath.Base(mainReq.Path), res.OffsetMs))
-			results[mainIdx] = SubSyncCheck{Path: mainReq.Path, Error: fmt.Sprintf("décalage aberrant %d ms rejeté", res.OffsetMs)}
+			results[mainIdx] = SubSyncCheck{Path: mainReq.Path, RejectedOffsetMs: res.OffsetMs}
 		} else if err != nil {
 			results[mainIdx] = SubSyncCheck{Path: mainReq.Path, Error: err.Error()}
 			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ alass %s : %s", filepath.Base(mainReq.Path), err.Error()))
@@ -1663,7 +1664,7 @@ func (a *App) CheckSubsSync(reqs []SubSyncRequest, sourceMkvPath, referenceMkvPa
 		const maxReasonableShiftMs = 30000
 		if err == nil && res != nil && (res.OffsetMs > maxReasonableShiftMs || res.OffsetMs < -maxReasonableShiftMs) {
 			wr.EventsEmit(a.ctx, "log", fmt.Sprintf("⚠ alass %s : décalage aberrant (%d ms > ±30s) → rejeté, sub brut utilisé", filepath.Base(e.req.Path), res.OffsetMs))
-			results[i] = SubSyncCheck{Path: e.req.Path, Error: fmt.Sprintf("décalage aberrant %d ms rejeté", res.OffsetMs)}
+			results[i] = SubSyncCheck{Path: e.req.Path, RejectedOffsetMs: res.OffsetMs}
 			continue
 		}
 		if err != nil {

@@ -4443,6 +4443,10 @@
                           <span class="sync-result-name mono">{basename(r.path)}</span>
                           {#if r.error}
                             <span class="sync-result-status">✕ {r.error}</span>
+                          {:else if r.rejected_offset_ms}
+                            <span class="sync-result-status">
+                              ✓ sub original conservé (alass proposait {r.rejected_offset_ms > 0 ? '+' : ''}{r.rejected_offset_ms} ms — hors seuil, probablement faux match)
+                            </span>
                           {:else}
                             <span class="sync-result-status">
                               ✓ décalage {r.offset_ms > 0 ? '+' : ''}{r.offset_ms} ms{r.fps_ratio ? ` · FPS ${r.fps_ratio}` : ''} appliqué
