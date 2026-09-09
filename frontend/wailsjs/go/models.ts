@@ -396,6 +396,7 @@ export namespace main {
 	    offset_ms: number;
 	    fps_ratio: string;
 	    error: string;
+	    rejected_offset_ms: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new SubSyncCheck(source);
@@ -408,6 +409,7 @@ export namespace main {
 	        this.offset_ms = source["offset_ms"];
 	        this.fps_ratio = source["fps_ratio"];
 	        this.error = source["error"];
+	        this.rejected_offset_ms = source["rejected_offset_ms"];
 	    }
 	}
 	export class SubSyncRequest {
