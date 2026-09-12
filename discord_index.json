@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-09-11T21:36:32Z",
+  "generated_at": "2026-09-12T21:19:16Z",
   "entries": {
     "10033": {
       "tmdb_id": "10033",
@@ -1394,6 +1394,14 @@
       "thread_id": "1521146259283644557",
       "last_message_id": "1521146299997491260"
     },
+    "38155": {
+      "tmdb_id": "38155",
+      "url": "https://discord.com/channels/994006546805694474/1548312099304775680/1548312099304775680",
+      "title": "Zu.The.Warriors.from.the.Magic.Mountain.1983.CUSTOM.MULTi.VFi.1080p.BLURAY.REMUX.AC3.2.0.H264.AVC-Li",
+      "updated_at": "2026-09-12T12:39:30.722000+00:00",
+      "thread_id": "1548312099304775680",
+      "last_message_id": "1548312166845784195"
+    },
     "38731": {
       "tmdb_id": "38731",
       "url": "https://discord.com/channels/994006546805694474/1508942497794232561/1508942497794232561",
@@ -1689,6 +1697,14 @@
       "updated_at": "2026-05-26T21:26:14.386000+00:00",
       "thread_id": "1508944377328959589",
       "last_message_id": "1508944377328959589"
+    },
+    "4958": {
+      "tmdb_id": "4958",
+      "url": "https://discord.com/channels/994006546805694474/1548311862494502932/1548311862494502932",
+      "title": "The.Legend.of.Bagger.Vance.2000.CUSTOM.MULTi.VFi.1080p.BLURAY.REMUX.AC3.2.0.H264.AVC-LiHDL",
+      "updated_at": "2026-09-12T12:38:34.262000+00:00",
+      "thread_id": "1548311862494502932",
+      "last_message_id": "1548311933818773536"
     },
     "4975": {
       "tmdb_id": "4975",
