@@ -118,7 +118,7 @@ func (a *App) startup(ctx context.Context) {
 
 // AppVersion est lue par le frontend (pill dans le header) et utilisée pour
 // comparer avec la dernière release GitHub lors du check de mise à jour.
-const AppVersion = "v6.0.6"
+const AppVersion = "v6.0.7"
 
 func (a *App) GetVersion() string { return AppVersion }
 
@@ -1580,7 +1580,17 @@ func (a *App) CheckSubsSync(reqs []SubSyncRequest, sourceMkvPath, referenceMkvPa
 	}
 	entries := make([]subEntry, len(reqs))
 	for i, r := range reqs {
-		entries[i] = subEntry{req: r, count: countSRTEntries(r.Path), origIdx: i, inputPath: r.Path}
+		input := r.Path
+		// Sanitize .srt (lignes vides parasites, BOM, CRLF) vers un temp file
+		// AVANT alass. Sinon alass-cli rejette avec "invalid digit found in string".
+		if strings.HasSuffix(strings.ToLower(r.Path), ".srt") {
+			sanitized := strings.TrimSuffix(r.Path, filepath.Ext(r.Path)) + ".sanitized.srt"
+			if err := sanitizeSRTForAlass(r.Path, sanitized); err == nil {
+				input = sanitized
+				defer os.Remove(sanitized)
+			}
+		}
+		entries[i] = subEntry{req: r, count: countSRTEntries(r.Path), origIdx: i, inputPath: input}
 	}
 	// Indice du SRT le plus long (référence d'offset).
 	mainIdx := 0
@@ -2547,6 +2557,37 @@ func countSRTEntries(path string) int {
 		return 0
 	}
 	return strings.Count(string(data), "-->")
+}
+
+// sanitizeSRTForAlass nettoie un .srt mal formé (lignes vides parasites entre
+// timestamp et texte, BOM, CRLF, 3+ newlines consécutifs) — alass-cli est
+// strict et rejette ces cas avec "invalid digit found in string". Écrit une
+// version propre dans dstPath. Si src n'est pas un .srt, copie-colle brute.
+func sanitizeSRTForAlass(srcPath, dstPath string) error {
+	data, err := os.ReadFile(srcPath)
+	if err != nil {
+		return err
+	}
+	if !strings.HasSuffix(strings.ToLower(srcPath), ".srt") {
+		return os.WriteFile(dstPath, data, 0644)
+	}
+	// Strip UTF-8 BOM
+	if len(data) >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF {
+		data = data[3:]
+	}
+	text := strings.ReplaceAll(string(data), "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	// Retire les lignes vides IMMÉDIATEMENT après une ligne timestamp
+	// (cause majeure de "invalid digit found in string" sur alass).
+	tsRe := regexp.MustCompile(`(?m)^(\d{2}:\d{2}:\d{2}[,.]\d{3}\s+-->\s+\d{2}:\d{2}:\d{2}[,.]\d{3}[^\n]*)\n(\s*\n)+`)
+	text = tsRe.ReplaceAllString(text, "$1\n")
+	// Collapse 3+ newlines consécutifs à 2 (une seule ligne vide entre cues).
+	multiNl := regexp.MustCompile(`\n{3,}`)
+	text = multiNl.ReplaceAllString(text, "\n\n")
+	if !strings.HasSuffix(text, "\n") {
+		text += "\n"
+	}
+	return os.WriteFile(dstPath, []byte(text), 0644)
 }
 
 // shiftSRTFile = tempoShiftSRTFile avec tempoFactor=1.0 (offset uniquement).
