@@ -4633,7 +4633,7 @@
               ...secondaryAudios.map((s, i) => ({ kind: 'secondary', idx: i, ref: s, order: s.order ?? 0 })),
             ].filter(item => item.ref.keep).sort((a, b) => a.order - b.order)}
             <div class="tracks-section">
-              <div class="tracks-section-header audio"><span class="tracks-section-dot"></span><span class="tracks-section-label">♪ Pistes audio</span><span class="tracks-section-count">{audioCount}</span></div>
+              <div class="tracks-section-header audio"><span class="tracks-section-dot"></span><span class="tracks-section-label">♪ Pistes audio</span><span class="tracks-section-count">{audioCount}</span><button class="btn-add-inline" title="Ajouter un fichier audio externe" on:click={pickAudioDialog}>+</button></div>
             {#each mergedAudios as item (item.kind + '-' + item.idx)}
               <div class="track track-editable" class:dropped={!item.ref.keep}>
                 <div class="track-icon audio">♪</div>
@@ -4690,7 +4690,7 @@
               ...secondarySubs.map((s, i) => ({ kind: 'secondary', idx: i, ref: s, order: s.order ?? 0 })),
             ].filter(item => item.ref.keep).sort((a, b) => a.order - b.order)}
             <div class="tracks-section">
-              <div class="tracks-section-header sub"><span class="tracks-section-dot"></span><span class="tracks-section-label">A Sous-titres</span><span class="tracks-section-count">{subCount}</span></div>
+              <div class="tracks-section-header sub"><span class="tracks-section-dot"></span><span class="tracks-section-label">A Sous-titres</span><span class="tracks-section-count">{subCount}</span><button class="btn-add-inline" title="Ajouter un fichier sous-titre externe" on:click={pickSubsDialog}>+</button></div>
             {#each mergedSubs as item (item.kind + '-' + item.idx)}
               <div class="track track-editable">
                 <div class="track-icon sub">A</div>
@@ -7473,6 +7473,20 @@
     padding: 2px 7px; border-radius: 999px;
     font-size: 10px; font-weight: 700;
     min-width: 22px; text-align: center;
+  }
+  .btn-add-inline {
+    background: rgba(124, 92, 255, 0.14);
+    border: 1px solid rgba(124, 92, 255, 0.35);
+    color: var(--text); cursor: pointer;
+    width: 22px; height: 22px; border-radius: 999px;
+    font-size: 14px; font-weight: 700; line-height: 1;
+    display: inline-flex; align-items: center; justify-content: center;
+    padding: 0; margin-left: 4px;
+    transition: all 120ms ease;
+  }
+  .btn-add-inline:hover {
+    background: rgba(124, 92, 255, 0.28);
+    border-color: rgba(124, 92, 255, 0.6);
   }
   .tracks-section-header.video { color: var(--accent-hot); }
   .tracks-section-header.video .tracks-section-dot { background: var(--accent-hot); }
