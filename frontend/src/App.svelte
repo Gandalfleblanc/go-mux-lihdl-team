@@ -5729,7 +5729,10 @@
           <div class="field" style="margin-top:10px;">
             <label>{grp.label}</label>
             <div class="field-row">
-              <input type="text" bind:value={newCustomVideoOption[grp.key]} placeholder={grp.placeholder}
+              <input type="text"
+                value={newCustomVideoOption[grp.key] || ''}
+                placeholder={grp.placeholder}
+                on:input={(e) => { newCustomVideoOption[grp.key] = e.target.value; newCustomVideoOption = {...newCustomVideoOption}; }}
                 on:keydown={(e) => e.key === 'Enter' && addCustomVideoOption(grp.key, grp.label)} />
               <button class="btn-test" on:click={() => addCustomVideoOption(grp.key, grp.label)}
                 disabled={!(newCustomVideoOption[grp.key] || '').trim()}>+ Ajouter</button>
