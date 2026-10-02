@@ -129,6 +129,7 @@
     audio_labels: [], subtitle_labels: [],
     video_qualities: [], video_encoders: [],
     video_sources: [], video_teams: [],
+    video_source_types: [], resolutions: [], target_sources: [], video_codecs: [],
   };
 
   let sourcePath = '';
@@ -3367,6 +3368,40 @@
     if (lbl) appendLog('🗑 Label sub supprimé : ' + lbl);
   }
 
+  // --- Options personnalisées card « Réglages piste vidéo » (générique) ---
+  // Permet d'ajouter / supprimer des valeurs dans chaque dropdown sans toucher
+  // au code. Mergées côté backend avec les listes figées.
+  let newCustomVideoOption = {
+    custom_video_qualities: '',
+    custom_video_encoders: '',
+    custom_video_teams: '',
+    custom_video_source_types: '',
+    custom_resolutions: '',
+    custom_target_sources: '',
+    custom_video_codecs: '',
+  };
+  async function addCustomVideoOption(configKey, label) {
+    const val = (newCustomVideoOption[configKey] || '').trim();
+    if (!val) return;
+    if (!config[configKey]) config[configKey] = [];
+    if (config[configKey].includes(val)) {
+      appendLog(`⚠ ${label} déjà présent : ${val}`);
+      return;
+    }
+    config[configKey] = [...config[configKey], val];
+    newCustomVideoOption[configKey] = '';
+    await SaveConfig(config);
+    options = await GetLihdlOptions();
+    appendLog(`✓ ${label} ajouté : ${val}`);
+  }
+  async function removeCustomVideoOption(configKey, idx, label) {
+    const val = (config[configKey] || [])[idx];
+    config[configKey] = (config[configKey] || []).filter((_, i) => i !== idx);
+    await SaveConfig(config);
+    options = await GetLihdlOptions();
+    if (val) appendLog(`🗑 ${label} supprimé : ${val}`);
+  }
+
   // === Index Discord (admin) ===
   async function doDiscordScan() {
     if (discordScanRunning) return;
@@ -4997,7 +5032,7 @@
             <div class="field">
               <span class="field-label">Type source</span>
               <select bind:value={videoChoice.sourceType} on:change={onSourceTypeChange}>
-                {#each VIDEO_SOURCE_TYPE_OPTIONS as s}<option>{s}</option>{/each}
+                {#each (options.video_source_types && options.video_source_types.length > 0 ? options.video_source_types : VIDEO_SOURCE_TYPE_OPTIONS) as s}<option>{s}</option>{/each}
               </select>
             </div>
             <div class="field">
@@ -5007,19 +5042,19 @@
             <div class="field">
               <span class="field-label">Résolution</span>
               <select bind:value={target.resolution}>
-                {#each RESOLUTION_OPTIONS as r}<option>{r}</option>{/each}
+                {#each (options.resolutions && options.resolutions.length > 0 ? options.resolutions : RESOLUTION_OPTIONS) as r}<option>{r}</option>{/each}
               </select>
             </div>
             <div class="field">
               <span class="field-label">Source (sortie)</span>
               <select bind:value={target.source}>
-                {#each TARGET_SOURCE_OPTIONS as s}<option>{s}</option>{/each}
+                {#each (options.target_sources && options.target_sources.length > 0 ? options.target_sources : TARGET_SOURCE_OPTIONS) as s}<option>{s}</option>{/each}
               </select>
             </div>
             <div class="field">
               <span class="field-label">Codec vidéo</span>
               <select bind:value={target.video_codec}>
-                {#each VIDEO_CODEC_OPTIONS as c}<option>{c}</option>{/each}
+                {#each (options.video_codecs && options.video_codecs.length > 0 ? options.video_codecs : VIDEO_CODEC_OPTIONS) as c}<option>{c}</option>{/each}
               </select>
             </div>
             <div class="field">
@@ -5676,6 +5711,41 @@
             {/each}
           </div>
         {/if}
+      </div>
+
+      <!-- Dropdowns personnalisés de la card « Réglages piste vidéo » -->
+      <div class="card">
+        <div class="card-title">🎛️ Dropdowns Réglages piste vidéo (personnalisés)</div>
+        <div class="field-hint" style="margin-bottom:10px;">Ajoute ou retire des valeurs dans chaque dropdown de la card. Mergé avec les valeurs par défaut, visible immédiatement.</div>
+        {#each [
+          { key: 'custom_video_qualities',     label: 'Qualité',       placeholder: 'ex: HDLight 10bit' },
+          { key: 'custom_video_encoders',      label: 'Encodeur',      placeholder: 'ex: NewEncoder' },
+          { key: 'custom_video_teams',         label: 'Team (sortie)', placeholder: 'ex: MYTEAM' },
+          { key: 'custom_video_source_types',  label: 'Type source',   placeholder: 'ex: WEB-DL AMZN' },
+          { key: 'custom_resolutions',         label: 'Résolution',    placeholder: 'ex: 1440p' },
+          { key: 'custom_target_sources',      label: 'Source (sortie)', placeholder: 'ex: BRRip' },
+          { key: 'custom_video_codecs',        label: 'Codec vidéo',   placeholder: 'ex: AV1-10b' },
+        ] as grp}
+          <div class="field" style="margin-top:10px;">
+            <label>{grp.label}</label>
+            <div class="field-row">
+              <input type="text" bind:value={newCustomVideoOption[grp.key]} placeholder={grp.placeholder}
+                on:keydown={(e) => e.key === 'Enter' && addCustomVideoOption(grp.key, grp.label)} />
+              <button class="btn-test" on:click={() => addCustomVideoOption(grp.key, grp.label)}
+                disabled={!(newCustomVideoOption[grp.key] || '').trim()}>+ Ajouter</button>
+            </div>
+            {#if config[grp.key] && config[grp.key].length > 0}
+              <div class="custom-labels-list">
+                {#each config[grp.key] as val, i}
+                  <span class="custom-label-pill">
+                    <span class="mono">{val}</span>
+                    <button class="custom-label-remove" on:click={() => removeCustomVideoOption(grp.key, i, grp.label)} title="Supprimer">✕</button>
+                  </span>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {/each}
       </div>
 
       <div class="card">

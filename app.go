@@ -118,7 +118,7 @@ func (a *App) startup(ctx context.Context) {
 
 // AppVersion est lue par le frontend (pill dans le header) et utilisée pour
 // comparer avec la dernière release GitHub lors du check de mise à jour.
-const AppVersion = "v6.0.7"
+const AppVersion = "v6.1.0"
 
 func (a *App) GetVersion() string { return AppVersion }
 
@@ -132,23 +132,46 @@ func (a *App) SaveConfig(c config.Config) error { return config.Save(c) }
 // LihdlOptions regroupe toutes les listes déroulantes figées par les normes
 // LiHDL. Exposé au frontend en un seul appel pour simplifier l'init de l'UI.
 type LihdlOptions struct {
-	AudioLabels    []string `json:"audio_labels"`
-	SubtitleLabels []string `json:"subtitle_labels"`
-	VideoQualities []string `json:"video_qualities"`
-	VideoEncoders  []string `json:"video_encoders"`
-	VideoSources   []string `json:"video_sources"`
-	VideoTeams     []string `json:"video_teams"`
+	AudioLabels      []string `json:"audio_labels"`
+	SubtitleLabels   []string `json:"subtitle_labels"`
+	VideoQualities   []string `json:"video_qualities"`
+	VideoEncoders    []string `json:"video_encoders"`
+	VideoSources     []string `json:"video_sources"`
+	VideoTeams       []string `json:"video_teams"`
+	VideoSourceTypes []string `json:"video_source_types"`
+	Resolutions      []string `json:"resolutions"`
+	TargetSources    []string `json:"target_sources"`
+	VideoCodecs      []string `json:"video_codecs"`
 }
+
+// Valeurs par défaut des 4 dropdowns anciennement hardcoded côté frontend.
+// Déplacés ici pour permettre le pattern merge avec Custom*.
+var (
+	defaultVideoSourceTypes = []string{
+		"REMUX", "REMUX CUSTOM",
+		"WEB-DL CUSTOM", "WEB CUSTOM",
+		"WEB", "WEB-DL", "WEBRip",
+		"WEBRip PSA Audio SUPPLY", "WEBRIP PSA Audio FW", "WEBRip PSA Audio Super U",
+		"BluRay", "COMPLETE BluRay",
+	}
+	defaultResolutions   = []string{"720p", "1080p", "2160p"}
+	defaultTargetSources = []string{"HDLight", "WEBLight", "WEB-DL", "WEBRip", "REMUX"}
+	defaultVideoCodecs   = []string{"H264", "x264", "H265", "x265", "AV1"}
+)
 
 func (a *App) GetLihdlOptions() LihdlOptions {
 	cfg := config.Load()
 	return LihdlOptions{
-		AudioLabels:    mergeLabels(naming.AudioLabels, cfg.CustomAudioLabels),
-		SubtitleLabels: mergeLabels(naming.SubtitleLabels, cfg.CustomSubtitleLabels),
-		VideoQualities: naming.VideoQualities,
-		VideoEncoders:  naming.VideoEncoders,
-		VideoSources:   naming.VideoSources,
-		VideoTeams:     naming.VideoTeams,
+		AudioLabels:      mergeLabels(naming.AudioLabels, cfg.CustomAudioLabels),
+		SubtitleLabels:   mergeLabels(naming.SubtitleLabels, cfg.CustomSubtitleLabels),
+		VideoQualities:   mergeLabels(naming.VideoQualities, cfg.CustomVideoQualities),
+		VideoEncoders:    mergeLabels(naming.VideoEncoders, cfg.CustomVideoEncoders),
+		VideoSources:     naming.VideoSources,
+		VideoTeams:       mergeLabels(naming.VideoTeams, cfg.CustomVideoTeams),
+		VideoSourceTypes: mergeLabels(defaultVideoSourceTypes, cfg.CustomVideoSourceTypes),
+		Resolutions:      mergeLabels(defaultResolutions, cfg.CustomResolutions),
+		TargetSources:    mergeLabels(defaultTargetSources, cfg.CustomTargetSources),
+		VideoCodecs:      mergeLabels(defaultVideoCodecs, cfg.CustomVideoCodecs),
 	}
 }
 

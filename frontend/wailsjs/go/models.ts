@@ -54,6 +54,13 @@ export namespace config {
 	    github_index_file_path: string;
 	    custom_audio_labels: string[];
 	    custom_subtitle_labels: string[];
+	    custom_video_qualities: string[];
+	    custom_video_encoders: string[];
+	    custom_video_teams: string[];
+	    custom_video_source_types: string[];
+	    custom_resolutions: string[];
+	    custom_target_sources: string[];
+	    custom_video_codecs: string[];
 	
 	    static createFrom(source: any = {}) {
 	        return new Config(source);
@@ -87,6 +94,13 @@ export namespace config {
 	        this.github_index_file_path = source["github_index_file_path"];
 	        this.custom_audio_labels = source["custom_audio_labels"];
 	        this.custom_subtitle_labels = source["custom_subtitle_labels"];
+	        this.custom_video_qualities = source["custom_video_qualities"];
+	        this.custom_video_encoders = source["custom_video_encoders"];
+	        this.custom_video_teams = source["custom_video_teams"];
+	        this.custom_video_source_types = source["custom_video_source_types"];
+	        this.custom_resolutions = source["custom_resolutions"];
+	        this.custom_target_sources = source["custom_target_sources"];
+	        this.custom_video_codecs = source["custom_video_codecs"];
 	    }
 	}
 
@@ -241,6 +255,10 @@ export namespace main {
 	    video_encoders: string[];
 	    video_sources: string[];
 	    video_teams: string[];
+	    video_source_types: string[];
+	    resolutions: string[];
+	    target_sources: string[];
+	    video_codecs: string[];
 	
 	    static createFrom(source: any = {}) {
 	        return new LihdlOptions(source);
@@ -254,6 +272,10 @@ export namespace main {
 	        this.video_encoders = source["video_encoders"];
 	        this.video_sources = source["video_sources"];
 	        this.video_teams = source["video_teams"];
+	        this.video_source_types = source["video_source_types"];
+	        this.resolutions = source["resolutions"];
+	        this.target_sources = source["target_sources"];
+	        this.video_codecs = source["video_codecs"];
 	    }
 	}
 	export class MkvBasicInfo {

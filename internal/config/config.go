@@ -52,6 +52,17 @@ type Config struct {
 	// (ex: "BRE VO : AC3 5.1", "BRE Full : SRT").
 	CustomAudioLabels    []string `json:"custom_audio_labels"`
 	CustomSubtitleLabels []string `json:"custom_subtitle_labels"`
+
+	// Dropdowns de la card « Réglages piste vidéo » — mergés avec les listes
+	// par défaut. Permet à l'user d'ajouter ses propres valeurs sans toucher
+	// au code (ex: nouveau team, nouveau type source, résolution exotique).
+	CustomVideoQualities   []string `json:"custom_video_qualities"`
+	CustomVideoEncoders    []string `json:"custom_video_encoders"`
+	CustomVideoTeams       []string `json:"custom_video_teams"`
+	CustomVideoSourceTypes []string `json:"custom_video_source_types"`
+	CustomResolutions      []string `json:"custom_resolutions"`
+	CustomTargetSources    []string `json:"custom_target_sources"`
+	CustomVideoCodecs      []string `json:"custom_video_codecs"`
 }
 
 // DiscordIndexPath retourne le chemin du JSON local de l'index Discord
