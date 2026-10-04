@@ -42,7 +42,7 @@
           videoChoice.quality = 'Custom PSA';
           videoChoice.encoder = config.default_encoder || 'ASTROBOY';
           // Team : films PSA → -LiHDL ; séries PSA → -GANDALF (norme).
-          videoChoice.team = /\bS\d{1,2}E\d{1,3}\b/i.test(psaName) ? 'ASTROBOY' : 'LiHDL';
+          videoChoice.team = /(?:^|[\s._-])S\d{1,2}E\d{1,3}(?=[\s._-]|$)/i.test(psaName) ? 'ASTROBOY' : 'LiHDL';
           videoChoice.sourceTeam = '';
           if (psa.source) {
             target.source = psa.source;
@@ -157,7 +157,8 @@
   ];
 
   function detectEpisode(filename) {
-    const m = /\bS(\d{1,2})E(\d{1,3})\b/i.exec(String(filename || ''));
+    // Accepte séparateurs . _ - espace autour de SxxExx (ex: Dallas_S03E01_).
+    const m = /(?:^|[\s._-])S(\d{1,2})E(\d{1,3})(?=[\s._-]|$)/i.exec(String(filename || ''));
     if (!m) return '';
     const s = m[1].padStart(2, '0');
     const e = m[2].padStart(2, '0');
@@ -2370,7 +2371,7 @@
         videoChoice.encoder = config.default_encoder || 'ASTROBOY';
         // Team : GANDALF par défaut (séries). Pour les films PSA c'est LiHDL —
         // détecté via absence de pattern SxxExx dans le nom de fichier.
-        const isSeries = /\bS\d{1,2}E\d{1,3}\b/i.test(filename);
+        const isSeries = /(?:^|[\s._-])S\d{1,2}E\d{1,3}(?=[\s._-]|$)/i.test(filename);
         videoChoice.team = isSeries ? 'ASTROBOY' : 'LiHDL';
         videoChoice.sourceTeam = ''; // norme : pas de team de source pour PSA
         if (psa.source) {
@@ -3049,11 +3050,11 @@
   function cleanQueryFromFilename(filename) {
     let name = String(filename || '').replace(/\.[^.]+$/, '');
     // Série : tout avant SxxExx (séparateur point OU espace).
-    const ms = /^(.+?)[\s.]S\d{1,2}E\d{1,3}\b/i.exec(name);
+    const ms = /^(.+?)[\s._-]S\d{1,2}E\d{1,3}(?=[\s._-]|$)/i.exec(name);
     if (ms) name = ms[1];
     else {
-      // Film : tout avant l'année 4 chiffres 19xx/20xx (séparateur point OU espace).
-      const my = /^(.+?)[\s.](?:19|20)\d{2}\b/.exec(name);
+      // Film : tout avant l'année 4 chiffres 19xx/20xx (séparateur . _ - espace).
+      const my = /^(.+?)[\s._-](?:19|20)\d{2}(?=[\s._-]|$)/.exec(name);
       if (my) name = my[1];
     }
     // Strip un éventuel suffixe " 2024" / ".2024" (cas: Title.2024.S01E15...)
@@ -3068,7 +3069,7 @@
     // Détection auto série uniquement via pattern SxxExx — le mode PSA n'impose
     // PLUS le mode TV (PSA fait aussi des films, l'user peut toggle Film/TV
     // dans la card de validation TMDB si l'auto-detect se trompe).
-    const isSeries = /\bS\d{1,2}E\d{1,3}\b/i.test(filename);
+    const isSeries = /(?:^|[\s._-])S\d{1,2}E\d{1,3}(?=[\s._-]|$)/i.test(filename);
     const forceTV = isSeries;
     tmdbQuery = cleanedSpaces;
     if (forceTV) tmdbMode = 'tv';
