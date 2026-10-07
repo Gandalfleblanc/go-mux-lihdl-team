@@ -3966,7 +3966,12 @@
     }
     if (forcedFRDone) appendLog('↑ FR Forced placé en 1er dans les sous-titres');
 
-    videoChoice.team = 'LiHDL';
+    // TEAM (sortie) : LiHDL par défaut au 1er automate, préservé ensuite
+    // si l'user l'a changé manuellement (ex: ASTROBOY) — même logique que
+    // les tracks (preserveUserEdits).
+    if (!preserveUserEdits) {
+      videoChoice.team = 'LiHDL';
+    }
     // Ne pas vider l'épisode en mode Série (sinon SxxExx disparaît du filename
     // après MUX AUTO et le nom se retrouve avec l'année à la place, ex:
     // House.Of.The.Dragon.2022... au lieu de House.Of.The.Dragon.S03E02...).
