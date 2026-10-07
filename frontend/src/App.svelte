@@ -3934,9 +3934,16 @@
 
     // Subs externes : applique aussi la règle FR Forced → keep + default + forced
     // (les externes ne passent pas par automateLihdl ci-dessus, on les traite ici).
+    // En preserveUserEdits (2e appel+), on garde keep/default/forced choisis par
+    // l'user — ex: l'user a mis Default sur FR Full, on ne doit pas l'écraser.
     externalSubs = externalSubs.map(s => {
       const isForcedFR = /^FR( VFF)? Forced\b/.test(s.label || '');
-      return { ...s, keep: true, default: isForcedFR, forced: isForcedFR };
+      return {
+        ...s,
+        keep: preserveUserEdits ? (s.keep !== false) : true,
+        default: preserveUserEdits ? !!s.default : isForcedFR,
+        forced: preserveUserEdits ? !!s.forced : isForcedFR,
+      };
     });
 
     // Norme LiHDL : la piste FR Forced est toujours placée EN PREMIER parmi
