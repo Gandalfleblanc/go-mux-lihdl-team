@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,13 +24,23 @@ import (
 
 // Locate trouve le chemin du binaire mkvmerge selon la priorité suivante :
 //  1. override explicite (depuis la config)
-//  2. binaire embarqué dans l'app (extrait à appBinDir au 1er run)
-//  3. binaire téléchargé dans le dossier de l'app
-//  4. binaire système sur PATH
+//  2. brew sur darwin/arm64 (binaire natif + mkvextract à côté)
+//  3. binaire embarqué dans l'app (extrait à appBinDir au 1er run)
+//  4. binaire téléchargé dans le dossier de l'app
+//  5. binaire système sur PATH
 func Locate(configOverride, appBinDir string) (string, error) {
 	if configOverride != "" {
 		if _, err := exec.LookPath(configOverride); err == nil {
 			return configOverride, nil
+		}
+	}
+	// darwin/arm64 : préfère le brew si disponible — évite les binaires x86_64
+	// embarqués qui crashent avec "bad CPU type in executable" sur Apple Silicon.
+	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
+		for _, p := range []string{"/opt/homebrew/bin/mkvmerge", "/usr/local/bin/mkvmerge"} {
+			if _, err := os.Stat(p); err == nil {
+				return p, nil
+			}
 		}
 	}
 	// Embedded binaries : extrait mkvmerge ET mkvextract à appBinDir si non

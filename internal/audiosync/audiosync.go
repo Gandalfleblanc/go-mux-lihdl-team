@@ -18,14 +18,34 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 )
 
+// preferBrewOnAppleSilicon retourne le chemin brew du binaire si on est sur
+// darwin/arm64 et qu'il existe (dylibs résolues via brew). Évite le crash
+// "bad CPU type in executable" quand les binaires embarqués sont x86_64.
+func preferBrewOnAppleSilicon(name string) string {
+	if runtime.GOOS != "darwin" || runtime.GOARCH != "arm64" {
+		return ""
+	}
+	for _, p := range []string{"/opt/homebrew/bin/" + name, "/usr/local/bin/" + name} {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
+}
+
 // Locate retourne le chemin du binaire ffmpeg selon la priorité :
-//  1. binaire embarqué dans l'app (extrait à appBinDir au 1er run)
-//  2. binaire système sur PATH
+//  1. brew sur darwin/arm64 (binaire natif + dylibs résolues)
+//  2. binaire embarqué dans l'app (extrait à appBinDir au 1er run)
+//  3. binaire système sur PATH
 func Locate(appBinDir string) (string, error) {
+	if p := preferBrewOnAppleSilicon("ffmpeg"); p != "" {
+		return p, nil
+	}
 	if appBinDir != "" && len(embeddedBinary) > 0 {
 		candidate := filepath.Join(appBinDir, embeddedName)
 		if _, err := os.Stat(candidate); err != nil {
@@ -44,6 +64,9 @@ func Locate(appBinDir string) (string, error) {
 
 // LocateFfprobe : même logique que Locate mais pour ffprobe (utilisé par alass-cli).
 func LocateFfprobe(appBinDir string) (string, error) {
+	if p := preferBrewOnAppleSilicon("ffprobe"); p != "" {
+		return p, nil
+	}
 	if appBinDir != "" && len(embeddedFfprobeBinary) > 0 {
 		candidate := filepath.Join(appBinDir, embeddedFfprobeName)
 		if _, err := os.Stat(candidate); err != nil {

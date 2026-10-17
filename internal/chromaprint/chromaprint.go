@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -31,13 +32,24 @@ const HashIntervalMs = 124.13
 
 // Locate retourne le chemin de fpcalc selon la priorité :
 //  1. override explicite (config)
-//  2. binaire embarqué dans l'app (extrait à appBinDir au 1er run)
-//  3. binaire déjà extrait à appBinDir
-//  4. binaire système sur PATH (fallback dev)
+//  2. brew sur darwin/arm64 (binaire natif + dylibs résolues)
+//  3. binaire embarqué dans l'app (extrait à appBinDir au 1er run)
+//  4. binaire déjà extrait à appBinDir
+//  5. binaire système sur PATH (fallback dev)
 func Locate(configOverride, appBinDir string) (string, error) {
 	if configOverride != "" {
 		if _, err := exec.LookPath(configOverride); err == nil {
 			return configOverride, nil
+		}
+	}
+	// darwin/arm64 : préfère le brew si disponible — l'embedded historique est
+	// un binaire x86_64 (bad CPU type sur Apple Silicon) et dépend de
+	// libchromaprint.1.dylib + ffmpeg libs qui ne sont pas livrées à côté.
+	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
+		for _, p := range []string{"/opt/homebrew/bin/fpcalc", "/usr/local/bin/fpcalc"} {
+			if _, err := os.Stat(p); err == nil {
+				return p, nil
+			}
 		}
 	}
 	// Embedded binary : extrait à appBinDir si non présent et que embed non vide.
