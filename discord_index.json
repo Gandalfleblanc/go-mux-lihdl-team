@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-10-17T21:20:33Z",
+  "generated_at": "2026-10-18T21:20:16Z",
   "entries": {
     "10033": {
       "tmdb_id": "10033",
@@ -434,6 +434,14 @@
       "thread_id": "1492183150611402803",
       "last_message_id": "1492183162825085128"
     },
+    "1242332": {
+      "tmdb_id": "1242332",
+      "url": "https://discord.com/channels/994006546805694474/1561418551749906522/1561418551749906522",
+      "title": "Normal.2026.CUSTOM.MULTi.VF2.1080p.BLURAY.REMUX.AC3.5.1.H264.AVC-LiHDL",
+      "updated_at": "2026-10-18T16:39:52.491000+00:00",
+      "thread_id": "1561418551749906522",
+      "last_message_id": "1561418592967467039"
+    },
     "1247002": {
       "tmdb_id": "1247002",
       "url": "https://discord.com/channels/994006546805694474/1495373825909719173/1495373825909719173",
@@ -714,6 +722,14 @@
       "thread_id": "1509253804158357735",
       "last_message_id": "1509253844213694628"
     },
+    "1433367": {
+      "tmdb_id": "1433367",
+      "url": "https://discord.com/channels/994006546805694474/1561418720730157217/1561418720730157217",
+      "title": "One.Night.Only.2026.CUSTOM.MULTi.VFQ.1080p.BLURAY.REMUX.AC3.5.1.H264.AVC-LiHDL",
+      "updated_at": "2026-10-18T16:40:32.779000+00:00",
+      "thread_id": "1561418720730157217",
+      "last_message_id": "1561418720730157217"
+    },
     "14365": {
       "tmdb_id": "14365",
       "url": "https://discord.com/channels/994006546805694474/1509544924289175573/1509544924289175573",
@@ -817,6 +833,14 @@
       "updated_at": "2026-10-05T20:42:33.421000+00:00",
       "thread_id": "1556768582464184361",
       "last_message_id": "1556779490422685729"
+    },
+    "15362": {
+      "tmdb_id": "15362",
+      "url": "https://discord.com/channels/994006546805694474/1561420761099411577/1561420761099411577",
+      "title": "Mesrine-L Ennemi public n°1 2008 VOF Bluray 1080p REMUX AVC DTS HD-MA-Sicario",
+      "updated_at": "2026-10-18T16:48:39.241000+00:00",
+      "thread_id": "1561420761099411577",
+      "last_message_id": "1561420810563100895"
     },
     "15705": {
       "tmdb_id": "15705",
@@ -1185,6 +1209,14 @@
       "updated_at": "2026-06-09T17:20:00.891000+00:00",
       "thread_id": "1513955842917929153",
       "last_message_id": "1513955881077706873"
+    },
+    "24438": {
+      "tmdb_id": "24438",
+      "url": "https://discord.com/channels/994006546805694474/1561381577793998888/1561381577793998888",
+      "title": "Did.You.Hear.About.The.Morgans.2009.CUSTOM.MULTi.VFF.1080p.BluRay.REMUX.AC3.5.1.H264-LiHDL",
+      "updated_at": "2026-10-18T14:12:57.213000+00:00",
+      "thread_id": "1561381577793998888",
+      "last_message_id": "1561388617987793000"
     },
     "24756": {
       "tmdb_id": "24756",
