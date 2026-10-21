@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-10-20T22:10:32Z",
+  "generated_at": "2026-10-21T22:12:24Z",
   "entries": {
     "10033": {
       "tmdb_id": "10033",
@@ -25,6 +25,14 @@
       "updated_at": "2026-05-05T16:54:56.777000+00:00",
       "thread_id": "1501265958910562487",
       "last_message_id": "1502334336333250650"
+    },
+    "10274": {
+      "tmdb_id": "10274",
+      "url": "https://discord.com/channels/994006546805694474/1562586402766585986/1562586402766585986",
+      "title": "The.Deal.2005.CUSTOM.DUAL.VFi.1080p.WEB-DL.AC3.2.0.H264-LiHDL",
+      "updated_at": "2026-10-21T22:00:29.871000+00:00",
+      "thread_id": "1562586402766585986",
+      "last_message_id": "1562586527962505368"
     },
     "1033148": {
       "tmdb_id": "1033148",
@@ -313,6 +321,14 @@
       "updated_at": "2026-07-30T08:36:37.672000+00:00",
       "thread_id": "1532305909416591472",
       "last_message_id": "1532305942551466035"
+    },
+    "11648": {
+      "tmdb_id": "11648",
+      "url": "https://discord.com/channels/994006546805694474/1562532824563851334/1562532824563851334",
+      "title": "Must.Love.Dogs.2005.CUSTOM.MULTi.VF2.1080p.BLURAY.REMUX.AC3.5.1.H264.AVC-LiHDL",
+      "updated_at": "2026-10-21T18:27:35.832000+00:00",
+      "thread_id": "1562532824563851334",
+      "last_message_id": "1562532824563851334"
     },
     "1167307": {
       "tmdb_id": "1167307",
@@ -946,6 +962,14 @@
       "thread_id": "1491054837218148503",
       "last_message_id": "1491054903085240370"
     },
+    "173980": {
+      "tmdb_id": "173980",
+      "url": "https://discord.com/channels/994006546805694474/1562584395507048458/1562584395507048458",
+      "title": "The.Devils.In.The.Details.2013.CUSTOM.DUAL.VFi.1080p.BluRay.REMUX.AC3.5.1.DTS-HD.MA.5.1.AVC-LiHDL",
+      "updated_at": "2026-10-21T21:52:31.303000+00:00",
+      "thread_id": "1562584395507048458",
+      "last_message_id": "1562584395507048458"
+    },
     "17581": {
       "tmdb_id": "17581",
       "url": "https://discord.com/channels/994006546805694474/1491344865781612625/1491344865781612625",
@@ -1233,6 +1257,14 @@
       "updated_at": "2026-04-08T18:38:14.978000+00:00",
       "thread_id": "1491507483678605403",
       "last_message_id": "1491507578361086042"
+    },
+    "24197": {
+      "tmdb_id": "24197",
+      "url": "https://discord.com/channels/994006546805694474/1562532689171718154/1562532689171718154",
+      "title": "Mr.and.Mrs.Smith.1941.CUSTOM.MULTi.VFi.1080p.BLURAY.REMUX.AC3.2.0.H264.AVC-LiHDL",
+      "updated_at": "2026-10-21T18:27:03.552000+00:00",
+      "thread_id": "1562532689171718154",
+      "last_message_id": "1562532689171718154"
     },
     "243938": {
       "tmdb_id": "243938",
@@ -2266,6 +2298,14 @@
       "thread_id": "1533013188000616529",
       "last_message_id": "1533013291251663049"
     },
+    "64586": {
+      "tmdb_id": "64586",
+      "url": "https://discord.com/channels/994006546805694474/1562532952947163186/1562532952947163186",
+      "title": "Sleeping.Beauty.2011.CUSTOM.MULTi.VFi.1080p.BLURAY.REMUX.AC3.2.0.H264.AVC-LiHDL",
+      "updated_at": "2026-10-21T18:28:06.441000+00:00",
+      "thread_id": "1562532952947163186",
+      "last_message_id": "1562532952947163186"
+    },
     "6538": {
       "tmdb_id": "6538",
       "url": "https://discord.com/channels/994006546805694474/1543323110596681889/1543323110596681889",
@@ -2433,6 +2473,14 @@
       "updated_at": "2026-07-26T06:44:51.012000+00:00",
       "thread_id": "1530828228183199755",
       "last_message_id": "1530828305664839811"
+    },
+    "8080": {
+      "tmdb_id": "8080",
+      "url": "https://discord.com/channels/994006546805694474/1562532504974393425/1562532504974393425",
+      "title": "Suspect.Zero.2004.CUSTOM.MULTi.VFF.1080p.BluRay.REMUX.EAC3.2.0.DTS-HD.MA.5.1.H264-LiHDL",
+      "updated_at": "2026-10-21T18:26:19.636000+00:00",
+      "thread_id": "1562532504974393425",
+      "last_message_id": "1562532504974393425"
     },
     "81751": {
       "tmdb_id": "81751",
