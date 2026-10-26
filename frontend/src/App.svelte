@@ -1,5 +1,5 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import banner from './assets/images/banner.png';
   import logo from './assets/images/logo.png';
   import {
@@ -4029,9 +4029,18 @@
       if (!srtPath) throw new Error('srt vide');
       let size = -1;
       try { size = await FileSize(srtPath); } catch {}
-      let maxOrder = 0;
-      for (const t of tracks) maxOrder = Math.max(maxOrder, t.order ?? 0);
-      for (const s of externalSubs) maxOrder = Math.max(maxOrder, s.order ?? 0);
+      // Norme LiHDL : FR Full : SRT (y compris généré depuis OCR PGS) passe
+      // EN PREMIER dans la liste des sous-titres — order < tous les autres.
+      let minOrder = 0;
+      for (const t of tracks) {
+        if (t.type !== 'subtitles') continue;
+        if (t.order == null) continue;
+        if (t.order < minOrder) minOrder = t.order;
+      }
+      for (const s of externalSubs) {
+        if (s.order == null) continue;
+        if (s.order < minOrder) minOrder = s.order;
+      }
       externalSubs = [...externalSubs, {
         path: srtPath,
         name: srtPath.split('/').pop(),
@@ -4040,8 +4049,13 @@
         default: !!pgsTrack.default,
         forced: !!pgsTrack.forced,
         label: 'FR Full : SRT',
-        order: maxOrder + 10,
+        order: minOrder - 10,
       }];
+      // Attend que Svelte propage l'ajout — sans ça effectiveFilename
+      // (langFlagClient → hasFrSub) peut être computé avant que externalSubs
+      // soit vu comme modifié, donnant DUAL au lieu de MULTi dans le filename
+      // final du mux.
+      await tick();
       appendLog('✓ FR Full : SRT ajouté au mux depuis OCR PGS');
     } catch (e) {
       appendLog('⚠ Génération FR SRT depuis PGS échouée : ' + String(e) + ' — mux avec PGS seul');
