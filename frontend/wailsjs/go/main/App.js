@@ -86,6 +86,10 @@ export function FileSize(arg1) {
   return window['go']['main']['App']['FileSize'](arg1);
 }
 
+export function GenerateFRSrtFromPGS(arg1, arg2) {
+  return window['go']['main']['App']['GenerateFRSrtFromPGS'](arg1, arg2);
+}
+
 export function GetConfig() {
   return window['go']['main']['App']['GetConfig']();
 }

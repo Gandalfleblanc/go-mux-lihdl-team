@@ -9,7 +9,7 @@
     Mux, CancelMux,
     CheckUpdate, InstallUpdate,
     ListAudioTracksForSync, MuxAudioSync, DetectAudioOffset,
-    OCRPGSTrack, OCRSupFile,
+    OCRPGSTrack, OCRSupFile, GenerateFRSrtFromPGS,
     TestLanguageToolKey,
     ApplyOCRFix,
     SearchOpenSubtitles, DownloadOpenSubtitle,
@@ -4004,12 +4004,57 @@
   }
 
   // 🚀 MUX AUTO LiHDL : automateLihdl puis doMux direct (sans nav vers Cible).
+  // Si une piste FR Full est en PGS seul (pas de FR Full SRT ni interne ni
+  // externe), génère un SRT via l'app Mac externe « PGS vers SRT.app » (OCR
+  // pgsrip + relecture Opus) et l'ajoute en externalSubs comme FR Full : SRT.
+  // Appelé avant doMux en MUX AUTO. Fail-soft : si ça rate, on continue avec
+  // le PGS seul.
+  async function maybeGenerateFRSrtFromPGSAuto() {
+    try {
+      const frFullSrtExists =
+        tracks.some(t => t.type === 'subtitles' && t.keep !== false && /^FR Full : SRT\b/.test(t.label || '')) ||
+        externalSubs.some(s => s.keep !== false && /^FR Full : SRT\b/.test(s.label || ''));
+      if (frFullSrtExists) return;
+      // Cherche une piste FR Full PGS interne (gardée).
+      const pgsTrack = tracks.find(t =>
+        t.type === 'subtitles' &&
+        t.keep !== false &&
+        /^FR Full : PGS\b/.test(t.label || '')
+      );
+      if (!pgsTrack) return;
+      appendLog('🔠 FR Full PGS sans SRT détecté → OCR + relecture Opus auto…');
+      // Décoche la piste PGS pour qu'elle ne finisse pas en double dans le mux.
+      tracks = tracks.map(t => t === pgsTrack ? { ...t, keep: false } : t);
+      const srtPath = await GenerateFRSrtFromPGS(sourcePath, pgsTrack.id);
+      if (!srtPath) throw new Error('srt vide');
+      let size = -1;
+      try { size = await FileSize(srtPath); } catch {}
+      let maxOrder = 0;
+      for (const t of tracks) maxOrder = Math.max(maxOrder, t.order ?? 0);
+      for (const s of externalSubs) maxOrder = Math.max(maxOrder, s.order ?? 0);
+      externalSubs = [...externalSubs, {
+        path: srtPath,
+        name: srtPath.split('/').pop(),
+        size,
+        keep: true,
+        default: !!pgsTrack.default,
+        forced: !!pgsTrack.forced,
+        label: 'FR Full : SRT',
+        order: maxOrder + 10,
+      }];
+      appendLog('✓ FR Full : SRT ajouté au mux depuis OCR PGS');
+    } catch (e) {
+      appendLog('⚠ Génération FR SRT depuis PGS échouée : ' + String(e) + ' — mux avec PGS seul');
+    }
+  }
+
   async function muxAutoLihdl() {
     if (!sourcePath) { appendLog('⚠ Charge un fichier d\'abord'); return; }
     autoMuxStatus = '';
     if (autoMuxStatusTimer) { clearTimeout(autoMuxStatusTimer); autoMuxStatusTimer = null; }
     automateLihdl(false); // pas de navigation, on reste sur source pour la barre de progress
     await new Promise(r => setTimeout(r, 200));
+    await maybeGenerateFRSrtFromPGSAuto();
     // Snapshot des labels/keep/default/forced JUSTE avant le mux → propagé
     // aux épisodes suivants de la queue si Auto-continue est actif.
     snapshotSeriesOverrides();
@@ -4057,6 +4102,7 @@
     automate();
     // Petit délai pour que Svelte propage les updates de state avant doMux.
     await new Promise(r => setTimeout(r, 200));
+    await maybeGenerateFRSrtFromPGSAuto();
     const ok = await doMux();
     autoMuxStatus = ok ? 'success' : 'error';
     // Pas d'auto-clear timer : la barre verte/rouge reste visible jusqu'au prochain mux ou reset manuel.
@@ -5231,7 +5277,10 @@
       {/if}
 
       <!-- Card secondaire en bas droite : tabs Journal | Queue -->
-      {#if sourcePath && tmdbValidated}
+      <!-- Visible dès qu'une source est chargée (y compris pendant la validation
+           TMDB) pour permettre de voir les erreurs quand ça bloque sur « Aucun
+           film identifié ». Avant tmdbValidated, le journal est critique. -->
+      {#if sourcePath || queue.length > 0}
         <div class="card journal-card journal-inline">
           <div class="bottom-pane-tabs">
             <button class="bottom-pane-tab" class:active={bottomPaneTab === 'journal'} on:click={() => bottomPaneTab = 'journal'}>

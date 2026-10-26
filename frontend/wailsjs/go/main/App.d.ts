@@ -50,6 +50,8 @@ export function ExtractRefSubs(arg1:string,arg2:string):Promise<Array<main.RefSu
 
 export function FileSize(arg1:string):Promise<number>;
 
+export function GenerateFRSrtFromPGS(arg1:string,arg2:number):Promise<string>;
+
 export function GetConfig():Promise<config.Config>;
 
 export function GetLihdlOptions():Promise<main.LihdlOptions>;

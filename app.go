@@ -118,7 +118,7 @@ func (a *App) startup(ctx context.Context) {
 
 // AppVersion est lue par le frontend (pill dans le header) et utilisée pour
 // comparer avec la dernière release GitHub lors du check de mise à jour.
-const AppVersion = "v6.1.5"
+const AppVersion = "v7.0.0"
 
 func (a *App) GetVersion() string { return AppVersion }
 
@@ -419,6 +419,15 @@ func (a *App) AnalyzeMkv(path string) {
 		}
 		var info mkvtool.Info
 		_ = json.Unmarshal([]byte(raw), &info)
+		// Fichier non reconnu par mkvmerge (ex: HTML téléchargé à la place du
+		// vrai .mkv après captcha 1F) → alerter clairement au lieu de rester
+		// bloqué silencieusement sur l'écran de validation TMDB.
+		if len(info.Tracks) == 0 {
+			msg := "❌ Fichier non reconnu comme MKV valide (0 piste détectée). Vérifie que c'est bien un .mkv et pas une page HTML ou un fichier corrompu."
+			wr.EventsEmit(a.ctx, "log", msg)
+			wr.EventsEmit(a.ctx, "analyze:result", map[string]any{"ok": false, "error": msg})
+			return
+		}
 		wr.EventsEmit(a.ctx, "log", "✓ "+pluralTracks(len(info.Tracks))+" détectée(s)")
 
 		// Enrichissement mediainfo (audio/sub) : mêmes champs qu'AnalyzeMkvSecondary.
@@ -1188,6 +1197,80 @@ func classifyFRAudio(t mkvtool.Track) string {
 }
 
 // ExtractFRAudios extrait les pistes FR VFF, FR VFQ et/ou ENG VO d'un fichier
+// GenerateFRSrtFromPGS extrait la piste PGS d'un .mkv et la convertit en SRT
+// via l'app Mac externe « PGS vers SRT.app » (pgsrip + relecture Opus déjà
+// embarquée dans pgs.sh). Utilisé en MUX AUTO quand une piste FR Full est en
+// PGS seul sans SRT, pour produire automatiquement un SRT fidèle à ajouter au
+// mux.
+//
+// Prérequis : « /Applications/PGS vers SRT.app » installée (voir
+// reference_mac_pgs_to_srt). Temps typique ~2 min par film (OCR 30 s +
+// relecture Claude 90 s).
+//
+// Retourne le chemin du .srt final (déjà relu). L'appelant est responsable de
+// la suppression du .sup temporaire ; le .srt reste à côté du .sup pour que
+// l'user puisse le retrouver si besoin (dans TMPDIR).
+func (a *App) GenerateFRSrtFromPGS(mkvPath string, pgsTrackID int) (string, error) {
+	if mkvPath == "" {
+		return "", errors.New("chemin mkv vide")
+	}
+	pgsScript := "/Applications/PGS vers SRT.app/Contents/Resources/pgs.sh"
+	if _, err := os.Stat(pgsScript); err != nil {
+		return "", fmt.Errorf("app « PGS vers SRT.app » introuvable dans /Applications : %w", err)
+	}
+	binary := a.LocateMkvmerge()
+	if binary == "" {
+		return "", errors.New("mkvmerge introuvable")
+	}
+	wr.EventsEmit(a.ctx, "log", fmt.Sprintf("🔠 OCR PGS→SRT : extraction piste #%d de %s…", pgsTrackID, filepath.Base(mkvPath)))
+
+	// pgs.sh exige nom.<lang>.sup (pgsrip langue-aware). On extrait vers un
+	// dossier temp dédié avec un nom .fr.sup pour que pgsrip détecte le FR.
+	workDir, err := os.MkdirTemp("", "mux-pgs-*")
+	if err != nil {
+		return "", fmt.Errorf("tempdir : %w", err)
+	}
+	base := strings.TrimSuffix(filepath.Base(mkvPath), filepath.Ext(mkvPath))
+	supPath := filepath.Join(workDir, base+".fr.sup")
+	extractBin := strings.Replace(binary, "mkvmerge", "mkvextract", 1)
+	cmd := exec.CommandContext(a.ctx, extractBin, "tracks", mkvPath, fmt.Sprintf("%d:%s", pgsTrackID, supPath))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("mkvextract PGS : %w (%s)", err, string(out))
+	}
+	info, err := os.Stat(supPath)
+	if err != nil || info.Size() == 0 {
+		return "", errors.New("extraction PGS vide — vérifier que la piste est bien PGS")
+	}
+	wr.EventsEmit(a.ctx, "log", fmt.Sprintf("🔠 PGS extrait (%.1f Mo) → OCR + relecture Opus en cours (~2 min)…", float64(info.Size())/1024/1024))
+
+	// pgs.sh <in.sup> <workdir>  — écrit le .srt à côté du .sup et son chemin
+	// dans $workdir/sortie. Code retour dans $workdir/rc.
+	cmd = exec.CommandContext(a.ctx, pgsScript, supPath, workDir)
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	if err := cmd.Run(); err != nil {
+		errBytes, _ := os.ReadFile(filepath.Join(workDir, "erreur"))
+		return "", fmt.Errorf("pgs.sh : %w — %s", err, strings.TrimSpace(string(errBytes)))
+	}
+	sortie, err := os.ReadFile(filepath.Join(workDir, "sortie"))
+	if err != nil {
+		return "", fmt.Errorf("pgs.sh : fichier sortie manquant : %w", err)
+	}
+	srtPath := strings.TrimSpace(string(sortie))
+	if srtPath == "" {
+		return "", errors.New("pgs.sh : aucun SRT produit")
+	}
+	if _, err := os.Stat(srtPath); err != nil {
+		return "", fmt.Errorf("SRT introuvable à %q : %w", srtPath, err)
+	}
+	relu := ""
+	if _, err := os.Stat(filepath.Join(workDir, "relecture")); err == nil {
+		relu = " (relu par Opus)"
+	}
+	wr.EventsEmit(a.ctx, "log", fmt.Sprintf("✓ FR Full SRT généré%s : %s", relu, filepath.Base(srtPath)))
+	return srtPath, nil
+}
+
 // source tiers, détecte le décalage par rapport à la source LiHDL, et retourne
 // les fichiers audio prêts à être ajoutés au mux comme externalAudios. Le
 // frontend gère ensuite le replace (drop des FR/ENG existants) et l'ajout.
