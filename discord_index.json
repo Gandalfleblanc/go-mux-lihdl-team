@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-10-25T21:33:20Z",
+  "generated_at": "2026-10-26T23:04:07Z",
   "entries": {
     "10033": {
       "tmdb_id": "10033",
@@ -721,6 +721,14 @@
       "updated_at": "2026-09-19T10:28:30.552000+00:00",
       "thread_id": "1550815846421626971",
       "last_message_id": "1550815846421626971"
+    },
+    "1396965": {
+      "tmdb_id": "1396965",
+      "url": "https://discord.com/channels/994006546805694474/1564403485368262776/1564403485368262776",
+      "title": "Detective.Conan.One-eyed.Flashback.2025.CUSTOM.MULTi.VFi.1080p.BluRay.REMUX.EAC3.5.1.DTS-HD.HRA.5.1.",
+      "updated_at": "2026-10-26T22:20:56.123000+00:00",
+      "thread_id": "1564403485368262776",
+      "last_message_id": "1564403511213432973"
     },
     "13988": {
       "tmdb_id": "13988",
@@ -1642,6 +1650,14 @@
       "thread_id": "1535599189210435624",
       "last_message_id": "1535599258882015338"
     },
+    "33570": {
+      "tmdb_id": "33570",
+      "url": "https://discord.com/channels/994006546805694474/1564395998258794567/1564395998258794567",
+      "title": "Ice.Castles.2010.CUSTOM.MULTi.VFi.1080p.AMZN.WEB-DL.AC3.5.1.EAC3.5.1.H264-LiHDL",
+      "updated_at": "2026-10-26T21:51:11.057000+00:00",
+      "thread_id": "1564395998258794567",
+      "last_message_id": "1564395998258794567"
+    },
     "33851": {
       "tmdb_id": "33851",
       "url": "https://discord.com/channels/994006546805694474/1508939240564723912/1508939240564723912",
@@ -1914,6 +1930,14 @@
       "thread_id": "1532308676025651261",
       "last_message_id": "1532308712319094884"
     },
+    "425972": {
+      "tmdb_id": "425972",
+      "url": "https://discord.com/channels/994006546805694474/1564330675534827661/1564330675534827661",
+      "title": "Cargo.2017.CUSTOM.MULTi.VFi.1080p.BLURAY.REMUX.AC3.5.1.H264.AVC-LiHDL",
+      "updated_at": "2026-10-26T17:31:36.906000+00:00",
+      "thread_id": "1564330675534827661",
+      "last_message_id": "1564331162858561668"
+    },
     "42604": {
       "tmdb_id": "42604",
       "url": "https://discord.com/channels/994006546805694474/1517954345117941910/1517954345117941910",
@@ -1993,6 +2017,14 @@
       "updated_at": "2026-07-30T09:04:49.401000+00:00",
       "thread_id": "1532313005042176092",
       "last_message_id": "1532313035568447498"
+    },
+    "454639": {
+      "tmdb_id": "454639",
+      "url": "https://discord.com/channels/994006546805694474/1564330923829498038/1564330923829498038",
+      "title": "Masters.of.the.Universe.2026.CUSTOM.MULTi.VF2.1080p.BLURAY.REMUX.AC3.5.1.H264.AVC-LiHDL",
+      "updated_at": "2026-10-26T17:32:36.104000+00:00",
+      "thread_id": "1564330923829498038",
+      "last_message_id": "1564330923829498038"
     },
     "45522": {
       "tmdb_id": "45522",
@@ -2185,6 +2217,14 @@
       "updated_at": "2026-07-05T19:52:40.633000+00:00",
       "thread_id": "1523416346166169600",
       "last_message_id": "1523416368295182436"
+    },
+    "50541": {
+      "tmdb_id": "50541",
+      "url": "https://discord.com/channels/994006546805694474/1564315836703969392/1564315836703969392",
+      "title": "Ice.Castles.1978.CUSTOM.MULTi.VFi.1080p.BluRay.REMUX.AC3.2.0.FLAC.2.0.AVC-LiHDL",
+      "updated_at": "2026-10-26T16:32:39.053000+00:00",
+      "thread_id": "1564315836703969392",
+      "last_message_id": "1564315893104644127"
     },
     "505948": {
       "tmdb_id": "505948",
