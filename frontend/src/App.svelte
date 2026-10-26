@@ -2323,8 +2323,10 @@
                    target.resolution, target.source, target.video_codec, target.lang,
                    target.episode, target.flagOverride, includeYearInEpisode, supplyExtraFlag,
                    secondarySelected.length,
+                   externalSubs.length,
                    ...tracks.map(t => (t.keep ? '1' : '0') + (t.label || '')),
-                   ...secondarySelected.map(t => (t.keep ? '1' : '0') + (t.label || ''))];
+                   ...secondarySelected.map(t => (t.keep ? '1' : '0') + (t.label || '')),
+                   ...externalSubs.map(s => (s.keep !== false ? '1' : '0') + (s.label || ''))];
     void _deps;
     return buildFilenameClient();
   })();
