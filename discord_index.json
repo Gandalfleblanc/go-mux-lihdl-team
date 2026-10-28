@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-10-27T22:53:45Z",
+  "generated_at": "2026-10-28T23:01:23Z",
   "entries": {
     "10033": {
       "tmdb_id": "10033",
@@ -73,6 +73,14 @@
       "updated_at": "2026-05-14T16:12:42.856000+00:00",
       "thread_id": "1504516821665972346",
       "last_message_id": "1504517367714025502"
+    },
+    "10490": {
+      "tmdb_id": "10490",
+      "url": "https://discord.com/channels/994006546805694474/1565079817903280279/1565079817903280279",
+      "title": "Belles.a.mourir.1999.Custom.MULTi.VFF.1080p.BluRay.Remux.DTS.HD.MA.5.1.AVC-QBDom Envoyé par QBDom •",
+      "updated_at": "2026-10-28T19:08:26.365000+00:00",
+      "thread_id": "1565079817903280279",
+      "last_message_id": "1565079817903280279"
     },
     "10612": {
       "tmdb_id": "10612",
@@ -1170,6 +1178,14 @@
       "thread_id": "1532305268535197828",
       "last_message_id": "1532305337183375411"
     },
+    "192684": {
+      "tmdb_id": "192684",
+      "url": "https://discord.com/channels/994006546805694474/1565135317969801396/1565135317969801396",
+      "title": "La.Tete.de.Normande.St.Onge.1975.VFF.1080p.BluRay.DTS.2.0.x264-Fist",
+      "updated_at": "2026-10-28T22:48:58.612000+00:00",
+      "thread_id": "1565135317969801396",
+      "last_message_id": "1565135317969801396"
+    },
     "19348": {
       "tmdb_id": "19348",
       "url": "https://discord.com/channels/994006546805694474/1513955692912836699/1513955692912836699",
@@ -1394,6 +1410,14 @@
       "thread_id": "1533096895101145239",
       "last_message_id": "1533097002311618790"
     },
+    "250634": {
+      "tmdb_id": "250634",
+      "url": "https://discord.com/channels/994006546805694474/1565127070718365777/1565127070718365777",
+      "title": "Les.Longs.Manteaux.1986.FRENCH.1080p.Bluray.Remux.AVC-BDHD",
+      "updated_at": "2026-10-28T22:16:12.314000+00:00",
+      "thread_id": "1565127070718365777",
+      "last_message_id": "1565127070718365777"
+    },
     "254172": {
       "tmdb_id": "254172",
       "url": "https://discord.com/channels/994006546805694474/1532314063751614534/1532314063751614534",
@@ -1585,6 +1609,14 @@
       "updated_at": "2026-08-01T16:58:15.869000+00:00",
       "thread_id": "1533156926135865537",
       "last_message_id": "1533156989561995385"
+    },
+    "312137": {
+      "tmdb_id": "312137",
+      "url": "https://discord.com/channels/994006546805694474/1565080405785190510/1565080405785190510",
+      "title": "Le.Film.Est.Deja.Commence.1951.VFF.1080p.BluRay.FLAC.1.0.x264-Slope",
+      "updated_at": "2026-10-28T19:10:46.527000+00:00",
+      "thread_id": "1565080405785190510",
+      "last_message_id": "1565080405785190510"
     },
     "316410": {
       "tmdb_id": "316410",
@@ -1810,6 +1842,14 @@
       "thread_id": "1548312099304775680",
       "last_message_id": "1548312166845784195"
     },
+    "383980": {
+      "tmdb_id": "383980",
+      "url": "https://discord.com/channels/994006546805694474/1565134963840647229/1565134963840647229",
+      "title": "Les.Yeux.de.l.amour.1959.VOF.1080p.BluRay.Remux.DTS.HD.MA.2.0.AVC-Fist",
+      "updated_at": "2026-10-28T22:47:34.181000+00:00",
+      "thread_id": "1565134963840647229",
+      "last_message_id": "1565134963840647229"
+    },
     "38731": {
       "tmdb_id": "38731",
       "url": "https://discord.com/channels/994006546805694474/1508942497794232561/1508942497794232561",
@@ -1841,6 +1881,14 @@
       "updated_at": "2026-05-22T05:20:12.318000+00:00",
       "thread_id": "1507251715332902992",
       "last_message_id": "1507251772203204709"
+    },
+    "40084": {
+      "tmdb_id": "40084",
+      "url": "https://discord.com/channels/994006546805694474/1565070975777640538/1565070975777640538",
+      "title": "Caligula.et.Messaline.1981.MULTI.VFF.1080p.BLURAY.REMUX.DTS.HD.MA.2.0.AVC-KrakenleGrand",
+      "updated_at": "2026-10-28T18:33:18.238000+00:00",
+      "thread_id": "1565070975777640538",
+      "last_message_id": "1565070975777640538"
     },
     "401697": {
       "tmdb_id": "401697",
@@ -1937,6 +1985,14 @@
       "updated_at": "2026-04-14T17:44:18.247000+00:00",
       "thread_id": "1493668235038556170",
       "last_message_id": "1493668299958128690"
+    },
+    "41961": {
+      "tmdb_id": "41961",
+      "url": "https://discord.com/channels/994006546805694474/1565060913629892608/1565060913629892608",
+      "title": "La.Petite.Vera.1988.TRUEFRENCH.1080p.BluRay.AC3.5.1.x264-Alexandr",
+      "updated_at": "2026-10-28T17:53:19.235000+00:00",
+      "thread_id": "1565060913629892608",
+      "last_message_id": "1565060913629892608"
     },
     "420622": {
       "tmdb_id": "420622",
@@ -2186,6 +2242,14 @@
       "thread_id": "1548311862494502932",
       "last_message_id": "1548311933818773536"
     },
+    "49685": {
+      "tmdb_id": "49685",
+      "url": "https://discord.com/channels/994006546805694474/1565084504442404974/1565084504442404974",
+      "title": "Je.Rentre.A.La.Maison.2001.MULTI.VFF.1080p.BluRay.REMUX.DTS.HD.MA.5.1.AVC-ZoroSenpai",
+      "updated_at": "2026-10-28T19:27:03.723000+00:00",
+      "thread_id": "1565084504442404974",
+      "last_message_id": "1565084504442404974"
+    },
     "4975": {
       "tmdb_id": "4975",
       "url": "https://discord.com/channels/994006546805694474/1525389104223752362/1525389104223752362",
@@ -2306,6 +2370,14 @@
       "thread_id": "1501628094400954480",
       "last_message_id": "1501628168170111028"
     },
+    "533454": {
+      "tmdb_id": "533454",
+      "url": "https://discord.com/channels/994006546805694474/1565137026938835117/1565137026938835117",
+      "title": "Des.Frissons.Partout.1964.MULTI.VFI.1080p.BluRay.ISO.DTS.HD.MA.2.0.AVC-FULLSiZE",
+      "updated_at": "2026-10-28T22:55:46.062000+00:00",
+      "thread_id": "1565137026938835117",
+      "last_message_id": "1565137026938835117"
+    },
     "540247": {
       "tmdb_id": "540247",
       "url": "https://discord.com/channels/994006546805694474/1541447822040113183/1541447822040113183",
@@ -2321,6 +2393,14 @@
       "updated_at": "2026-08-18T05:14:51.562000+00:00",
       "thread_id": "1539140502157262888",
       "last_message_id": "1539140581022892052"
+    },
+    "563582": {
+      "tmdb_id": "563582",
+      "url": "https://discord.com/channels/994006546805694474/1565068795679084605/1565068795679084605",
+      "title": "Toutes.Folles.De.Lui.1967.VOF.1080p.BluRay.REMUX.DTS.HD.MA.2.0.AVC-Fist",
+      "updated_at": "2026-10-28T18:24:38.462000+00:00",
+      "thread_id": "1565068795679084605",
+      "last_message_id": "1565068795679084605"
     },
     "566810": {
       "tmdb_id": "566810",
@@ -2753,6 +2833,14 @@
       "updated_at": "2026-08-08T13:22:39.263000+00:00",
       "thread_id": "1535639381136777216",
       "last_message_id": "1535639429065220168"
+    },
+    "93934": {
+      "tmdb_id": "93934",
+      "url": "https://discord.com/channels/994006546805694474/1565132759352221796/1565132759352221796",
+      "title": "Je.Tu.Il.Elle.1974.VFF.1080p.BluRay.REMUX.FLAC.1.0.AVC-LM",
+      "updated_at": "2026-10-28T22:38:48.590000+00:00",
+      "thread_id": "1565132759352221796",
+      "last_message_id": "1565132759352221796"
     },
     "950028": {
       "tmdb_id": "950028",
