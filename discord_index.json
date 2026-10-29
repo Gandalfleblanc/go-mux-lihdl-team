@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-10-28T23:01:23Z",
+  "generated_at": "2026-10-29T23:08:56Z",
   "entries": {
     "10033": {
       "tmdb_id": "10033",
@@ -562,6 +562,14 @@
       "thread_id": "1539125202204491776",
       "last_message_id": "1539125220105912380"
     },
+    "128154": {
+      "tmdb_id": "128154",
+      "url": "https://discord.com/channels/994006546805694474/1565451073983094834/1565451073983094834",
+      "title": "Alata.2012.MULTI.VFF.1080p.BluRay.REMUX.DTS.5.1.AVC-MDY95",
+      "updated_at": "2026-10-29T19:43:40.712000+00:00",
+      "thread_id": "1565451073983094834",
+      "last_message_id": "1565451073983094834"
+    },
     "1282960": {
       "tmdb_id": "1282960",
       "url": "https://discord.com/channels/994006546805694474/1533558479724216360/1533558479724216360",
@@ -674,6 +682,14 @@
       "thread_id": "1561789023356461106",
       "last_message_id": "1561789061130362893"
     },
+    "133827": {
+      "tmdb_id": "133827",
+      "url": "https://discord.com/channels/994006546805694474/1565455107657695292/1565455107657695292",
+      "title": "Echappement.Libre.1964.MULTI.VOF.1080p.BLURAY.REMUX.DTS.HD.MA.2.0.AVC-ONLY",
+      "updated_at": "2026-10-29T19:59:42.415000+00:00",
+      "thread_id": "1565455107657695292",
+      "last_message_id": "1565455107657695292"
+    },
     "13523": {
       "tmdb_id": "13523",
       "url": "https://discord.com/channels/994006546805694474/1544008602539393155/1544008602539393155",
@@ -713,6 +729,14 @@
       "updated_at": "2026-10-01T18:49:17.419000+00:00",
       "thread_id": "1555290526503149609",
       "last_message_id": "1555290526503149609"
+    },
+    "137607": {
+      "tmdb_id": "137607",
+      "url": "https://discord.com/channels/994006546805694474/1565500280022376588/1565500280022376588",
+      "title": "Celestine.bonne.a.tout.faire.1974.MULTI.VFF.1080p.BLURAY.REMUX.DTS.HD.MA.2.0.AVC-Fan2",
+      "updated_at": "2026-10-29T22:59:12.346000+00:00",
+      "thread_id": "1565500280022376588",
+      "last_message_id": "1565500280022376588"
     },
     "13816": {
       "tmdb_id": "13816",
@@ -761,6 +785,14 @@
       "updated_at": "2026-07-26T06:45:32.620000+00:00",
       "thread_id": "1530828402699800656",
       "last_message_id": "1530828436510343228"
+    },
+    "1404684": {
+      "tmdb_id": "1404684",
+      "url": "https://discord.com/channels/994006546805694474/1565452015738290226/1565452015738290226",
+      "title": "Just.an.Illusion.2026.1080p.BluRay.REMUX.AVC.DTS-HD.MA.5.1-BLiSS",
+      "updated_at": "2026-10-29T19:47:25.244000+00:00",
+      "thread_id": "1565452015738290226",
+      "last_message_id": "1565452015738290226"
     },
     "14136": {
       "tmdb_id": "14136",
@@ -905,6 +937,14 @@
       "updated_at": "2026-08-22T18:58:55.106000+00:00",
       "thread_id": "1540797434874298488",
       "last_message_id": "1540797434874298488"
+    },
+    "150338": {
+      "tmdb_id": "150338",
+      "url": "https://discord.com/channels/994006546805694474/1565446181667213402/1565446181667213402",
+      "title": "Pendulum.1969.MULTI.VFF.1080p.BLURAY.REMUX.DTS.HD.MA.2.0.AVC-Raf66",
+      "updated_at": "2026-10-29T19:24:14.293000+00:00",
+      "thread_id": "1565446181667213402",
+      "last_message_id": "1565446181667213402"
     },
     "1523": {
       "tmdb_id": "1523",
@@ -1450,6 +1490,14 @@
       "thread_id": "1533006603123425401",
       "last_message_id": "1533006643233816657"
     },
+    "264218": {
+      "tmdb_id": "264218",
+      "url": "https://discord.com/channels/994006546805694474/1565454706816585889/1565454706816585889",
+      "title": "La.Vie.Heureuse.De.Leopold.Z.1965.MULTI.VFF.1080p.BluRay.REMUX.DTS.HD.MA.2.0.AVC-NOTAG",
+      "updated_at": "2026-10-29T19:58:06.847000+00:00",
+      "thread_id": "1565454706816585889",
+      "last_message_id": "1565454706816585889"
+    },
     "266639": {
       "tmdb_id": "266639",
       "url": "https://discord.com/channels/994006546805694474/1535639212366237788/1535639212366237788",
@@ -1465,6 +1513,14 @@
       "updated_at": "2026-07-31T11:21:34.498000+00:00",
       "thread_id": "1532709807579201557",
       "last_message_id": "1532709854186045664"
+    },
+    "27066": {
+      "tmdb_id": "27066",
+      "url": "https://discord.com/channels/994006546805694474/1565321665930334258/1565321665930334258",
+      "title": "L.Uomo.Che.Guarda.1994.MULTI.VFF.1080p.BluRay.REMUX.DTS.HD.MA.2.0.AVC-KrakenLeGrand",
+      "updated_at": "2026-10-29T11:09:27.428000+00:00",
+      "thread_id": "1565321665930334258",
+      "last_message_id": "1565321665930334258"
     },
     "27396": {
       "tmdb_id": "27396",
@@ -1930,6 +1986,14 @@
       "thread_id": "1501262068442071050",
       "last_message_id": "1501262120497578197"
     },
+    "40724": {
+      "tmdb_id": "40724",
+      "url": "https://discord.com/channels/994006546805694474/1565321040606007446/1565321040606007446",
+      "title": "Le.Bonheur.Au.Bout.Du.Chemin.II.1987.MULTI.VFI.1080p.BLURAY.REMUX.AC3.2.0.AVC-NOTAG",
+      "updated_at": "2026-10-29T11:06:58.339000+00:00",
+      "thread_id": "1565321040606007446",
+      "last_message_id": "1565321040606007446"
+    },
     "407448": {
       "tmdb_id": "407448",
       "url": "https://discord.com/channels/994006546805694474/1493678431769198734/1493678431769198734",
@@ -2001,6 +2065,14 @@
       "updated_at": "2026-07-30T08:47:37.283000+00:00",
       "thread_id": "1532308676025651261",
       "last_message_id": "1532308712319094884"
+    },
+    "42229": {
+      "tmdb_id": "42229",
+      "url": "https://discord.com/channels/994006546805694474/1565454225033658561/1565454225033658561",
+      "title": "Une.Journee.Particuliere.1977.MULTi.1080p.Bluray.Remux.AVC.FLAC-E.T.",
+      "updated_at": "2026-10-29T19:56:11.981000+00:00",
+      "thread_id": "1565454225033658561",
+      "last_message_id": "1565454225033658561"
     },
     "425972": {
       "tmdb_id": "425972",
@@ -2082,6 +2154,14 @@
       "thread_id": "1535710391433302196",
       "last_message_id": "1535710449390067763"
     },
+    "452": {
+      "tmdb_id": "452",
+      "url": "https://discord.com/channels/994006546805694474/1565452395562008707/1565452395562008707",
+      "title": "Les.idiots.Idioterne.1998.Remastered.Uncut.Multi.1080p.FRA.Blu-ray.REMUX.AVC.DTS-HD.MA-RyanHG",
+      "updated_at": "2026-10-29T19:48:55.801000+00:00",
+      "thread_id": "1565452395562008707",
+      "last_message_id": "1565452395562008707"
+    },
     "454227": {
       "tmdb_id": "454227",
       "url": "https://discord.com/channels/994006546805694474/1532313005042176092/1532313005042176092",
@@ -2121,6 +2201,14 @@
       "updated_at": "2026-07-30T09:36:36.154000+00:00",
       "thread_id": "1532321002544169081",
       "last_message_id": "1532321032843694131"
+    },
+    "46363": {
+      "tmdb_id": "46363",
+      "url": "https://discord.com/channels/994006546805694474/1565445950854660127/1565445950854660127",
+      "title": "Sissi.Les.Jeunes.Annees.D.Une.Reine.1954.VFF.1080p.BluRay.REMUX.DTS.HD.MA.1.0.AVC-tr4kr13",
+      "updated_at": "2026-10-29T19:23:19.263000+00:00",
+      "thread_id": "1565445950854660127",
+      "last_message_id": "1565445950854660127"
     },
     "464723": {
       "tmdb_id": "464723",
@@ -2376,7 +2464,7 @@
       "title": "Des.Frissons.Partout.1964.MULTI.VFI.1080p.BluRay.ISO.DTS.HD.MA.2.0.AVC-FULLSiZE",
       "updated_at": "2026-10-28T22:55:46.062000+00:00",
       "thread_id": "1565137026938835117",
-      "last_message_id": "1565137026938835117"
+      "last_message_id": "1565307711636242447"
     },
     "540247": {
       "tmdb_id": "540247",
@@ -2394,6 +2482,14 @@
       "thread_id": "1539140502157262888",
       "last_message_id": "1539140581022892052"
     },
+    "55563": {
+      "tmdb_id": "55563",
+      "url": "https://discord.com/channels/994006546805694474/1565324761213567097/1565324761213567097",
+      "title": "Tammy.And.The.T.Rex.1994.MULTi.VFF.1080p.BluRay.ReMuX.DTS.HD.MA.2.0.AVC-Raf66",
+      "updated_at": "2026-10-29T11:21:45.401000+00:00",
+      "thread_id": "1565324761213567097",
+      "last_message_id": "1565324761213567097"
+    },
     "563582": {
       "tmdb_id": "563582",
       "url": "https://discord.com/channels/994006546805694474/1565068795679084605/1565068795679084605",
@@ -2409,6 +2505,14 @@
       "updated_at": "2026-09-10T12:24:22.426000+00:00",
       "thread_id": "1547583513904025630",
       "last_message_id": "1547583550986133525"
+    },
+    "57389": {
+      "tmdb_id": "57389",
+      "url": "https://discord.com/channels/994006546805694474/1565445531847631060/1565445531847631060",
+      "title": "Le.Quattro.Volte.2010.VO.MUET.1080p.BluRay.Remux.AVC.DTS-HD.MA.5.1-KaMichou",
+      "updated_at": "2026-10-29T19:21:39.364000+00:00",
+      "thread_id": "1565445531847631060",
+      "last_message_id": "1565445531847631060"
     },
     "57949": {
       "tmdb_id": "57949",
@@ -2689,6 +2793,14 @@
       "updated_at": "2026-07-26T06:44:51.012000+00:00",
       "thread_id": "1530828228183199755",
       "last_message_id": "1530828305664839811"
+    },
+    "80611": {
+      "tmdb_id": "80611",
+      "url": "https://discord.com/channels/994006546805694474/1565453598538596503/1565453598538596503",
+      "title": "Quiet.Cool.1986.CUSTOM.DUAL.VFF.1080p.AMZN.WEB-DL.AC3.2.0.EAC3.2.0.H264-LiHDL",
+      "updated_at": "2026-10-29T19:53:42.613000+00:00",
+      "thread_id": "1565453598538596503",
+      "last_message_id": "1565453633137676378"
     },
     "8080": {
       "tmdb_id": "8080",
