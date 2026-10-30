@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-10-29T23:08:56Z",
+  "generated_at": "2026-10-30T22:52:15Z",
   "entries": {
     "10033": {
       "tmdb_id": "10033",
@@ -602,6 +602,14 @@
       "thread_id": "1508404584685633616",
       "last_message_id": "1508404584685633616"
     },
+    "1290424": {
+      "tmdb_id": "1290424",
+      "url": "https://discord.com/channels/994006546805694474/1565785690103484418/1565785690103484418",
+      "title": "L.Inconnu.de.la.Grande.Arche.2025.Multilingue.1080p.FRA.BluRay.AVC.DTS-HD.MA.5.1-RyanHG",
+      "updated_at": "2026-10-30T17:53:19.412000+00:00",
+      "thread_id": "1565785690103484418",
+      "last_message_id": "1565785690103484418"
+    },
     "1290821": {
       "tmdb_id": "1290821",
       "url": "https://discord.com/channels/994006546805694474/1501633684258947182/1501633684258947182",
@@ -1065,6 +1073,14 @@
       "updated_at": "2026-04-07T12:39:35.652000+00:00",
       "thread_id": "1491054837218148503",
       "last_message_id": "1491054903085240370"
+    },
+    "16923": {
+      "tmdb_id": "16923",
+      "url": "https://discord.com/channels/994006546805694474/1565746378456567839/1565746378456567839",
+      "title": "Merlin.and.the.War.of.the.Dragons.2011.CUSTOM.DUAL.VFi.1080p.BLURAY.REMUX.AC3.2.0.H264.MPEG2-LiHDL",
+      "updated_at": "2026-10-30T15:17:06.785000+00:00",
+      "thread_id": "1565746378456567839",
+      "last_message_id": "1565746378456567839"
     },
     "1705729": {
       "tmdb_id": "1705729",
@@ -1610,6 +1626,14 @@
       "thread_id": "1544007323486257263",
       "last_message_id": "1544007323486257263"
     },
+    "297455": {
+      "tmdb_id": "297455",
+      "url": "https://discord.com/channels/994006546805694474/1565746245262254080/1565746245262254080",
+      "title": "Preston.Castle.2012.CUSTOM.MULTi.VFi.1080p.BLURAY.REMUX.AC3.2.0.H264.AVC-LiHDL",
+      "updated_at": "2026-10-30T15:16:35.029000+00:00",
+      "thread_id": "1565746245262254080",
+      "last_message_id": "1565746245262254080"
+    },
     "2977": {
       "tmdb_id": "2977",
       "url": "https://discord.com/channels/994006546805694474/1535638886301040731/1535638886301040731",
@@ -1746,6 +1770,14 @@
       "thread_id": "1532374428757786706",
       "last_message_id": "1532374483267223783"
     },
+    "33362": {
+      "tmdb_id": "33362",
+      "url": "https://discord.com/channels/994006546805694474/1565641482377895986/1565641482377895986",
+      "title": "Les.Vieux.De.La.Vieille.1960.FRENCH.VOF.1080p.Blu-ray.Remux.AVC.DTS-HD.MA.2.0-HDT",
+      "updated_at": "2026-10-30T08:20:17.611000+00:00",
+      "thread_id": "1565641482377895986",
+      "last_message_id": "1565641482377895986"
+    },
     "33542": {
       "tmdb_id": "33542",
       "url": "https://discord.com/channels/994006546805694474/1535599189210435624/1535599189210435624",
@@ -1809,6 +1841,14 @@
       "updated_at": "2026-05-26T21:01:05.075000+00:00",
       "thread_id": "1508938046819536996",
       "last_message_id": "1508938046819536996"
+    },
+    "35250": {
+      "tmdb_id": "35250",
+      "url": "https://discord.com/channels/994006546805694474/1565811576097996961/1565811576097996961",
+      "title": "The.Locals.2003.Custom.MULTi.VFF.1080p.BluRay.Remux.DTS.HD.MA.5.1.H264-C4lypso",
+      "updated_at": "2026-10-30T19:36:11.114000+00:00",
+      "thread_id": "1565811576097996961",
+      "last_message_id": "1565850795633807451"
     },
     "353069": {
       "tmdb_id": "353069",
@@ -2201,6 +2241,14 @@
       "updated_at": "2026-07-30T09:36:36.154000+00:00",
       "thread_id": "1532321002544169081",
       "last_message_id": "1532321032843694131"
+    },
+    "460962": {
+      "tmdb_id": "460962",
+      "url": "https://discord.com/channels/994006546805694474/1565746127184199862/1565746127184199862",
+      "title": "Alien.Convergence.2017.CUSTOM.MULTi.VFi.1080p.BLURAY.REMUX.AC3.2.0.H264.AVC-LiHDL",
+      "updated_at": "2026-10-30T15:16:06.877000+00:00",
+      "thread_id": "1565746127184199862",
+      "last_message_id": "1565746127184199862"
     },
     "46363": {
       "tmdb_id": "46363",
@@ -2730,6 +2778,14 @@
       "thread_id": "1532319680197558282",
       "last_message_id": "1532319812498231406"
     },
+    "748685": {
+      "tmdb_id": "748685",
+      "url": "https://discord.com/channels/994006546805694474/1565746570547302420/1565746570547302420",
+      "title": "The.Sacrifice.2020.DUAL.MULTi.VFi.1080p.BLURAY.REMUX.AC3.2.0.H264.AVC-LiHDL",
+      "updated_at": "2026-10-30T15:17:52.583000+00:00",
+      "thread_id": "1565746570547302420",
+      "last_message_id": "1565746570547302420"
+    },
     "75048": {
       "tmdb_id": "75048",
       "url": "https://discord.com/channels/994006546805694474/1509253140506218496/1509253140506218496",
@@ -2786,6 +2842,14 @@
       "thread_id": "1507250758205051011",
       "last_message_id": "1507250829579784252"
     },
+    "79756": {
+      "tmdb_id": "79756",
+      "url": "https://discord.com/channels/994006546805694474/1565702638299914457/1565702638299914457",
+      "title": "Signes.Exterieurs.de.Richesse.1983.VOF.1080p.BluRay.REMUX.DTS.2.0.x264-prem",
+      "updated_at": "2026-10-30T12:23:18.319000+00:00",
+      "thread_id": "1565702638299914457",
+      "last_message_id": "1565702638299914457"
+    },
     "80518": {
       "tmdb_id": "80518",
       "url": "https://discord.com/channels/994006546805694474/1530828228183199755/1530828228183199755",
@@ -2793,6 +2857,14 @@
       "updated_at": "2026-07-26T06:44:51.012000+00:00",
       "thread_id": "1530828228183199755",
       "last_message_id": "1530828305664839811"
+    },
+    "8052": {
+      "tmdb_id": "8052",
+      "url": "https://discord.com/channels/994006546805694474/1565811222853460018/1565811222853460018",
+      "title": "Double.Mise.1997.MULTI.VFF.1080p.BluRay.Remux.AC3.2.0.AVC-FgCw",
+      "updated_at": "2026-10-30T19:34:46.894000+00:00",
+      "thread_id": "1565811222853460018",
+      "last_message_id": "1565811222853460018"
     },
     "80611": {
       "tmdb_id": "80611",
