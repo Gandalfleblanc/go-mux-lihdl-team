@@ -64,6 +64,8 @@ export function InstallUpdate():Promise<void>;
 
 export function ListAudioTracksForSync(arg1:string):Promise<Array<main.SyncAudioTrack>>;
 
+export function ListMkvFiles(arg1:string):Promise<Array<string>>;
+
 export function LocateMkvmerge():Promise<string>;
 
 export function LookupHydrackerURL(arg1:number):Promise<string>;
@@ -109,6 +111,8 @@ export function SelectMkvFile():Promise<string>;
 export function SelectMkvFiles():Promise<Array<string>>;
 
 export function SelectOutputDir():Promise<string>;
+
+export function SelectSeasonFolder():Promise<string>;
 
 export function SelectSubFiles():Promise<Array<string>>;
 

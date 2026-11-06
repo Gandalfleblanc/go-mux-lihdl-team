@@ -10,11 +10,12 @@
   import VideoSettingsCard from './lib/VideoSettingsCard.svelte';
   import TmdbValidateCard from './lib/TmdbValidateCard.svelte';
   import TrackList from './lib/TrackList.svelte';
+  import SeasonBoard from './lib/SeasonBoard.svelte';
   import SourcesCard from './lib/SourcesCard.svelte';
   import HeaderFilmBar from './lib/HeaderFilmBar.svelte';
   import EmptyHero from './lib/EmptyHero.svelte';
   import Icon from './lib/Icon.svelte';
-  import { detectEpisode, detectSourceType, parsePsaSourceInfo, parseSupplyInfo, looksLikeAD, inferAudioLabel, inferSubLabel, mapLangCode, dotify, subLabelPriority, cleanQueryFromFilename, langFlag, findUnambiguousTmdbMatch, yearFromFilename } from './lib/rules.js';
+  import { detectEpisode, detectSourceType, parsePsaSourceInfo, parseSupplyInfo, looksLikeAD, inferAudioLabel, inferSubLabel, mapLangCode, dotify, subLabelPriority, cleanQueryFromFilename, langFlag, findUnambiguousTmdbMatch, yearFromFilename, pairSeasonFiles } from './lib/rules.js';
   import banner from './assets/images/banner.png';
   import logo from './assets/images/logo.png';
   import {
@@ -24,7 +25,7 @@
     Mux, CancelMux,
     CheckUpdate, InstallUpdate,
     ListAudioTracksForSync, MuxAudioSync, DetectAudioOffset,
-    OCRPGSTrack, OCRSupFile, GenerateFRSrtFromPGS, Notify,
+    OCRPGSTrack, OCRSupFile, GenerateFRSrtFromPGS, Notify, SelectSeasonFolder, ListMkvFiles,
     TestLanguageToolKey,
     ApplyOCRFix,
     SearchOpenSubtitles, DownloadOpenSubtitle,
@@ -845,7 +846,7 @@
       // MAIS en auto-continue de queue avec des épisodes restants, on ne
       // trash QUE les fichiers de l'épisode courant sinon les épisodes
       // suivants (aussi dans "LiHDL en cours") partiraient à la corbeille.
-      if (queueAutoContinue && queue.length > 0) {
+      if ((queueAutoContinue && queue.length > 0) || (season && season.running)) {
         const filesForThisEp = [
           sourcePath,
           referencePath,
@@ -961,6 +962,142 @@
         }
       }, 200);
     });
+  }
+
+  // ─── MODE SAISON ─────────────────────────────────────────────────────────
+  // Un dossier → épisodes associés (PSA+SUPPLY ou source seule) → mux auto
+  // enchaîné, avec arrêt propre, sync vérifiée et récap.
+  let season = $state(null);
+
+  function waitUntil(cond, timeoutMs = 60000, label = 'attente') {
+    return new Promise((resolve, reject) => {
+      const t0 = Date.now();
+      const timer = setInterval(() => {
+        if (cond()) { clearInterval(timer); resolve(); }
+        else if (Date.now() - t0 > timeoutMs) { clearInterval(timer); reject(new Error(label + ' : délai dépassé')); }
+      }, 250);
+    });
+  }
+
+  async function openSeasonFolder() {
+    let dir;
+    try { dir = await SelectSeasonFolder(); } catch { dir = ''; }
+    if (!dir) return;
+    let files = [];
+    try { files = await ListMkvFiles(dir); } catch (e) { appendLog('❌ Lecture du dossier : ' + String(e)); return; }
+    const { episodes, ignored } = pairSeasonFiles(files, muxMode);
+    season = {
+      dir, mode: muxMode, ignored,
+      episodes: episodes.map((e) => ({ ...e, status: 'pending', step: '', output: '', notes: [] })),
+      running: false, stopRequested: false, currentIdx: -1,
+    };
+    appendLog(`📺 Mode Saison : ${episodes.length} épisode(s) trouvé(s) dans ${dir.split('/').pop()}`);
+    screen = 'saison';
+  }
+
+  async function runSeason() {
+    if (!season || season.running) return;
+    season.running = true;
+    season.stopRequested = false;
+    queueAutoContinue = false;
+    queue = [];
+    seriesLabelOverrides = {};
+    let prevTmdb = null;
+    const mode = season.mode;
+    if (muxMode !== mode) switchMuxMode(mode);
+    for (let i = 0; i < season.episodes.length; i++) {
+      if (season.stopRequested) break;
+      const ep = season.episodes[i];
+      if (ep.status === 'done') { continue; }
+      if (!ep.source || (mode === 'psa' && !ep.supply)) {
+        ep.status = 'skipped';
+        continue;
+      }
+      season.currentIdx = i;
+      ep.status = 'running';
+      ep.notes = [];
+      ep.output = '';
+      try {
+        ep.step = 'Analyse des pistes';
+        // Rien ne doit fuiter de l'épisode précédent (audio recalé, SUPPLY, MKV synchro).
+        externalAudios = [];
+        if (mode === 'psa') {
+          if (psaSyncedAudioPath) clearPSASyncedAudio();
+          secondaryPath = '';
+          secondaryTracks = [];
+          secondarySelected = [];
+          psaSyncStatus = '';
+          psaSyncMessage = '';
+        }
+        openMkv(ep.source);
+        await waitForAnalyzeComplete(90000);
+        ep.step = 'Fiche TMDB';
+        await waitUntil(() => !tmdbSearching, 60000, 'recherche TMDB');
+        if (prevTmdb) {
+          lastTmdbResult = prevTmdb;
+          target.title = composeTmdbTitle(prevTmdb);
+          target.year = prevTmdb.annee_fr || '';
+          tmdbValidated = true;
+        }
+        if (!tmdbValidated) {
+          ep.step = 'En attente de ta confirmation TMDB';
+          appendLog('⏸ Saison : confirme la fiche TMDB du 1er épisode pour continuer');
+          screen = 'source';
+          await waitUntil(() => tmdbValidated || season.stopRequested, 24 * 3600 * 1000, 'confirmation TMDB');
+          if (!tmdbValidated) { ep.status = 'pending'; ep.step = ''; break; }
+          screen = 'saison';
+        }
+        prevTmdb = lastTmdbResult;
+        if (mode === 'psa') {
+          ep.step = 'Analyse du SUPPLY';
+          loadSecondary(ep.supply);
+          await waitUntil(() => secondaryTracks.length > 0, 90000, 'analyse SUPPLY');
+          ep.step = 'Vérification de la sync audio';
+          await waitUntil(() => psaSyncStatus && psaSyncStatus !== 'checking', 15 * 60 * 1000, 'sync audio');
+          if (psaSyncStatus === 'error') {
+            ep.status = 'review';
+            ep.notes.push('Sync audio impossible : ' + (psaSyncMessage || 'à vérifier'));
+            appendLog(`⚠ Saison ${ep.episode} : sync audio impossible — épisode laissé de côté`);
+            continue;
+          }
+          if (psaSyncStatus === 'corrected') ep.notes.push('Sync audio corrigée : ' + psaSyncMessage);
+        }
+        ep.step = 'Mux';
+        if (mode === 'psa') await muxAuto(); else await muxAutoLihdl();
+        ep.output = effectiveFilename;
+        if (autoMuxStatus === 'success') {
+          ep.status = 'done';
+          if (/\.DUAL\./.test(ep.output)) { ep.status = 'review'; ep.notes.push('Sortie en DUAL : aucun sous-titre FR'); }
+        } else {
+          ep.status = 'error';
+          ep.notes.push('Le mux a échoué — voir le journal');
+        }
+      } catch (e) {
+        ep.status = 'error';
+        ep.notes.push(String(e && e.message ? e.message : e));
+        appendLog(`❌ Saison ${ep.episode} : ` + String(e));
+      } finally {
+        ep.step = '';
+      }
+    }
+    season.running = false;
+    season.currentIdx = -1;
+    screen = 'saison';
+    const done = season.episodes.filter((e) => e.status === 'done').length;
+    const review = season.episodes.filter((e) => e.status === 'review' || e.status === 'error').length;
+    appendLog(`🏁 Saison : ${done}/${season.episodes.length} muxé(s)${review ? `, ${review} à vérifier` : ''}`);
+    notifyIfAway('Saison terminée', `${done}/${season.episodes.length} épisodes muxés${review ? ` · ${review} à vérifier` : ''}`);
+  }
+
+  async function openSeasonEpisodeManually(i) {
+    const ep = season && season.episodes[i];
+    if (!ep || !ep.source) return;
+    if (muxMode !== season.mode) switchMuxMode(season.mode);
+    screen = 'source';
+    openMkv(ep.source);
+    if (season.mode === 'psa' && ep.supply) {
+      try { await waitForAnalyzeComplete(90000); loadSecondary(ep.supply); } catch (_) {}
+    }
   }
 
   function queueAdd(paths) {
@@ -1357,6 +1494,11 @@
   async function pickSecondaryDialog() {
     const p = await SelectMkvFile();
     if (!p) return;
+    loadSecondary(p);
+  }
+
+  // Charge un SUPPLY/FW sans dialogue (utilisé aussi par le mode Saison).
+  function loadSecondary(p) {
     secondaryPath = p;
     secondaryTracks = [];
     secondarySelected = [];
@@ -4096,6 +4238,7 @@
     <nav class="subnav">
       <button class="btn btn-ghost" onclick={() => screen = 'source'}>← Retour</button>
       <button class="subnav-btn" class:active={screen === 'source'}   onclick={() => screen = 'source'}>Source</button>
+      {#if season}<button class="subnav-btn" class:active={screen === 'saison'} onclick={() => screen = 'saison'}>Saison</button>{/if}
       <button class="subnav-btn" class:active={screen === 'cible'}    onclick={() => screen = 'cible'}>Cible</button>
       <button class="subnav-btn" class:active={screen === 'sync'}     onclick={() => screen = 'sync'}>Synchro Audios</button>
       <button class="subnav-btn" class:active={screen === 'reglages'} onclick={() => screen = 'reglages'}>Réglages</button>
@@ -4237,6 +4380,7 @@
           {ocrProgress}
           onPickMkv={pickMkvDialog}
           onPickMultipleMkv={pickMultipleMkvDialog}
+          onOpenSeason={openSeasonFolder}
           onPickAndOCR={pickAndOCRStandaloneSup}
           onOpenOSModal={() => openOSModal('standalone')}
           onOpenSync={() => screen = 'sync'}
@@ -4374,6 +4518,17 @@
 
     </div><!-- /col droite -->
 
+    {:else if screen === 'saison' && season}
+    <div class="fullscreen">
+      <SeasonBoard
+        {season}
+        logTail={logLines.slice(-6)}
+        onStart={runSeason}
+        onStop={() => { season.stopRequested = true; }}
+        onClose={() => { season = null; screen = 'source'; }}
+        onRelaunchEpisode={openSeasonEpisodeManually}
+      />
+    </div>
     {:else if screen === 'cible'}
     <div class="fullscreen">
       <div class="card">

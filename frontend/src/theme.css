@@ -649,3 +649,76 @@ html, body, #app {
 @keyframes screen-fade { from { opacity: 0; } to { opacity: 1; } }
 .app .card.card-grow .track:hover, .app .track:hover,
 .app .btn:hover:not(:disabled), .app .btn:active:not(:disabled) { transform: none; }
+
+/* ─── MODE SAISON ──────────────────────────────────────────────────────── */
+.app .season { display: flex; flex-direction: column; gap: 14px; text-align: left; }
+.app .season-head {
+  display: grid; grid-template-columns: 1fr auto; gap: 14px 20px; align-items: end;
+  padding: 20px 22px 0; overflow: hidden;
+  background: radial-gradient(700px 220px at 0% 0%, rgba(var(--accent-rgb), 0.12), transparent 70%), linear-gradient(180deg, #141418, #111114);
+}
+.app .season-kicker { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--accent); }
+.app .season-head h2 {
+  margin: 6px 0 8px; font-family: var(--font-display); font-weight: 700; font-size: 26px;
+  letter-spacing: -0.02em; color: var(--text); word-break: break-word;
+}
+.app .season-stats { display: flex; flex-wrap: wrap; gap: 16px; font-size: 12.5px; color: var(--text2); }
+.app .season-stats b { font-family: var(--font-mono); color: var(--text); font-weight: 700; }
+.app .season-stats .ok b { color: var(--green); }
+.app .season-stats .warn b { color: var(--accent); }
+.app .season-actions { display: flex; gap: 8px; align-self: center; }
+.app .season-actions .btn-danger { padding: 11px 18px; font-size: 13px; }
+.app .season-progress { grid-column: 1 / -1; height: 3px; margin: 4px -22px 0; background: #1a1a1f; }
+.app .season-progress-fill {
+  height: 100%; background: linear-gradient(90deg, var(--accent), var(--red));
+  box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.8); transition: width 400ms var(--ease) !important; transition-property: width !important;
+}
+.app .season-banner {
+  display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 10px;
+  color: var(--accent); background: rgba(var(--accent-rgb), 0.07); border: 1px solid rgba(var(--accent-rgb), 0.3); font-size: 12.5px;
+}
+.app .season-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.app .ep-card {
+  position: relative; display: flex; flex-direction: column; gap: 8px;
+  padding: 14px 14px 14px 18px; border-radius: 12px; overflow: hidden;
+  background: linear-gradient(180deg, #141418, #101013); border: 1px solid var(--border);
+}
+.app .ep-card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--text3); }
+.app .ep-card.status-running::before { background: var(--accent); box-shadow: 0 0 14px var(--accent); }
+.app .ep-card.status-done::before    { background: var(--green); }
+.app .ep-card.status-review::before  { background: var(--accent); }
+.app .ep-card.status-error::before   { background: var(--red); }
+.app .ep-card.status-skipped { opacity: 0.55; }
+.app .ep-card.current { border-color: rgba(var(--accent-rgb), 0.55); box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.25), 0 18px 40px -20px rgba(var(--accent-rgb), 0.6); }
+.app .ep-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.app .ep-code { font-family: var(--font-display); font-weight: 700; font-size: 20px; letter-spacing: -0.01em; color: var(--text); }
+.app .ep-status {
+  display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+  letter-spacing: 0.12em; text-transform: uppercase; padding: 4px 8px; border-radius: 6px;
+  color: var(--text2); background: #1a1a1f; border: 1px solid var(--border-hi);
+}
+.app .status-running .ep-status { color: var(--accent); border-color: rgba(var(--accent-rgb), 0.4); background: rgba(var(--accent-rgb), 0.08); }
+.app .status-done .ep-status    { color: var(--green); border-color: rgba(61, 220, 151, 0.4); background: rgba(61, 220, 151, 0.08); }
+.app .status-review .ep-status  { color: var(--accent); border-color: rgba(var(--accent-rgb), 0.4); background: rgba(var(--accent-rgb), 0.08); }
+.app .status-error .ep-status   { color: var(--red); border-color: rgba(var(--red-rgb), 0.4); background: rgba(var(--red-rgb), 0.08); }
+.app .ep-files { display: flex; flex-direction: column; gap: 4px; }
+.app .ep-file {
+  display: flex; align-items: center; gap: 8px; min-width: 0;
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--text2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.app .ep-file-tag {
+  flex-shrink: 0; font-size: 9px; font-weight: 700; letter-spacing: 0.1em; padding: 2px 5px; border-radius: 4px;
+  color: var(--lane-video); background: rgba(79, 209, 255, 0.08); border: 1px solid rgba(79, 209, 255, 0.25);
+}
+.app .ep-file-tag.sup { color: var(--lane-audio); background: rgba(var(--accent-rgb), 0.08); border-color: rgba(var(--accent-rgb), 0.25); }
+.app .ep-step { font-size: 12px; color: var(--accent); }
+.app .ep-output {
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--accent-hot); word-break: break-all;
+  padding: 7px 9px; border-radius: 8px; background: #09090b; border: 1px solid rgba(var(--accent-rgb), 0.22);
+}
+.app .ep-note { display: flex; gap: 6px; align-items: flex-start; font-size: 11.5px; color: var(--accent); }
+.app .ep-open { align-self: flex-start; }
+.app .season-log { padding: 10px 14px; background: #0a0a0c; }
+.app .season-log .journal-line { font-family: var(--font-mono); font-size: 11px; }
+.app .empty-hero-cta-row .season-cta { padding: 12px 20px; }

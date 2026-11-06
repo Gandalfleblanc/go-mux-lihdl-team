@@ -118,7 +118,7 @@ func (a *App) startup(ctx context.Context) {
 
 // AppVersion est lue par le frontend (pill dans le header) et utilisée pour
 // comparer avec la dernière release GitHub lors du check de mise à jour.
-const AppVersion = "v8.3.0"
+const AppVersion = "v8.4.0"
 
 func (a *App) GetVersion() string { return AppVersion }
 
@@ -4175,4 +4175,30 @@ func (a *App) Notify(title, message string) {
 	}
 	script := fmt.Sprintf(`display notification "%s" with title "%s" sound name "Glass"`, esc(message), esc(title))
 	_ = exec.Command("osascript", "-e", script).Start()
+}
+
+// SelectSeasonFolder ouvre le choix d'un dossier de saison (mode Saison).
+func (a *App) SelectSeasonFolder() (string, error) {
+	return wr.OpenDirectoryDialog(a.ctx, wr.OpenDialogOptions{
+		Title: "Choisir le dossier de la saison",
+	})
+}
+
+// ListMkvFiles renvoie les .mkv d'un dossier (non récursif), triés par nom.
+// Les fichiers cachés (._xxx macOS) sont ignorés.
+func (a *App) ListMkvFiles(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || strings.HasPrefix(name, ".") || !strings.EqualFold(filepath.Ext(name), ".mkv") {
+			continue
+		}
+		out = append(out, filepath.Join(dir, name))
+	}
+	sort.Strings(out)
+	return out, nil
 }

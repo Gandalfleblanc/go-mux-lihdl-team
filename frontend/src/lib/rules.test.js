@@ -190,3 +190,34 @@ describe('validation TMDB automatique', () => {
     expect(findUnambiguousTmdbMatch('Boston Blue', '', [{ titre_vo: 'Boston Legal' }])).toBe(-1);
   });
 });
+
+import { pairSeasonFiles } from './rules.js';
+
+describe('pairSeasonFiles (mode Saison)', () => {
+  const d = '/Saison/';
+  it('PSA : associe chaque PSA à son SUPPLY par épisode, triés', () => {
+    const r = pairSeasonFiles([
+      d + 'Show.S01E02.1080p.WEB.H264-SUPPLY.mkv',
+      d + 'Show.S01E01.1080p.WEBRip.x265-PSA.mkv',
+      d + 'Show.S01E01.MULTi.1080p.WEB.H264-SUPPLY.mkv',
+      d + 'Show.S01E02.1080p.WEBRip.x265-PSA.mkv',
+    ], 'psa');
+    expect(r.episodes.map((e) => e.episode)).toEqual(['S01E01', 'S01E02']);
+    expect(r.episodes[0].source).toContain('S01E01.1080p.WEBRip.x265-PSA');
+    expect(r.episodes[0].supply).toContain('S01E01.MULTi');
+    expect(r.episodes[0].issues).toEqual([]);
+  });
+  it('PSA : signale un SUPPLY manquant', () => {
+    const r = pairSeasonFiles([d + 'Show.S01E03.1080p.WEBRip.x265-PSA.mkv'], 'psa');
+    expect(r.episodes[0].issues).toContain('SUPPLY manquant');
+  });
+  it('LiHDL : un fichier par épisode, fichiers sans SxxExx ignorés', () => {
+    const r = pairSeasonFiles([d + 'Show.S02E01.mkv', d + 'Show.S02E02.mkv', d + 'Bonus.Making.Of.mkv'], 'lihdl');
+    expect(r.episodes).toHaveLength(2);
+    expect(r.ignored).toEqual([d + 'Bonus.Making.Of.mkv']);
+  });
+  it('signale les doublons', () => {
+    const r = pairSeasonFiles([d + 'Show.S01E01.A.mkv', d + 'Show.S01E01.B.mkv'], 'lihdl');
+    expect(r.episodes[0].issues[0]).toMatch(/plusieurs fichiers/);
+  });
+});

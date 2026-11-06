@@ -114,6 +114,10 @@ export function ListAudioTracksForSync(arg1) {
   return window['go']['main']['App']['ListAudioTracksForSync'](arg1);
 }
 
+export function ListMkvFiles(arg1) {
+  return window['go']['main']['App']['ListMkvFiles'](arg1);
+}
+
 export function LocateMkvmerge() {
   return window['go']['main']['App']['LocateMkvmerge']();
 }
@@ -204,6 +208,10 @@ export function SelectMkvFiles() {
 
 export function SelectOutputDir() {
   return window['go']['main']['App']['SelectOutputDir']();
+}
+
+export function SelectSeasonFolder() {
+  return window['go']['main']['App']['SelectSeasonFolder']();
 }
 
 export function SelectSubFiles() {

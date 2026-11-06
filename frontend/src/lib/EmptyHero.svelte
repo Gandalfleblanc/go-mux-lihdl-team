@@ -13,6 +13,7 @@
   export let ocrProgress = { status: '', percent: 0, message: '', subtitles: 0, corrected_lines: 0, lt_auto_fixed: 0, lt_needs_review: 0, quality_score: 0 };
   export let onPickMkv = () => {};
   export let onPickMultipleMkv = () => {};
+  export let onOpenSeason = () => {};
   export let onPickAndOCR = () => {};
   export let onOpenOSModal = () => {};
   export let onOpenSync = () => {};
@@ -43,6 +44,9 @@
         </button>
         <button class="btn empty-hero-cta-secondary" on:click={onPickMultipleMkv}>
           <span><Icon name="queue-list" /></span> Choisir plusieurs (queue)
+        </button>
+        <button class="btn btn-danger empty-hero-cta season-cta" on:click={onOpenSeason} title="Choisis le dossier d'une saison : chaque épisode est associé et muxé automatiquement">
+          <Icon name="tv" /> Mode Saison
         </button>
       </div>
       <div class="empty-hero-droptip">↓ Ou glisse plusieurs MKV ici pour les mettre en file ↓</div>

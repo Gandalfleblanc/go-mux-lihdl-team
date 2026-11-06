@@ -309,3 +309,41 @@ export function findUnambiguousTmdbMatch(query, fileYear, results) {
   });
   return hits.length === 1 ? hits[0] : -1;
 }
+
+// Mode Saison : regroupe les .mkv d'un dossier par épisode (SxxExx).
+//  - mode 'psa'   : chaque épisode = 1 PSA (vidéo) + 1 SUPPLY/FW (audios+subs)
+//  - mode 'lihdl' : chaque épisode = 1 fichier source
+// Les fichiers sans SxxExx sont listés à part (ignored). Les manques et
+// doublons sont signalés dans `issues` pour que l'utilisateur les voie
+// avant de lancer.
+export function pairSeasonFiles(paths, mode) {
+  const byEp = new Map();
+  const ignored = [];
+  for (const p of paths || []) {
+    const name = String(p).split('/').pop();
+    const ep = detectEpisode(name);
+    if (!ep) { ignored.push(p); continue; }
+    if (!byEp.has(ep)) byEp.set(ep, []);
+    byEp.get(ep).push(p);
+  }
+  const episodes = [...byEp.keys()].sort().map((ep) => {
+    const files = byEp.get(ep);
+    const issues = [];
+    let source = '', supply = '';
+    if (mode === 'psa') {
+      const isPsa = (f) => parsePsaSourceInfo(String(f).split('/').pop()).isPSA;
+      const psas = files.filter(isPsa);
+      const others = files.filter((f) => !isPsa(f));
+      source = psas[0] || '';
+      supply = others[0] || '';
+      if (!source) issues.push('PSA manquante');
+      if (!supply) issues.push('SUPPLY manquant');
+      if (psas.length > 1 || others.length > 1) issues.push('plusieurs fichiers pour cet épisode — le 1er est utilisé');
+    } else {
+      source = files[0];
+      if (files.length > 1) issues.push('plusieurs fichiers pour cet épisode — le 1er est utilisé');
+    }
+    return { episode: ep, source, supply, issues };
+  });
+  return { episodes, ignored };
+}
