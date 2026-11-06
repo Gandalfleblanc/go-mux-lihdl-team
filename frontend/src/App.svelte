@@ -1,4 +1,7 @@
 <script>
+  import { run, createBubbler, stopPropagation } from 'svelte/legacy';
+
+  const bubble = createBubbler();
   import { onMount, tick } from 'svelte';
   import JournalPane from './lib/JournalPane.svelte';
   import OutilsCard from './lib/OutilsCard.svelte';
@@ -28,8 +31,8 @@
   } from '../wailsjs/go/main/App.js';
   import { EventsOn } from '../wailsjs/runtime/runtime.js';
 
-  let screen = 'source';
-  let muxMode = 'lihdl';   // 'lihdl' | 'psa'
+  let screen = $state('source');
+  let muxMode = $state('lihdl');   // 'lihdl' | 'psa'
 
   function switchMuxMode(mode) {
     if (muxMode === mode) return;
@@ -97,10 +100,10 @@
     }
     appendLog('Mode mux : ' + mode.toUpperCase());
   }
-  let appVersion = '';
+  let appVersion = $state('');
   let mkvmergePath = '';
 
-  let config = {
+  let config = $state({
     tmdb_key: '',
     serveurperso_url: 'https://www.serveurperso.com/stats/search.php',
     output_dir: '',
@@ -122,43 +125,43 @@
     github_repo: '',
     github_branch: 'main',
     github_index_file_path: 'discord_index.json',
-  };
+  });
 
   // Index Discord — état UI :
   // discordIndexEntry  = URL Discord du film actuel ("" si pas trouvé)
   // discordScanRunning = scan admin en cours
   // discordScanProgress = { scanned, total, message }
-  let discordIndexEntry = '';
-  let discordScanRunning = false;
-  let discordScanProgress = { scanned: 0, total: 0, message: '' };
-  let discordCopyOk = false;
-  let githubPushing = false;
-  let githubPushOk = false;
+  let discordIndexEntry = $state('');
+  let discordScanRunning = $state(false);
+  let discordScanProgress = $state({ scanned: 0, total: 0, message: '' });
+  let discordCopyOk = $state(false);
+  let githubPushing = $state(false);
+  let githubPushOk = $state(false);
 
-  let options = {
+  let options = $state({
     audio_labels: [], subtitle_labels: [],
     video_qualities: [], video_encoders: [],
     video_sources: [], video_teams: [],
     video_source_types: [], resolutions: [], target_sources: [], video_codecs: [],
-  };
+  });
 
-  let sourcePath = '';
+  let sourcePath = $state('');
   let sourceInfo = null;   // réponse AnalyzeMkv
-  let tracks = [];         // état UI enrichi de chaque piste
+  let tracks = $state([]);         // état UI enrichi de chaque piste
 
-  let videoChoice = {
+  let videoChoice = $state({
     quality: 'HDLight',
     encoder: 'ASTROBOY',
     sourceType: 'COMPLETE BluRay', // ex-source split
     sourceTeam: '',                 // team de la source (ex: Alkaline) — éditable
     team: 'LiHDL',                  // team de sortie (dans le filename)
-  };
-  let target = {
+  });
+  let target = $state({
     title: '', year: '', resolution: '1080p', source: 'HDLight',
     video_codec: '', lang: 'auto',
     episode: '',          // SxxExx auto-détecté (vide = film)
     flagOverride: 'auto', // override du langflag : auto | VFF | VFQ | VFi | VO | MULTi.VFF | MULTi.VFQ | MULTi.VF2 | MULTi.VFi | FASTSUB.VOSTFR | FASTSUB.FR
-  };
+  });
   const FLAG_OVERRIDE_OPTIONS = [
     'auto',
     'VFF', 'VFQ', 'VFi', 'VO',
@@ -237,25 +240,11 @@
     return { team, langFlag };
   }
   // Dernière fiche TMDB sélectionnée — permet de basculer VF/VO sans re-chercher.
-  let lastTmdbResult = null;
+  let lastTmdbResult = $state(null);
   // Flag de validation TMDB : tant qu'il est false ET qu'on a une fiche TMDB,
   // on bloque l'affichage des pistes/réglages pour forcer une confirmation visuelle.
-  let tmdbValidated = false;
+  let tmdbValidated = $state(false);
 
-  // Lookup Discord à chaque changement de TMDB ID : on demande au backend
-  // (qui regarde l'index local d'abord, puis le remote si configuré). Best-
-  // effort silencieux ; aucune erreur ne remonte côté UI.
-  $: if (lastTmdbResult && lastTmdbResult.tmdb_id) {
-    const id = String(lastTmdbResult.tmdb_id);
-    DiscordIndexLookup(id).then((u) => {
-      // Vérifie que le TMDB ID n'a pas changé entre temps (anti-race).
-      if (lastTmdbResult && String(lastTmdbResult.tmdb_id) === id) {
-        discordIndexEntry = u || '';
-      }
-    }).catch(() => { /* silencieux */ });
-  } else {
-    discordIndexEntry = '';
-  }
 
   // Dropdowns pour le filename (ordre : résolution.source).
   const RESOLUTION_OPTIONS = ['720p', '1080p', '2160p'];
@@ -269,8 +258,8 @@
     'BluRay', 'COMPLETE BluRay',
   ];
   const VIDEO_CODEC_OPTIONS = ['H264', 'x264', 'H265', 'x265', 'AV1'];
-  let tmdbResults = [];
-  let tmdbResultIndex = 0; // index du résultat actuel dans tmdbResults (cycle via "Autre résultat")
+  let tmdbResults = $state([]);
+  let tmdbResultIndex = $state(0); // index du résultat actuel dans tmdbResults (cycle via "Autre résultat")
 
   // Cycle vers le prochain résultat TMDB (utile en cas d'ambiguïté).
   async function cycleNextTmdbResult() {
@@ -292,12 +281,12 @@
     appendLog(`↻ TMDB : passage au résultat ${tmdbResultIndex + 1}/${tmdbResults.length} — ${target.title}`);
     if (muxMode === 'lihdl' && picked && picked.original_language === 'fr') applyVOFSwap();
   }
-  let tmdbQuery = '';
-  let tmdbIdQuery = ''; // recherche par ID TMDB (séparée du nom)
-  let tmdbMode = 'movie'; // 'movie' | 'tv'
+  let tmdbQuery = $state('');
+  let tmdbIdQuery = $state(''); // recherche par ID TMDB (séparée du nom)
+  let tmdbMode = $state('movie'); // 'movie' | 'tv'
   // Toggle VFi par défaut ON : les pistes audio FR sont labellisées FR VFi.
   // Si l'utilisateur décoche → FR VFF.
-  let useVFi = true;
+  let useVFi = $state(true);
   // Règle universelle pour les subs : un label "FR Forced" ou "FR VFF Forced"
   // a default=true ET forced=true. "FR VFQ Forced" devient default+forced
   // UNIQUEMENT si aucun FR Forced non-VFQ n'est présent (cas releases qui
@@ -477,37 +466,17 @@
     secondarySelected = secondarySelected.map(t => t.type === 'subtitles' ? { ...t, label: swap(t.label) } : t);
   }
 
-  // Réactif Svelte : à chaque changement audio (interne, externe, secondary),
-  // recalcule les labels SRT FR ↔ FR VFF selon la présence VFQ. Le guard
-  // dans applyFRSubVFFLabels évite les boucles infinies.
-  $: {
-    void tracks; void externalAudios; void secondarySelected;
-    applyFRSubVFFLabels();
-  }
 
-  // Réactif Svelte : si une VFQ apparaît dans les pistes audio, l'autre piste
-  // FR (typiquement VFi) doit devenir FR VFF (norme LiHDL — quand y'a 2 pistes
-  // FR, l'une est VFF/internationale, l'autre est VFQ québécoise).
-  $: {
-    void tracks; void externalAudios; void secondarySelected;
-    const hasVFQ = tracks.some(t => t.type === 'audio' && /^FR VFQ/.test(t.label || ''))
-      || externalAudios.some(a => /^FR VFQ/.test(a.label || ''))
-      || secondarySelected.some(t => t.type === 'audio' && /^FR VFQ/.test(t.label || ''));
-    if (hasVFQ && useVFi) {
-      useVFi = false;
-      applyVFiSwap(); // FR VFi → FR VFF (useVFi=false)
-    }
-  }
 
   // URL fiche Hydracker (résolue via API à partir de l'ID TMDB ; vide si pas de clé)
-  let hydrackerURL = '';
+  let hydrackerURL = $state('');
 
   // Source de référence (3ᵉ barre, optionnelle) : pour vérifier compatibilité
   // durée + FPS avant de récupérer les sous-titres dessus.
-  let referencePath = '';
-  let sourceMkvInfo = null;     // { duration_seconds, framerate, width, height }
-  let referenceMkvInfo = null;
-  let showReferenceBar = false;
+  let referencePath = $state('');
+  let sourceMkvInfo = $state(null);     // { duration_seconds, framerate, width, height }
+  let referenceMkvInfo = $state(null);
+  let showReferenceBar = $state(false);
 
   function formatDuration(secs) {
     if (!secs || secs <= 0) return '?';
@@ -631,38 +600,38 @@
 
   // ---- Extraction FR Audio (VFF/VFQ depuis la source de référence) ----
   // Utilise referencePath comme unique source — pas de fichier séparé.
-  let extractFRVFF = false;
+  let extractFRVFF = $state(false);
   // Toggle "inclure l'année avant l'épisode" pour les séries où le nom seul
   // est ambigu (ex: remake "The Office 2024" vs original "The Office 2005").
   // Format avec : Title.YYYY.SxxExx... ; sans : Title.SxxExx...
-  let includeYearInEpisode = false;
+  let includeYearInEpisode = $state(false);
   // Flag extra détecté dans le nom SUPPLY (ex: "FiNAL"). Inséré entre
   // SxxExx et le flag langue dans le filename de sortie.
-  let supplyExtraFlag = '';
+  let supplyExtraFlag = $state('');
   // Référence audio pour la sync (Chromaprint + cross-corr) : "fr" (default,
   // matche la VFF/VFi de la source LiHDL) ou "eng" (pour les cas où la VFF
   // de la source n'est pas fiable, ex: source LiHDL re-encodée avec un drift
   // sur l'audio FR mais ENG VO préservée).
-  let syncRefLang = 'fr';
-  let extractFRVFQ = false;
-  let extractENG = false;
-  let frAudioExtracting = false;
-  let frAudioExtractionResult = ''; // '' | 'success' | 'error'
-  let frAudioPhase = ''; // 'sync' | 'convert:CODEC,VARIANT' — phase courante pour le label de la progress bar
-  let frAudioConvertPercent = 0; // 0-100 pendant la conversion AC3 (event ac3convert:progress)
-  let frAudioConvertedSummary = ''; // "448 kb/s 5.1" ou "192 kb/s 2.0" ou "448 kb/s 5.1 / 192 kb/s 2.0" selon les conversions réelles
-  let srtExtracting = false; // true pendant l'extraction SRT auto au pick d'une référence
-  let srtExtractionResult = ''; // '' | 'success' | 'error'
-  let srtPhase = ''; // '' | 'convert_ass' — phase courante pour le label de la SRT progress bar
-  let srtAssConverted = false; // true si au moins un sub ASS a été converti en SRT pendant cette extraction
-  let srtPercent = 0; // 0-100 progression de l'extraction SRT (event srtprogress)
+  let syncRefLang = $state('fr');
+  let extractFRVFQ = $state(false);
+  let extractENG = $state(false);
+  let frAudioExtracting = $state(false);
+  let frAudioExtractionResult = $state(''); // '' | 'success' | 'error'
+  let frAudioPhase = $state(''); // 'sync' | 'convert:CODEC,VARIANT' — phase courante pour le label de la progress bar
+  let frAudioConvertPercent = $state(0); // 0-100 pendant la conversion AC3 (event ac3convert:progress)
+  let frAudioConvertedSummary = $state(''); // "448 kb/s 5.1" ou "192 kb/s 2.0" ou "448 kb/s 5.1 / 192 kb/s 2.0" selon les conversions réelles
+  let srtExtracting = $state(false); // true pendant l'extraction SRT auto au pick d'une référence
+  let srtExtractionResult = $state(''); // '' | 'success' | 'error'
+  let srtPhase = $state(''); // '' | 'convert_ass' — phase courante pour le label de la SRT progress bar
+  let srtAssConverted = $state(false); // true si au moins un sub ASS a été converti en SRT pendant cette extraction
+  let srtPercent = $state(0); // 0-100 progression de l'extraction SRT (event srtprogress)
 
   // ---- Vérification sync subs externes vs audio source LiHDL ----
-  let subSyncChecking = false;
-  let subSyncResults = []; // [{path, offset_ms, raw_offset_ms, confidence, method, error}]
-  let subSyncPercent = 0;
-  let subSyncCurrentName = '';
-  let subSyncAppliedMsg = ''; // "✓ N SRT resyncronisé(s)" persistant après apply
+  let subSyncChecking = $state(false);
+  let subSyncResults = $state([]); // [{path, offset_ms, raw_offset_ms, confidence, method, error}]
+  let subSyncPercent = $state(0);
+  let subSyncCurrentName = $state('');
+  let subSyncAppliedMsg = $state(''); // "✓ N SRT resyncronisé(s)" persistant après apply
 
   // Hash des paths SRT externes — pour éviter de relancer alass plusieurs fois
   // sur le même état après auto-trigger.
@@ -977,13 +946,11 @@
     appendLog('ℹ État conservé après mux — clique ↻ RESET en haut quand tu veux continuer');
     void preserveAutoMuxStatus; // arg gardé pour compat caller
   }
-  let filenameCopied = false;
+  let filenameCopied = $state(false);
   let filenameCopiedTimer = null;
-  let filenameOverride = false;   // true = l'utilisateur a pris la main sur le nom
-  let manualFilename = '';        // valeur saisie manuellement quand override actif
+  let filenameOverride = $state(false);   // true = l'utilisateur a pris la main sur le nom
+  let manualFilename = $state('');        // valeur saisie manuellement quand override actif
 
-  // Le nom utilisé pour le mux : manuel si override, sinon généré.
-  $: effectiveFilename = filenameOverride ? manualFilename : previewFilename;
 
   function startFilenameOverride() {
     manualFilename = previewFilename;
@@ -996,11 +963,11 @@
   }
 
   // Queue batch : liste de .mkv en attente de mux.
-  let queue = [];
-  let bottomPaneTab = 'journal'; // 'journal' | 'queue' — tab actif dans la card secondaire en bas droite
+  let queue = $state([]);
+  let bottomPaneTab = $state('journal'); // 'journal' | 'queue' — tab actif dans la card secondaire en bas droite
   // Auto-continue : après un mux OK, charge le prochain de la queue et relance
   // MUX AUTO automatiquement (chain complet, épisode après épisode).
-  let queueAutoContinue = false;
+  let queueAutoContinue = $state(false);
   // Overrides série : snapshot des labels/keep/default/forced du dernier mux
   // réussi, indexés par ${type}-${lang}-${nthOfSameLang}. Rejoués sur les
   // épisodes suivants pour propager les corrections manuelles de l'user
@@ -1104,25 +1071,25 @@
       appendLog('⚠ Copie : ' + String(e));
     }
   }
-  let tmdbSearching = false;
+  let tmdbSearching = $state(false);
 
-  let muxing = false;
-  let muxPercent = 0;
-  let logLines = [];
+  let muxing = $state(false);
+  let muxPercent = $state(0);
+  let logLines = $state([]);
 
   // ─── Onglet Synchro Audios ────────────────────────────────────────────────
   // État indépendant du workflow LiHDL/PSA. Charge un .mkv, affiche ses
   // pistes audio, permet de désigner une piste de référence et d'appliquer
   // un décalage (ms) aux autres. Le mux résultant copie l'audio bit-à-bit
   // (mkvmerge --sync TID:offset, pas de réencodage).
-  let syncSourcePath = '';
-  let syncAudioTracks = [];   // [{id, codec, language, name, channels}]
-  let syncRefId = null;       // track ID désigné comme référence
-  let syncOffsets = {};       // { trackId: delayMs }
-  let syncRunning = false;
-  let syncPercent = 0;
-  let syncDetecting = {};   // { trackId: true } pendant la détection
-  let syncResults = {};     // { trackId: {offset_ms, confidence, drift_ms, method, notes} }
+  let syncSourcePath = $state('');
+  let syncAudioTracks = $state([]);   // [{id, codec, language, name, channels}]
+  let syncRefId = $state(null);       // track ID désigné comme référence
+  let syncOffsets = $state({});       // { trackId: delayMs }
+  let syncRunning = $state(false);
+  let syncPercent = $state(0);
+  let syncDetecting = $state({});   // { trackId: true } pendant la détection
+  let syncResults = $state({});     // { trackId: {offset_ms, confidence, drift_ms, method, notes} }
 
   async function syncDetectOne(trackId) {
     if (!syncSourcePath || syncRefId === null || trackId === syncRefId) return;
@@ -1205,56 +1172,54 @@
       appendLog('❌ Recalage : ' + String(e));
     }
   }
-  let logEl;
+  let logEl = $state();
 
   // Subs externes ajoutés (srt/sup/ass/ssa/sub/idx). Chaque entrée a le même
   // format qu'une piste interne pour l'UI unifiée, mais avec un flag external.
-  let externalSubs = [];
-  let externalAudios = [];
+  let externalSubs = $state([]);
+  let externalAudios = $state([]);
 
   // OCR PGS → SRT : état réactif partagé entre toutes les pistes (un seul OCR
   // à la fois pour ne pas saturer Tesseract). ocrTrackId = id de la piste en
   // cours (-1 si aucun). ocrProgress = { status, percent, message }.
-  let ocrRunning = false;
-  let ocrTrackId = -1;
-  let ocrProgress = {
+  let ocrRunning = $state(false);
+  let ocrTrackId = $state(-1);
+  let ocrProgress = $state({
     status: '', percent: 0, message: '',
     total_lines: 0, corrected_lines: 0, suspicious_lines: 0, quality_score: 0, subtitles: 0,
     lt_total_issues: 0, lt_auto_fixed: 0, lt_needs_review: 0, lt_review_list: [],
-  };
+  });
   // Garde la barre OCR visible quelques secondes après "done" pour afficher le score.
   let ocrLastResultAt = 0;
   // Modal "lignes à vérifier" (LanguageTool) — toggle simple.
-  let showLTReview = false;
+  let showLTReview = $state(false);
   // États par-match : pour chaque match (index dans lt_review_list) on stocke
   // `resolved` (✓ après patch ou ignore) et `customText` (champ d'édition libre).
-  let ltReviewState = []; // [{resolved, ignored, customText, busy, error}]
+  let ltReviewState = $state([]); // [{resolved, ignored, customText, busy, error}]
   // Path du SRT actuellement affiché dans le modal review (pour ApplyOCRFix).
   let ocrCurrentSRT = '';
 
   // OpenSubtitles modal de recherche.
-  let showOSModal = false;
-  let osQuery = '';
-  let osYear = '';
-  let osLang = 'fr,en';
-  let osResults = [];
-  let osSearching = false;
-  let osError = '';
+  let showOSModal = $state(false);
+  let osQuery = $state('');
+  let osYear = $state('');
+  let osLang = $state('fr,en');
+  let osResults = $state([]);
+  let osSearching = $state(false);
+  let osError = $state('');
   // Quand le modal a été ouvert depuis la vue post-source : on ajoute le SRT
   // résultant aux externalSubs. Sinon (page d'accueil), on demande un dossier
   // de destination.
   let osContext = 'standalone'; // 'standalone' | 'post-source'
-  let osDownloading = '';
+  let osDownloading = $state('');
 
   // Dictionnaire custom OCR — modal Settings.
-  let customDictEntries = [];
-  let showAddDictModal = false;
-  let newDictWrong = '';
-  let newDictRight = '';
-  let dictBusy = false;
+  let customDictEntries = $state([]);
+  let showAddDictModal = $state(false);
+  let newDictWrong = $state('');
+  let newDictRight = $state('');
+  let dictBusy = $state(false);
 
-  // Recharge la liste du dico OCR quand on entre dans l'écran Réglages.
-  $: if (screen === 'reglages' && typeof window !== 'undefined') { loadCustomDictReactive(); }
   let _lastDictLoadAt = 0;
   function loadCustomDictReactive() {
     if (Date.now() - _lastDictLoadAt < 500) return;
@@ -1446,20 +1411,14 @@
   }
 
   // Source secondaire (SUPPLY/FW) — récupère uniquement audios + subs.
-  let secondaryPath = '';
-  let secondaryTracks = [];      // tracks audio + subs analysées
-  let secondaryMkvInfo = null;   // { duration_seconds, framerate, … }
-  let psaSyncStatus = '';         // '' | 'checking' | 'ok' | 'corrected' | 'error'
+  let secondaryPath = $state('');
+  let secondaryTracks = $state([]);      // tracks audio + subs analysées
+  let secondaryMkvInfo = $state(null);   // { duration_seconds, framerate, … }
+  let psaSyncStatus = $state('');         // '' | 'checking' | 'ok' | 'corrected' | 'error'
   let psaSyncOffsetMs = 0;        // offset audio détecté (à appliquer aux subs aussi)
   let psaSyncTempoRatio = 1.0;    // tempo audio détecté (à appliquer aux subs aussi)
-  let psaSyncMessage = '';        // texte à afficher (offset, conf, etc.)
-  // Réactif : true si FPS PSA ≈ FPS SUPPLY (±0.05) ET audio sync OK ou corrigé.
-  $: psaSourcesValid = !!(
-    sourceMkvInfo && secondaryMkvInfo &&
-    Math.abs((sourceMkvInfo.framerate || 0) - (secondaryMkvInfo.framerate || 0)) <= 0.05 &&
-    (psaSyncStatus === 'ok' || psaSyncStatus === 'corrected')
-  );
-  let secondarySelected = [];    // tracks sélectionnées avec label LiHDL
+  let psaSyncMessage = $state('');        // texte à afficher (offset, conf, etc.)
+  let secondarySelected = $state([]);    // tracks sélectionnées avec label LiHDL
 
   function inferAudioLabel(track) {
     const lang = String(track.language || '').toLowerCase();
@@ -2326,35 +2285,7 @@
     return `${videoChoice.quality}${team ? ' ' + team : ''} By ${videoChoice.encoder} (Source ${src})`;
   }
 
-  // Réactivité : on référence chaque dépendance pour que Svelte détecte
-  // les changements et recalcule (sinon il n'analyse pas l'intérieur des fns).
-  $: previewFilename = (function() {
-    const _deps = [tracks.length, videoChoice.team, target.title, target.year,
-                   target.resolution, target.source, target.video_codec, target.lang,
-                   target.episode, target.flagOverride, includeYearInEpisode, supplyExtraFlag,
-                   secondarySelected.length,
-                   externalSubs.length,
-                   ...tracks.map(t => (t.keep ? '1' : '0') + (t.label || '')),
-                   ...secondarySelected.map(t => (t.keep ? '1' : '0') + (t.label || '')),
-                   ...externalSubs.map(s => (s.keep !== false ? '1' : '0') + (s.label || ''))];
-    void _deps;
-    return buildFilenameClient();
-  })();
-  $: previewVideoName = (function() {
-    const _deps = [videoChoice.quality, videoChoice.encoder,
-                   videoChoice.sourceType, videoChoice.sourceTeam];
-    void _deps;
-    return videoTrackNameClient();
-  })();
-  // Auto-fill du codec cible quand aucun n'est explicitement choisi.
-  $: if (!target.video_codec) target.video_codec = suggestedVideoCodec();
 
-  $: suggestedCodecDisplay = (function() {
-    const _deps = [target.source, tracks.length,
-                   ...tracks.filter(t => t.type === 'video').map(t => t.codec + (t.codecId || ''))];
-    void _deps;
-    return suggestedVideoCodec();
-  })();
 
   // --- actions ---
   function openMkv(path) {
@@ -2806,8 +2737,8 @@
   // Mode PSA : ajoute un MKV "synchro avec la PSA" → l'app extrait sa 1ère
   // piste audio FR (ou ENG fallback) et l'ajoute comme externalAudio. Drop
   // automatiquement les audios SUPPLY puisque cet audio les remplace.
-  let psaSyncedAudioPath = '';   // path du .ac3/.eac3 extrait
-  let psaSyncedSourceMkv = '';   // path du MKV source choisi (pour affichage)
+  let psaSyncedAudioPath = $state('');   // path du .ac3/.eac3 extrait
+  let psaSyncedSourceMkv = $state('');   // path du MKV source choisi (pour affichage)
   async function pickPSASyncedAudio() {
     try {
       const p = await SelectMkvFile();
@@ -2856,7 +2787,7 @@
   // Mode PSA : extrait les subs FR/ENG du SUPPLY et les synchronise sur la PSA
   // via alass. Les subs corrigés sont ajoutés comme externalSubs et les subs
   // SUPPLY originaux sont décochés.
-  let psaSubSyncRunning = false;
+  let psaSubSyncRunning = $state(false);
   async function syncSupplySubsToPSA() {
     if (!sourcePath) { appendLog('⚠ PSA non chargée'); return; }
     if (!secondaryPath) { appendLog('⚠ SUPPLY non chargée'); return; }
@@ -3332,8 +3263,8 @@
   }
 
   // --- Labels audio/sub personnalisés (mergés avec les labels figés LiHDL) ---
-  let newAudioLabel = '';
-  let newSubtitleLabel = '';
+  let newAudioLabel = $state('');
+  let newSubtitleLabel = $state('');
 
   async function addCustomAudioLabel() {
     const lbl = newAudioLabel.trim();
@@ -3384,7 +3315,7 @@
   // --- Options personnalisées card « Réglages piste vidéo » (générique) ---
   // Permet d'ajouter / supprimer des valeurs dans chaque dropdown sans toucher
   // au code. Mergées côté backend avec les listes figées.
-  let newCustomVideoOption = {
+  let newCustomVideoOption = $state({
     custom_video_qualities: '',
     custom_video_encoders: '',
     custom_video_teams: '',
@@ -3392,7 +3323,7 @@
     custom_resolutions: '',
     custom_target_sources: '',
     custom_video_codecs: '',
-  };
+  });
   async function addCustomVideoOption(configKey, label) {
     const val = (newCustomVideoOption[configKey] || '').trim();
     if (!val) return;
@@ -3473,10 +3404,10 @@
     }
   }
 
-  let tmdbTest = { running: false, ok: null, message: '' };
-  let hydrackerTest = { running: false, ok: null, message: '' };
-  let unfrTest = { running: false, ok: null, message: '' };
-  let ltTest = { running: false, ok: null, message: '' };
+  let tmdbTest = $state({ running: false, ok: null, message: '' });
+  let hydrackerTest = $state({ running: false, ok: null, message: '' });
+  let unfrTest = $state({ running: false, ok: null, message: '' });
+  let ltTest = $state({ running: false, ok: null, message: '' });
 
   async function doTestLanguageToolKey() {
     ltTest = { running: true, ok: null, message: '' };
@@ -3681,9 +3612,9 @@
   }
 
   // Auto-update state.
-  let updateInfo = null;       // {version, url, notes} si dispo
-  let checkingUpdate = false;
-  let installingUpdate = false;
+  let updateInfo = $state(null);       // {version, url, notes} si dispo
+  let checkingUpdate = $state(false);
+  let installingUpdate = $state(false);
 
   async function checkForUpdate() {
     if (checkingUpdate) return;
@@ -4115,7 +4046,7 @@
   }
 
   // MUX AUTO : automate puis lance le mux directement, sans passer par Cible.
-  let autoMuxStatus = '';   // '' | 'success' | 'error'
+  let autoMuxStatus = $state('');   // '' | 'success' | 'error'
   let autoMuxStatusTimer = null;
   async function muxAuto() {
     if (!sourcePath) { appendLog('⚠ Charge le fichier PSA d\'abord'); return; }
@@ -4293,6 +4224,62 @@
       }
     } catch {}
   });
+  // Lookup Discord à chaque changement de TMDB ID : on demande au backend
+  // (qui regarde l'index local d'abord, puis le remote si configuré). Best-
+  // effort silencieux ; aucune erreur ne remonte côté UI.
+  run(() => {
+    if (lastTmdbResult && lastTmdbResult.tmdb_id) {
+      const id = String(lastTmdbResult.tmdb_id);
+      DiscordIndexLookup(id).then((u) => {
+        // Vérifie que le TMDB ID n'a pas changé entre temps (anti-race).
+        if (lastTmdbResult && String(lastTmdbResult.tmdb_id) === id) {
+          discordIndexEntry = u || '';
+        }
+      }).catch(() => { /* silencieux */ });
+    } else {
+      discordIndexEntry = '';
+    }
+  });
+  // Réactif Svelte : à chaque changement audio (interne, externe, secondary),
+  // recalcule les labels SRT FR ↔ FR VFF selon la présence VFQ. Le guard
+  // dans applyFRSubVFFLabels évite les boucles infinies.
+  run(() => {
+    void tracks; void externalAudios; void secondarySelected;
+    applyFRSubVFFLabels();
+  });
+  // Réactif Svelte : si une VFQ apparaît dans les pistes audio, l'autre piste
+  // FR (typiquement VFi) doit devenir FR VFF (norme LiHDL — quand y'a 2 pistes
+  // FR, l'une est VFF/internationale, l'autre est VFQ québécoise).
+  run(() => {
+    void tracks; void externalAudios; void secondarySelected;
+    const hasVFQ = tracks.some(t => t.type === 'audio' && /^FR VFQ/.test(t.label || ''))
+      || externalAudios.some(a => /^FR VFQ/.test(a.label || ''))
+      || secondarySelected.some(t => t.type === 'audio' && /^FR VFQ/.test(t.label || ''));
+    if (hasVFQ && useVFi) {
+      useVFi = false;
+      applyVFiSwap(); // FR VFi → FR VFF (useVFi=false)
+    }
+  });
+  // $derived (runes) suit automatiquement tout ce que lit buildFilenameClient().
+  let previewFilename = $derived(buildFilenameClient());
+  // Le nom utilisé pour le mux : manuel si override, sinon généré.
+  let effectiveFilename = $derived(filenameOverride ? manualFilename : previewFilename);
+  // Recharge la liste du dico OCR quand on entre dans l'écran Réglages.
+  run(() => {
+    if (screen === 'reglages' && typeof window !== 'undefined') { loadCustomDictReactive(); }
+  });
+  // Réactif : true si FPS PSA ≈ FPS SUPPLY (±0.05) ET audio sync OK ou corrigé.
+  let psaSourcesValid = $derived(!!(
+    sourceMkvInfo && secondaryMkvInfo &&
+    Math.abs((sourceMkvInfo.framerate || 0) - (secondaryMkvInfo.framerate || 0)) <= 0.05 &&
+    (psaSyncStatus === 'ok' || psaSyncStatus === 'corrected')
+  ));
+  let previewVideoName = $derived(videoTrackNameClient());
+  // Auto-fill du codec cible quand aucun n'est explicitement choisi.
+  run(() => {
+    if (!target.video_codec) target.video_codec = suggestedVideoCodec();
+  });
+  let suggestedCodecDisplay = $derived(suggestedVideoCodec());
 </script>
 
 <div class="app" class:no-source={!sourcePath && tracks.length === 0 && screen === 'source'} class:tmdb-pending={sourcePath && !tmdbValidated && screen === 'source'} style:--banner-url="url({banner})">
@@ -4313,8 +4300,8 @@
     </div>
 
     <div class="mode-switch">
-      <button class="mode-btn" class:active={muxMode === 'lihdl'} on:click={() => switchMuxMode('lihdl')}>⚡ MUX LiHDL</button>
-      <button class="mode-btn" class:active={muxMode === 'psa'}   on:click={() => switchMuxMode('psa')}>🎬 Custom PSA</button>
+      <button class="mode-btn" class:active={muxMode === 'lihdl'} onclick={() => switchMuxMode('lihdl')}>⚡ MUX LiHDL</button>
+      <button class="mode-btn" class:active={muxMode === 'psa'}   onclick={() => switchMuxMode('psa')}>🎬 Custom PSA</button>
     </div>
 
     <!-- Film-bar : si TMDB sélectionné, on affiche poster + identité ; sinon placeholder -->
@@ -4344,18 +4331,18 @@
   <!-- Sub-nav : Source / Cible / Sync / Réglages (utilisée seulement si on quitte 'source') -->
   {#if screen !== 'source'}
     <nav class="subnav">
-      <button class="btn btn-ghost" on:click={() => screen = 'source'}>← Retour</button>
-      <button class="subnav-btn" class:active={screen === 'source'}   on:click={() => screen = 'source'}>Source</button>
-      <button class="subnav-btn" class:active={screen === 'cible'}    on:click={() => screen = 'cible'}>Cible</button>
-      <button class="subnav-btn" class:active={screen === 'sync'}     on:click={() => screen = 'sync'}>Synchro Audios</button>
-      <button class="subnav-btn" class:active={screen === 'reglages'} on:click={() => screen = 'reglages'}>Réglages</button>
+      <button class="btn btn-ghost" onclick={() => screen = 'source'}>← Retour</button>
+      <button class="subnav-btn" class:active={screen === 'source'}   onclick={() => screen = 'source'}>Source</button>
+      <button class="subnav-btn" class:active={screen === 'cible'}    onclick={() => screen = 'cible'}>Cible</button>
+      <button class="subnav-btn" class:active={screen === 'sync'}     onclick={() => screen = 'sync'}>Synchro Audios</button>
+      <button class="subnav-btn" class:active={screen === 'reglages'} onclick={() => screen = 'reglages'}>Réglages</button>
     </nav>
   {/if}
 
   <!-- Mux progress bar : si en cours, on affiche au-dessus du main -->
   {#if muxing}
     <div class="mux-progress-bar">
-      <button class="btn btn-danger btn-stop-small" on:click={stopMux}>⏹ Stop</button>
+      <button class="btn btn-danger btn-stop-small" onclick={stopMux}>⏹ Stop</button>
       <div class="progress-bar"><div class="progress-fill" style:width="{muxPercent}%"></div></div>
       <span class="mono">{muxPercent}% · Mux en cours…</span>
     </div>
@@ -4556,20 +4543,20 @@
           <div class="card-title">🌐 Langues, Sous-Titres & Liens</div>
           {#if muxMode === 'lihdl'}
             <label class="vfq-toggle">
-              <input type="checkbox" bind:checked={useVFi} on:change={applyVFiSwap} />
+              <input type="checkbox" bind:checked={useVFi} onchange={applyVFiSwap} />
               <span class:vfq-yes={useVFi} class:vfq-no={!useVFi}>
                 {useVFi ? '✓ FR VFi (international)' : '☐ FR VFF (France)'}
               </span>
               {#if lastTmdbResult.tmdb_id}
-                <button class="vfq-link" type="button" on:click={() => OpenURL(`https://www.themoviedb.org/movie/${lastTmdbResult.tmdb_id}/translations`)}>TMDB ↗</button>
-                <button class="vfq-link" type="button" on:click={() => OpenURL(`https://fr.wikipedia.org/w/index.php?title=Special:Search&go=Go&search=${encodeURIComponent(lastTmdbResult.titre_fr || lastTmdbResult.titre_vo || '')}`)}>Wikipédia ↗</button>
+                <button class="vfq-link" type="button" onclick={() => OpenURL(`https://www.themoviedb.org/movie/${lastTmdbResult.tmdb_id}/translations`)}>TMDB ↗</button>
+                <button class="vfq-link" type="button" onclick={() => OpenURL(`https://fr.wikipedia.org/w/index.php?title=Special:Search&go=Go&search=${encodeURIComponent(lastTmdbResult.titre_fr || lastTmdbResult.titre_vo || '')}`)}>Wikipédia ↗</button>
               {/if}
             </label>
           {/if}
           {#if lastTmdbResult.tmdb_id}
             <div class="vfq-toggle" style:margin-top="6px">
               <span class="srt-label">🔍 Sous-titres SRT :</span>
-              <button class="vfq-link" type="button" on:click={() => OpenURL(hydrackerURL || `https://hydracker.com/titles?search=${encodeURIComponent(lastTmdbResult.titre_fr || lastTmdbResult.titre_vo || '')}`)}>Hydra ↗</button>
+              <button class="vfq-link" type="button" onclick={() => OpenURL(hydrackerURL || `https://hydracker.com/titles?search=${encodeURIComponent(lastTmdbResult.titre_fr || lastTmdbResult.titre_vo || '')}`)}>Hydra ↗</button>
             </div>
           {/if}
         </div>
@@ -4629,16 +4616,16 @@
       <div class="card">
         <div class="card-title">Recherche TMDB</div>
         <div class="lang-toggle" style:margin-bottom="8px">
-          <button class:active={tmdbMode === 'movie'} on:click={() => tmdbMode = 'movie'}>🎬 Film</button>
-          <button class:active={tmdbMode === 'tv'}    on:click={() => tmdbMode = 'tv'}>📺 Série</button>
+          <button class:active={tmdbMode === 'movie'} onclick={() => tmdbMode = 'movie'}>🎬 Film</button>
+          <button class:active={tmdbMode === 'tv'}    onclick={() => tmdbMode = 'tv'}>📺 Série</button>
         </div>
         <div class="field-row">
-          <input type="text" bind:value={tmdbQuery} placeholder={tmdbMode === 'tv' ? 'Titre de série…' : 'Titre du film…'} on:keydown={(e) => e.key === 'Enter' && searchTmdb()} />
-          <button class="btn btn-accent" on:click={searchTmdb} disabled={tmdbSearching}>{tmdbSearching ? '…' : 'Chercher par titre'}</button>
+          <input type="text" bind:value={tmdbQuery} placeholder={tmdbMode === 'tv' ? 'Titre de série…' : 'Titre du film…'} onkeydown={(e) => e.key === 'Enter' && searchTmdb()} />
+          <button class="btn btn-accent" onclick={searchTmdb} disabled={tmdbSearching}>{tmdbSearching ? '…' : 'Chercher par titre'}</button>
         </div>
         <div class="field-row" style:margin-top="6px">
-          <input type="text" bind:value={tmdbIdQuery} placeholder="ID TMDB numérique (ex: 12345)…" inputmode="numeric" pattern="[0-9]*" on:keydown={(e) => e.key === 'Enter' && searchTmdbById()} />
-          <button class="btn btn-accent" on:click={searchTmdbById} disabled={tmdbSearching}>{tmdbSearching ? '…' : 'Chercher par ID'}</button>
+          <input type="text" bind:value={tmdbIdQuery} placeholder="ID TMDB numérique (ex: 12345)…" inputmode="numeric" pattern="[0-9]*" onkeydown={(e) => e.key === 'Enter' && searchTmdbById()} />
+          <button class="btn btn-accent" onclick={searchTmdbById} disabled={tmdbSearching}>{tmdbSearching ? '…' : 'Chercher par ID'}</button>
         </div>
         {#if tmdbMode === 'tv' && !config.tmdb_key}
           <div class="field-hint">⚠ Clé API TMDB requise pour chercher des séries — Réglages.</div>
@@ -4662,7 +4649,7 @@
               </div>
               {#if muxMode === 'lihdl'}
                 <label class="vfq-toggle">
-                  <input type="checkbox" bind:checked={useVFi} on:change={applyVFiSwap} />
+                  <input type="checkbox" bind:checked={useVFi} onchange={applyVFiSwap} />
                   <span class:vfq-yes={useVFi} class:vfq-no={!useVFi}>
                     {useVFi ? '✓ FR VFi (doublage international)' : '☐ FR VFF (doublage France métropolitaine)'}
                   </span>
@@ -4682,7 +4669,7 @@
           <ul class="tmdb-list">
             {#each tmdbResults.slice(0, 3) as r}
               <li>
-                <button class="tmdb-item" on:click={() => pickTmdb(r)}>
+                <button class="tmdb-item" onclick={() => pickTmdb(r)}>
                   {#if r.poster_url}<img class="tmdb-poster" src={r.poster_url} alt=""/>{/if}
                   <div class="tmdb-body">
                     <div class="tmdb-title">{r.titre_fr || r.titre_vo} <span class="tmdb-year">({r.annee_fr})</span></div>
@@ -4698,7 +4685,7 @@
             <ul class="tmdb-list">
               {#each tmdbResults.filter(r => r.tmdb_id !== lastTmdbResult.tmdb_id).slice(0, 2) as r}
                 <li>
-                  <button class="tmdb-item" on:click={() => pickTmdb(r)}>
+                  <button class="tmdb-item" onclick={() => pickTmdb(r)}>
                     {#if r.poster_url}<img class="tmdb-poster" src={r.poster_url} alt=""/>{/if}
                     <div class="tmdb-body">
                       <div class="tmdb-title">{r.titre_fr || r.titre_vo} <span class="tmdb-year">({r.annee_fr})</span></div>
@@ -4729,7 +4716,7 @@
             {/if}
           </div>
           <div class="field" style:flex="1"><label>Mode</label>
-            <select value={target.episode ? 'tv' : 'movie'} on:change={(e) => {
+            <select value={target.episode ? 'tv' : 'movie'} onchange={(e) => {
               if (e.currentTarget.value === 'tv' && !target.episode) {
                 target.episode = detectEpisode((sourcePath || '').split('/').pop()) || 'S01E01';
               } else if (e.currentTarget.value === 'movie') {
@@ -4777,24 +4764,24 @@
           <div class="preview-label">Nom de fichier final</div>
           {#if lastTmdbResult}
             <div class="lang-toggle">
-              <button class:active={target.lang === 'auto'} on:click={() => target.lang = 'auto'}>Auto</button>
-              <button class:active={target.lang === 'vf'}   on:click={() => target.lang = 'vf'}>VF</button>
-              <button class:active={target.lang === 'vo'}   on:click={() => target.lang = 'vo'}>VO</button>
+              <button class:active={target.lang === 'auto'} onclick={() => target.lang = 'auto'}>Auto</button>
+              <button class:active={target.lang === 'vf'}   onclick={() => target.lang = 'vf'}>VF</button>
+              <button class:active={target.lang === 'vo'}   onclick={() => target.lang = 'vo'}>VO</button>
             </div>
           {/if}
           <div class="preview-filename-row">
             {#if filenameOverride}
               <input class="filename-input mono" type="text" bind:value={manualFilename} placeholder="nom-de-fichier.mkv" />
-              <button class="btn-copy" on:click={resetFilenameOverride} title="Revenir à l'auto">↺ Auto</button>
+              <button class="btn-copy" onclick={resetFilenameOverride} title="Revenir à l'auto">↺ Auto</button>
             {:else}
               <div class="preview-value mono">{previewFilename || '—'}</div>
               {#if previewFilename}
-                <button class="btn-copy" on:click={startFilenameOverride} title="Modifier manuellement">✏ Modifier</button>
+                <button class="btn-copy" onclick={startFilenameOverride} title="Modifier manuellement">✏ Modifier</button>
               {/if}
             {/if}
             {#if effectiveFilename}
-              <button class="btn-copy" on:click={copyFilename} title="Copier">{filenameCopied ? '✓ Copié' : '📋 Copier'}</button>
-              <button class="btn-copy" on:click={openOutputDir} disabled={!effectiveOutputDir()} title="Ouvrir dossier de sortie">📂 Dossier</button>
+              <button class="btn-copy" onclick={copyFilename} title="Copier">{filenameCopied ? '✓ Copié' : '📋 Copier'}</button>
+              <button class="btn-copy" onclick={openOutputDir} disabled={!effectiveOutputDir()} title="Ouvrir dossier de sortie">📂 Dossier</button>
             {/if}
           </div>
         </div>
@@ -4802,11 +4789,11 @@
 
       <div class="actions-row">
         {#if muxing}
-          <button class="btn btn-danger" on:click={stopMux}>⏹ Stop</button>
+          <button class="btn btn-danger" onclick={stopMux}>⏹ Stop</button>
           <div class="progress-bar"><div class="progress-fill" style:width="{muxPercent}%"></div></div>
           <span class="mono">{muxPercent}%</span>
         {:else}
-          <button class="btn btn-accent" on:click={doMux} disabled={!sourcePath || !effectiveFilename}>Muxer</button>
+          <button class="btn btn-accent" onclick={doMux} disabled={!sourcePath || !effectiveFilename}>Muxer</button>
         {/if}
       </div>
     </div><!-- /fullscreen cible -->
@@ -4826,7 +4813,7 @@
         <div class="field">
           <label>Fichier .mkv</label>
           <div style="display:flex; gap:8px; align-items:center;">
-            <button class="btn-secondary" on:click={syncPickFile}>
+            <button class="btn-secondary" onclick={syncPickFile}>
               {syncSourcePath ? 'Changer' : 'Choisir un fichier'}
             </button>
             {#if syncSourcePath}
@@ -4856,7 +4843,7 @@
                   <td>
                     <input type="radio" name="syncRef" value={t.id}
                            checked={t.id === syncRefId}
-                           on:change={() => syncSetRef(t.id)} />
+                           onchange={() => syncSetRef(t.id)} />
                   </td>
                   <td class="mono">{t.id}</td>
                   <td class="mono">{t.codec || ''}</td>
@@ -4880,7 +4867,7 @@
                       <span style="opacity:.7;">⏳ analyse…</span>
                     {:else}
                       <button class="btn-secondary"
-                              on:click={() => syncDetectOne(t.id)}
+                              onclick={() => syncDetectOne(t.id)}
                               disabled={!syncSourcePath}>🎯 Détecter</button>
                       {#if syncResults[t.id]}
                         {@const r = syncResults[t.id]}
@@ -4918,7 +4905,7 @@
 
           <div class="actions-row" style="gap:10px;">
             <button class="btn-secondary"
-                    on:click={syncDetectAll}
+                    onclick={syncDetectAll}
                     disabled={!syncSourcePath || syncRefId === null}>
               🎯 Détecter toutes les pistes
             </button>
@@ -4927,7 +4914,7 @@
               <span class="mono">{syncPercent}%</span>
             {:else}
               <button class="btn-primary"
-                      on:click={syncApply}
+                      onclick={syncApply}
                       disabled={!syncSourcePath || syncRefId === null}>
                 ✅ Appliquer le recalage
               </button>
@@ -4949,7 +4936,7 @@
         <div class="field"><label>Clé API TMDB</label>
           <div class="field-row">
             <input type="password" bind:value={config.tmdb_key} placeholder="ex: a1b2c3d4e5f6… (themoviedb.org → Settings → API)" />
-            <button class="btn-test" on:click={doTestTmdbKey} disabled={tmdbTest.running}>
+            <button class="btn-test" onclick={doTestTmdbKey} disabled={tmdbTest.running}>
               {tmdbTest.running ? '…' : 'Test'}
             </button>
           </div>
@@ -4976,7 +4963,7 @@
         <div class="field"><label>Clé API Hydracker</label>
           <div class="field-row">
             <input type="password" bind:value={config.hydracker_key} placeholder="ex: a1b2c3d4… (hydracker.com/account-settings)" />
-            <button class="btn-test" on:click={doTestHydrackerKey} disabled={hydrackerTest.running}>
+            <button class="btn-test" onclick={doTestHydrackerKey} disabled={hydrackerTest.running}>
               {hydrackerTest.running ? '…' : 'Test'}
             </button>
           </div>
@@ -4990,7 +4977,7 @@
         <div class="field"><label>Clé API UNFR.pw</label>
           <div class="field-row">
             <input type="password" bind:value={config.unfr_key} placeholder="ex: token-unfr…" />
-            <button class="btn-test" on:click={doTestUnfrKey} disabled={unfrTest.running}>
+            <button class="btn-test" onclick={doTestUnfrKey} disabled={unfrTest.running}>
               {unfrTest.running ? '…' : 'Test'}
             </button>
           </div>
@@ -5021,8 +5008,8 @@
         <div class="card-title">Labels audio personnalisés</div>
         <div class="field"><label>Ajouter une langue/qualité audio (format figé : « LANG VARIANTE : CODEC CANAUX »)</label>
           <div class="field-row">
-            <input type="text" bind:value={newAudioLabel} placeholder="ex: BRE VO : AC3 5.1" on:keydown={(e) => e.key === 'Enter' && addCustomAudioLabel()} />
-            <button class="btn-test" on:click={addCustomAudioLabel} disabled={!newAudioLabel.trim()}>+ Ajouter</button>
+            <input type="text" bind:value={newAudioLabel} placeholder="ex: BRE VO : AC3 5.1" onkeydown={(e) => e.key === 'Enter' && addCustomAudioLabel()} />
+            <button class="btn-test" onclick={addCustomAudioLabel} disabled={!newAudioLabel.trim()}>+ Ajouter</button>
           </div>
           <div class="field-hint">Mergé avec les labels figés LiHDL. Visible immédiatement dans les dropdowns audio.</div>
         </div>
@@ -5031,7 +5018,7 @@
             {#each config.custom_audio_labels as lbl, i}
               <span class="custom-label-pill">
                 <span class="mono">{lbl}</span>
-                <button class="custom-label-remove" on:click={() => removeCustomAudioLabel(i)} title="Supprimer ce label">✕</button>
+                <button class="custom-label-remove" onclick={() => removeCustomAudioLabel(i)} title="Supprimer ce label">✕</button>
               </span>
             {/each}
           </div>
@@ -5042,8 +5029,8 @@
         <div class="card-title">Labels sous-titres personnalisés</div>
         <div class="field"><label>Ajouter une langue de sous-titre (format figé : « LANG VARIANTE : FORMAT »)</label>
           <div class="field-row">
-            <input type="text" bind:value={newSubtitleLabel} placeholder="ex: BRE Full : SRT" on:keydown={(e) => e.key === 'Enter' && addCustomSubtitleLabel()} />
-            <button class="btn-test" on:click={addCustomSubtitleLabel} disabled={!newSubtitleLabel.trim()}>+ Ajouter</button>
+            <input type="text" bind:value={newSubtitleLabel} placeholder="ex: BRE Full : SRT" onkeydown={(e) => e.key === 'Enter' && addCustomSubtitleLabel()} />
+            <button class="btn-test" onclick={addCustomSubtitleLabel} disabled={!newSubtitleLabel.trim()}>+ Ajouter</button>
           </div>
           <div class="field-hint">Mergé avec les labels figés LiHDL. Visible immédiatement dans les dropdowns sous-titres.</div>
         </div>
@@ -5052,7 +5039,7 @@
             {#each config.custom_subtitle_labels as lbl, i}
               <span class="custom-label-pill">
                 <span class="mono">{lbl}</span>
-                <button class="custom-label-remove" on:click={() => removeCustomSubtitleLabel(i)} title="Supprimer ce label">✕</button>
+                <button class="custom-label-remove" onclick={() => removeCustomSubtitleLabel(i)} title="Supprimer ce label">✕</button>
               </span>
             {/each}
           </div>
@@ -5078,9 +5065,9 @@
               <input type="text"
                 value={newCustomVideoOption[grp.key] || ''}
                 placeholder={grp.placeholder}
-                on:input={(e) => { newCustomVideoOption[grp.key] = e.target.value; newCustomVideoOption = {...newCustomVideoOption}; }}
-                on:keydown={(e) => e.key === 'Enter' && addCustomVideoOption(grp.key, grp.label)} />
-              <button class="btn-test" on:click={() => addCustomVideoOption(grp.key, grp.label)}
+                oninput={(e) => { newCustomVideoOption[grp.key] = e.target.value; newCustomVideoOption = {...newCustomVideoOption}; }}
+                onkeydown={(e) => e.key === 'Enter' && addCustomVideoOption(grp.key, grp.label)} />
+              <button class="btn-test" onclick={() => addCustomVideoOption(grp.key, grp.label)}
                 disabled={!(newCustomVideoOption[grp.key] || '').trim()}>+ Ajouter</button>
             </div>
             {#if config[grp.key] && config[grp.key].length > 0}
@@ -5088,7 +5075,7 @@
                 {#each config[grp.key] as val, i}
                   <span class="custom-label-pill">
                     <span class="mono">{val}</span>
-                    <button class="custom-label-remove" on:click={() => removeCustomVideoOption(grp.key, i, grp.label)} title="Supprimer">✕</button>
+                    <button class="custom-label-remove" onclick={() => removeCustomVideoOption(grp.key, i, grp.label)} title="Supprimer">✕</button>
                   </span>
                 {/each}
               </div>
@@ -5102,22 +5089,22 @@
         <div class="field"><label>⚡ MUX LiHDL (films)</label>
           <div class="field-row">
             <input type="text" bind:value={config.output_dir_lihdl} placeholder="/Users/…/Mux/LiHDL" readonly />
-            <button class="btn-test" on:click={pickOutputDirLihdl}>Choisir…</button>
-            <button class="btn-test" on:click={() => config.output_dir_lihdl && OpenFolder(config.output_dir_lihdl)} disabled={!config.output_dir_lihdl} title="Ouvrir dans le Finder">📂</button>
+            <button class="btn-test" onclick={pickOutputDirLihdl}>Choisir…</button>
+            <button class="btn-test" onclick={() => config.output_dir_lihdl && OpenFolder(config.output_dir_lihdl)} disabled={!config.output_dir_lihdl} title="Ouvrir dans le Finder">📂</button>
           </div>
         </div>
         <div class="field"><label>🎬 MUX CUSTOM PSA SERIES</label>
           <div class="field-row">
             <input type="text" bind:value={config.output_dir_psa} placeholder="/Users/…/Mux/PSA" readonly />
-            <button class="btn-test" on:click={pickOutputDirPSA}>Choisir…</button>
-            <button class="btn-test" on:click={() => config.output_dir_psa && OpenFolder(config.output_dir_psa)} disabled={!config.output_dir_psa} title="Ouvrir dans le Finder">📂</button>
+            <button class="btn-test" onclick={pickOutputDirPSA}>Choisir…</button>
+            <button class="btn-test" onclick={() => config.output_dir_psa && OpenFolder(config.output_dir_psa)} disabled={!config.output_dir_psa} title="Ouvrir dans le Finder">📂</button>
           </div>
         </div>
         <div class="field"><label>Dossier fallback (si l'un des 2 ci-dessus est vide)</label>
           <div class="field-row">
             <input type="text" bind:value={config.output_dir} placeholder="/Users/…/Mux" readonly />
-            <button class="btn-test" on:click={pickOutputDir}>Choisir…</button>
-            <button class="btn-test" on:click={() => config.output_dir && OpenFolder(config.output_dir)} disabled={!config.output_dir} title="Ouvrir dans le Finder">📂</button>
+            <button class="btn-test" onclick={pickOutputDir}>Choisir…</button>
+            <button class="btn-test" onclick={() => config.output_dir && OpenFolder(config.output_dir)} disabled={!config.output_dir} title="Ouvrir dans le Finder">📂</button>
           </div>
         </div>
       </div>
@@ -5130,7 +5117,7 @@
         <div class="field"><label>Clé API LanguageTool (optionnel — Premium)</label>
           <div class="field-row">
             <input type="password" bind:value={config.languagetool_key} placeholder="ex: lt-xxxxxx (laisse vide pour API publique gratuite)" />
-            <button class="btn-test" on:click={doTestLanguageToolKey} disabled={ltTest.running}>
+            <button class="btn-test" onclick={doTestLanguageToolKey} disabled={ltTest.running}>
               {ltTest.running ? '…' : 'Test'}
             </button>
           </div>
@@ -5173,14 +5160,14 @@
                 <span class="custom-dict-arrow">→</span>
                 <span class="custom-dict-right mono">{e.right}</span>
                 {#if e.auto}<span class="custom-dict-auto">auto</span>{/if}
-                <button class="btn btn-ghost btn-tiny" on:click={() => removeCustomDictEntry(e.wrong)} title="Supprimer">✕</button>
+                <button class="btn btn-ghost btn-tiny" onclick={() => removeCustomDictEntry(e.wrong)} title="Supprimer">✕</button>
               </div>
             {/each}
           {/if}
         </div>
         <div style="margin-top:8px;display:flex;gap:8px;">
-          <button class="btn btn-ghost btn-tiny" on:click={() => { newDictWrong=''; newDictRight=''; showAddDictModal = true; }}>+ Ajouter</button>
-          <button class="btn btn-ghost btn-tiny" on:click={loadCustomDict}>↻ Recharger</button>
+          <button class="btn btn-ghost btn-tiny" onclick={() => { newDictWrong=''; newDictRight=''; showAddDictModal = true; }}>+ Ajouter</button>
+          <button class="btn btn-ghost btn-tiny" onclick={loadCustomDict}>↻ Recharger</button>
         </div>
       </div>
 
@@ -5225,13 +5212,13 @@
         </div>
 
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px;">
-          <button class="btn btn-accent" on:click={doDiscordScan} disabled={discordScanRunning || !config.discord_bot_token || !config.discord_forum_id}>
+          <button class="btn btn-accent" onclick={doDiscordScan} disabled={discordScanRunning || !config.discord_bot_token || !config.discord_forum_id}>
             {discordScanRunning ? '⟳ Scan en cours…' : '🔄 Mettre à jour l\'index'}
           </button>
-          <button class="btn btn-ghost" on:click={doDiscordCopy} disabled={discordScanRunning}>
+          <button class="btn btn-ghost" onclick={doDiscordCopy} disabled={discordScanRunning}>
             {discordCopyOk ? '✓ Copié' : '📋 Copier le JSON'}
           </button>
-          <button class="btn btn-accent" on:click={doDiscordPushGitHub} disabled={discordScanRunning || githubPushing || !config.github_token || !config.github_repo}>
+          <button class="btn btn-accent" onclick={doDiscordPushGitHub} disabled={discordScanRunning || githubPushing || !config.github_token || !config.github_repo}>
             {githubPushing ? '⟳ Push en cours…' : (githubPushOk ? '✓ Pushé sur GitHub' : '📤 Pusher sur GitHub')}
           </button>
         </div>
@@ -5260,7 +5247,7 @@
       </div>
 
       <div class="actions-row">
-        <button class="btn btn-accent" on:click={saveSettings}>Enregistrer</button>
+        <button class="btn btn-accent" onclick={saveSettings}>Enregistrer</button>
       </div>
     </div><!-- /fullscreen reglages -->
     {/if}
@@ -5268,11 +5255,11 @@
   </main>
 
   {#if showLTReview}
-    <div class="lt-review-overlay" on:click={() => showLTReview = false} on:keydown={(e) => e.key === 'Escape' && (showLTReview = false)} role="presentation">
-      <div class="lt-review-modal" on:click|stopPropagation role="dialog" aria-modal="true" aria-label="Lignes à vérifier (LanguageTool)">
+    <div class="lt-review-overlay" onclick={() => showLTReview = false} onkeydown={(e) => e.key === 'Escape' && (showLTReview = false)} role="presentation">
+      <div class="lt-review-modal" onclick={stopPropagation(bubble('click'))} role="dialog" aria-modal="true" aria-label="Lignes à vérifier (LanguageTool)">
         <div class="lt-review-header">
           <h3>🔍 Lignes à vérifier — LanguageTool ({ocrProgress.lt_needs_review})</h3>
-          <button class="btn btn-ghost btn-tiny" on:click={() => showLTReview = false}>✕</button>
+          <button class="btn btn-ghost btn-tiny" onclick={() => showLTReview = false}>✕</button>
         </div>
         <div class="lt-review-body">
           {#if !ocrProgress.lt_review_list || ocrProgress.lt_review_list.length === 0}
@@ -5295,7 +5282,7 @@
                       {#each m.suggestions as s}
                         <button class="lt-sugg-pill clickable"
                                 disabled={ltReviewState[idx] && ltReviewState[idx].busy}
-                                on:click={() => applyReviewFix(idx, s)}>
+                                onclick={() => applyReviewFix(idx, s)}>
                           {s}
                         </button>
                       {/each}
@@ -5304,15 +5291,15 @@
                   <div class="lt-review-custom">
                     <input type="text" class="lt-custom-input" placeholder="Correction libre…"
                            bind:value={ltReviewState[idx].customText}
-                           on:keydown={(e) => e.key === 'Enter' && applyReviewFix(idx, ltReviewState[idx].customText)}
+                           onkeydown={(e) => e.key === 'Enter' && applyReviewFix(idx, ltReviewState[idx].customText)}
                            disabled={ltReviewState[idx] && ltReviewState[idx].busy} />
                     <button class="btn btn-accent btn-tiny"
                             disabled={!ltReviewState[idx] || !ltReviewState[idx].customText || !ltReviewState[idx].customText.trim() || ltReviewState[idx].busy}
-                            on:click={() => applyReviewFix(idx, ltReviewState[idx].customText)}>
+                            onclick={() => applyReviewFix(idx, ltReviewState[idx].customText)}>
                       {ltReviewState[idx] && ltReviewState[idx].busy ? '…' : 'Appliquer'}
                     </button>
                     <button class="btn btn-ghost btn-tiny"
-                            on:click={() => ignoreReviewMatch(idx)}
+                            onclick={() => ignoreReviewMatch(idx)}
                             title="Ignorer ce match (pas une vraie erreur)">
                       Ignorer
                     </button>
@@ -5329,24 +5316,24 @@
           {/if}
         </div>
         <div class="lt-review-footer">
-          <button class="btn btn-accent" on:click={() => showLTReview = false}>Fermer</button>
+          <button class="btn btn-accent" onclick={() => showLTReview = false}>Fermer</button>
         </div>
       </div>
     </div>
   {/if}
 
   {#if showOSModal}
-    <div class="lt-review-overlay" on:click={() => showOSModal = false} on:keydown={(e) => e.key === 'Escape' && (showOSModal = false)} role="presentation">
-      <div class="lt-review-modal" on:click|stopPropagation role="dialog" aria-modal="true" aria-label="OpenSubtitles">
+    <div class="lt-review-overlay" onclick={() => showOSModal = false} onkeydown={(e) => e.key === 'Escape' && (showOSModal = false)} role="presentation">
+      <div class="lt-review-modal" onclick={stopPropagation(bubble('click'))} role="dialog" aria-modal="true" aria-label="OpenSubtitles">
         <div class="lt-review-header">
           <h3>🔍 OpenSubtitles — recherche SRT</h3>
-          <button class="btn btn-ghost btn-tiny" on:click={() => showOSModal = false}>✕</button>
+          <button class="btn btn-ghost btn-tiny" onclick={() => showOSModal = false}>✕</button>
         </div>
         <div class="lt-review-body">
           {#if !config.opensubtitles_api_key}
             <div class="empty-hint" style="padding:12px;border:1px solid var(--orange);border-radius:8px;background:rgba(255,181,71,0.08);">
               ⚠ Clé API OpenSubtitles manquante.
-              <button class="btn btn-ghost btn-tiny" style="margin-left:8px" on:click={() => { showOSModal = false; screen = 'reglages'; }}>
+              <button class="btn btn-ghost btn-tiny" style="margin-left:8px" onclick={() => { showOSModal = false; screen = 'reglages'; }}>
                 Configurer dans Settings
               </button>
             </div>
@@ -5354,7 +5341,7 @@
           <div class="os-search-row">
             <div class="field" style="flex:2">
               <label>Titre</label>
-              <input type="text" bind:value={osQuery} placeholder="ex: Inception" on:keydown={(e) => e.key === 'Enter' && searchOpenSubtitles()} />
+              <input type="text" bind:value={osQuery} placeholder="ex: Inception" onkeydown={(e) => e.key === 'Enter' && searchOpenSubtitles()} />
             </div>
             <div class="field" style="flex:1">
               <label>Année</label>
@@ -5364,7 +5351,7 @@
               <label>Langues</label>
               <input type="text" bind:value={osLang} placeholder="fr,en" />
             </div>
-            <button class="btn btn-accent" on:click={searchOpenSubtitles} disabled={osSearching || !config.opensubtitles_api_key}>
+            <button class="btn btn-accent" onclick={searchOpenSubtitles} disabled={osSearching || !config.opensubtitles_api_key}>
               {osSearching ? '⏳' : 'Chercher'}
             </button>
           </div>
@@ -5385,9 +5372,9 @@
                   <div class="os-result-filename mono">{r.filename || ''}</div>
                   <div class="os-result-actions">
                     {#if r.url}
-                      <button class="btn btn-ghost btn-tiny" on:click={() => OpenURL(r.url)}>↗ Voir</button>
+                      <button class="btn btn-ghost btn-tiny" onclick={() => OpenURL(r.url)}>↗ Voir</button>
                     {/if}
-                    <button class="btn btn-accent btn-tiny" on:click={() => downloadOSResult(r)} disabled={osDownloading === r.id}>
+                    <button class="btn btn-accent btn-tiny" onclick={() => downloadOSResult(r)} disabled={osDownloading === r.id}>
                       {osDownloading === r.id ? '⏳ Téléchargement…' : '⬇ Utiliser'}
                     </button>
                   </div>
@@ -5397,18 +5384,18 @@
           {/if}
         </div>
         <div class="lt-review-footer">
-          <button class="btn btn-ghost" on:click={() => showOSModal = false}>Fermer</button>
+          <button class="btn btn-ghost" onclick={() => showOSModal = false}>Fermer</button>
         </div>
       </div>
     </div>
   {/if}
 
   {#if showAddDictModal}
-    <div class="lt-review-overlay" on:click={() => showAddDictModal = false} on:keydown={(e) => e.key === 'Escape' && (showAddDictModal = false)} role="presentation">
-      <div class="lt-review-modal" on:click|stopPropagation role="dialog" aria-modal="true" aria-label="Ajouter une entrée au dictionnaire OCR">
+    <div class="lt-review-overlay" onclick={() => showAddDictModal = false} onkeydown={(e) => e.key === 'Escape' && (showAddDictModal = false)} role="presentation">
+      <div class="lt-review-modal" onclick={stopPropagation(bubble('click'))} role="dialog" aria-modal="true" aria-label="Ajouter une entrée au dictionnaire OCR">
         <div class="lt-review-header">
           <h3>+ Ajouter une entrée au dictionnaire OCR</h3>
-          <button class="btn btn-ghost btn-tiny" on:click={() => showAddDictModal = false}>✕</button>
+          <button class="btn btn-ghost btn-tiny" onclick={() => showAddDictModal = false}>✕</button>
         </div>
         <div class="lt-review-body">
           <div class="field">
@@ -5417,12 +5404,12 @@
           </div>
           <div class="field">
             <label>Correction (right)</label>
-            <input type="text" bind:value={newDictRight} placeholder="ex: Charli XCX" on:keydown={(e) => e.key === 'Enter' && addCustomDictEntry()} />
+            <input type="text" bind:value={newDictRight} placeholder="ex: Charli XCX" onkeydown={(e) => e.key === 'Enter' && addCustomDictEntry()} />
           </div>
         </div>
         <div class="lt-review-footer">
-          <button class="btn btn-ghost" on:click={() => showAddDictModal = false}>Annuler</button>
-          <button class="btn btn-accent" on:click={addCustomDictEntry} disabled={dictBusy || !newDictWrong.trim() || !newDictRight.trim()}>
+          <button class="btn btn-ghost" onclick={() => showAddDictModal = false}>Annuler</button>
+          <button class="btn btn-accent" onclick={addCustomDictEntry} disabled={dictBusy || !newDictWrong.trim() || !newDictRight.trim()}>
             {dictBusy ? '…' : 'Ajouter'}
           </button>
         </div>
