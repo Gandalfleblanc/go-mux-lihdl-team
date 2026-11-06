@@ -4,6 +4,7 @@
   avant chargement d'une source. Extraite de App.svelte en v7.1.8.
 -->
 <script>
+  import Icon from './Icon.svelte';
   export let lastTmdbResult = null;
   export let discordIndexEntry = '';
   export let openURL = () => {};
@@ -19,9 +20,9 @@
     <div class="film-info">
       <div class="film-title">{lastTmdbResult.titre_fr || lastTmdbResult.titre_vo || '—'}{lastTmdbResult.annee_fr ? ` (${lastTmdbResult.annee_fr})` : ''}</div>
       <div class="film-meta">
-        {#if lastTmdbResult.tmdb_id}<button type="button" class="film-id film-id-link" on:click={() => openURL(lastTmdbResult.url || `https://www.themoviedb.org/movie/${lastTmdbResult.tmdb_id}`)} title="Ouvrir la fiche TMDB">↗ TMDB</button>{/if}
-        {#if discordIndexEntry}<button type="button" class="film-id film-id-link" on:click={() => openURL(discordIndexEntry)} title="Ouvrir le post Discord de la Team">↗ Discord</button>{/if}
-        {#if lastTmdbResult.duree}<span>⏱ {lastTmdbResult.duree}</span>{/if}
+        {#if lastTmdbResult.tmdb_id}<button type="button" class="film-id film-id-link" on:click={() => openURL(lastTmdbResult.url || `https://www.themoviedb.org/movie/${lastTmdbResult.tmdb_id}`)} title="Ouvrir la fiche TMDB"><Icon name="arrow-top-right-on-square" /> TMDB</button>{/if}
+        {#if discordIndexEntry}<button type="button" class="film-id film-id-link" on:click={() => openURL(discordIndexEntry)} title="Ouvrir le post Discord de la Team"><Icon name="arrow-top-right-on-square" /> Discord</button>{/if}
+        {#if lastTmdbResult.duree}<span><Icon name="clock" /> {lastTmdbResult.duree}</span>{/if}
         {#if lastTmdbResult.note > 0}<span>★ {lastTmdbResult.note}</span>{/if}
       </div>
     </div>

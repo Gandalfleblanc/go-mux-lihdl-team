@@ -7,6 +7,7 @@
   Extraite de App.svelte en v7.1.7 (phase 1 découpage).
 -->
 <script>
+  import Icon from './Icon.svelte';
   // Mode + état principal
   export let muxMode = 'lihdl';
   export let sourcePath = '';
@@ -69,7 +70,7 @@
 </script>
 
 <div class="card drop-target" style:--wails-drop-target="drop">
-  <div class="card-title">📁 Sources</div>
+  <div class="card-title"><Icon name="folder" /> Sources</div>
 
   <div class="source-list">
 
@@ -81,7 +82,7 @@
       {#if sourcePath}
         <div class="source-value">{sourcePath.split('/').pop()}</div>
         {#if sourceMkvInfo}
-          <div class="source-value" style="opacity:0.7;font-size:11px;">⏱ {formatDuration(sourceMkvInfo.duration_seconds)} · 🎞 {sourceMkvInfo.framerate || '?'} fps</div>
+          <div class="source-value" style="opacity:0.7;font-size:11px;"><Icon name="clock" /> {formatDuration(sourceMkvInfo.duration_seconds)} · <Icon name="film" /> {sourceMkvInfo.framerate || '?'} fps</div>
         {/if}
       {:else}
         <div class="source-value empty">— Aucun fichier sélectionné —</div>
@@ -101,7 +102,7 @@
         {#if secondaryPath}
           <div class="source-value">{secondaryPath.split('/').pop()} · {secondaryTracks.length} piste(s)</div>
           {#if secondaryMkvInfo}
-            <div class="source-value" style="opacity:0.7;font-size:11px;">⏱ {formatDuration(secondaryMkvInfo.duration_seconds)} · 🎞 {secondaryMkvInfo.framerate || '?'} fps</div>
+            <div class="source-value" style="opacity:0.7;font-size:11px;"><Icon name="clock" /> {formatDuration(secondaryMkvInfo.duration_seconds)} · <Icon name="film" /> {secondaryMkvInfo.framerate || '?'} fps</div>
           {/if}
           {#if psaSyncStatus}
             <div class="source-value" style="font-size:11px;font-weight:600;color:{psaSyncStatus === 'ok' ? '#7ad17a' : psaSyncStatus === 'corrected' ? '#e8b94a' : psaSyncStatus === 'error' ? '#e87a7a' : '#aaa'};">
@@ -165,9 +166,9 @@
             <span class="extract-progress-label">
               {#if srtExtracting}
                 {#if srtPhase === 'convert_ass'}
-                  🔄 Conversion ASS → SRT (via ffmpeg) — {srtPercent}%
+                  <Icon name="arrow-path" /> Conversion ASS → SRT (via ffmpeg) — {srtPercent}%
                 {:else}
-                  ⏳ Extraction SRT + détection sync — {srtPercent}%
+                  <Icon name="clock" /> Extraction SRT + détection sync — {srtPercent}%
                 {/if}
               {:else if srtExtractionResult === 'success'}
                 {#if srtAssConverted}
@@ -192,7 +193,7 @@
             {#if subSyncChecking}
               <div class="extract-progress">
                 <span class="extract-progress-label">
-                  🔎 Analyse sync SRT — {subSyncPercent}% {subSyncCurrentName ? `(${subSyncCurrentName})` : ''}
+                  <Icon name="magnifying-glass" /> Analyse sync SRT — {subSyncPercent}% {subSyncCurrentName ? `(${subSyncCurrentName})` : ''}
                 </span>
                 <progress max="100" value={subSyncPercent}></progress>
               </div>
@@ -202,12 +203,12 @@
                 <progress max="100" value="100"></progress>
               </div>
               <div class="sync-actions" style="margin-top:6px;">
-                <button class="btn btn-tiny" on:click={runSubSyncCheck}>🔎 Re-vérifier</button>
+                <button class="btn btn-tiny" on:click={runSubSyncCheck}><Icon name="magnifying-glass" /> Re-vérifier</button>
                 <button class="btn btn-ghost btn-tiny" on:click={dismissSubSyncResults}>Masquer</button>
               </div>
             {:else if subSyncResults.length === 0}
               <button class="btn btn-tiny" on:click={runSubSyncCheck}>
-                🔎 Vérifier sync SRT vs audio source
+                <Icon name="magnifying-glass" /> Vérifier sync SRT vs audio source
               </button>
             {:else}
               <div class="sync-results-header">Synchronisation alass (SRT corrigé prêt) :</div>
@@ -288,7 +289,7 @@
               {/if}
             </div>
             <div class="fr-audio-options" style="margin-top:6px;">
-              <span style="opacity:0.7;font-size:12px;">🎯 Référence sync :</span>
+              <span style="opacity:0.7;font-size:12px;"><Icon name="viewfinder-circle" /> Référence sync :</span>
               <label class="vfq-toggle">
                 <input type="radio" name="syncRefLang" bind:group={syncRefLang} value="fr" disabled={frAudioExtracting} />
                 <span>FR (VFF/VFi)</span>
@@ -307,14 +308,14 @@
                 <span class="extract-progress-label">
                   {#if frAudioExtracting}
                     {#if frAudioPhase === 'sync'}
-                      🔎 Détection sync audio…
+                      <Icon name="magnifying-glass" /> Détection sync audio…
                     {:else if frAudioPhase.startsWith('convert:')}
                       {@const parts = frAudioPhase.slice(8).split(',')}
-                      🔄 Conversion {parts[0]} → AC3 ({parts[1] || ''}) — {frAudioConvertPercent}%
+                      <Icon name="arrow-path" /> Conversion {parts[0]} → AC3 ({parts[1] || ''}) — {frAudioConvertPercent}%
                     {:else if frAudioPhase === 'convert'}
-                      🔄 Conversion vers AC3 — {frAudioConvertPercent}%
+                      <Icon name="arrow-path" /> Conversion vers AC3 — {frAudioConvertPercent}%
                     {:else}
-                      ⏳ Extraction FR audio + détection sync…
+                      <Icon name="clock" /> Extraction FR audio + détection sync…
                     {/if}
                   {:else if frAudioExtractionResult === 'success'}
                     {#if frAudioConvertedSummary}

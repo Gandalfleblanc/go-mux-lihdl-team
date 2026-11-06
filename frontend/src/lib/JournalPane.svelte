@@ -8,6 +8,7 @@
   ref).
 -->
 <script>
+  import Icon from './Icon.svelte';
   export let logLines = [];
   export let logEl = null;         // bind:this remonté au parent pour scroll auto
   export let bottomPaneTab = 'journal';
@@ -24,10 +25,10 @@
 <div class="card journal-card journal-inline">
   <div class="bottom-pane-tabs">
     <button class="bottom-pane-tab" class:active={bottomPaneTab === 'journal'} on:click={() => bottomPaneTab = 'journal'}>
-      📜 Journal{logLines.length > 0 ? ` (${logLines.length})` : ''}
+      <Icon name="command-line" /> Journal{logLines.length > 0 ? ` (${logLines.length})` : ''}
     </button>
     <button class="bottom-pane-tab" class:active={bottomPaneTab === 'queue'} on:click={() => bottomPaneTab = 'queue'}>
-      📋 Queue{queue.length > 0 ? ` (${queue.length})` : ''}
+      <Icon name="queue-list" /> Queue{queue.length > 0 ? ` (${queue.length})` : ''}
     </button>
   </div>
 
@@ -50,13 +51,13 @@
     <div class="queue-pane">
       {#if queue.length === 0}
         <div class="queue-empty">
-          <div class="queue-empty-icon">📋</div>
+          <div class="queue-empty-icon"><Icon name="queue-list" /></div>
           <div class="queue-empty-title">File vide</div>
         </div>
       {:else}
         <label class="queue-auto-toggle" title="Après chaque mux OK, charge automatiquement l'épisode suivant et relance MUX AUTO. Les corrections manuelles de labels sont propagées aux épisodes suivants.">
           <input type="checkbox" bind:checked={queueAutoContinue} disabled={muxing} />
-          <span>🤖 Auto-continuer (série complète)</span>
+          <span><Icon name="cpu-chip" /> Auto-continuer (série complète)</span>
         </label>
         <ul class="queue-list">
           {#each queue as p, i}
@@ -70,7 +71,7 @@
         </ul>
         <div class="queue-actions">
           <button class="btn btn-ghost btn-tiny" on:click={onQueueNext} disabled={muxing}>↓ Charger le suivant</button>
-          <button class="btn btn-ghost btn-tiny" on:click={onQueueClear}>🗑 Vider</button>
+          <button class="btn btn-ghost btn-tiny" on:click={onQueueClear}><Icon name="trash" /> Vider</button>
         </div>
       {/if}
     </div>

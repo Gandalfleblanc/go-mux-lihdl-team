@@ -5,6 +5,7 @@
   auto-suggéré). Extraite de App.svelte en v7.1.4 (phase 1 découpage).
 -->
 <script>
+  import Icon from './Icon.svelte';
   export let videoChoice = { quality: '', encoder: '', sourceType: '', sourceTeam: '', team: '' };
   export let target = { resolution: '', source: '', video_codec: '', flagOverride: 'auto', title: '', episode: '', year: '' };
   export let options = { video_qualities: [], video_encoders: [], video_source_types: [], video_teams: [], resolutions: [], target_sources: [], video_codecs: [] };
@@ -22,7 +23,7 @@
 </script>
 
 <div class="card">
-  <div class="card-title">🎛️ Réglages piste vidéo</div>
+  <div class="card-title"><Icon name="adjustments-horizontal" /> Réglages piste vidéo</div>
   <div class="field-grid">
     <div class="field">
       <span class="field-label">Qualité</span>
@@ -86,8 +87,8 @@
       <span class="field-label" style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
         <span>{target.episode ? 'Épisode' : 'Année'}</span>
         <span style="display:flex;gap:3px;">
-          <button type="button" class="tmdb-mode-toggle small" class:active={!target.episode} on:click={() => { target.episode = ''; tmdbMode = 'movie'; }} title="Mode Film : année dans le filename">🎬</button>
-          <button type="button" class="tmdb-mode-toggle small" class:active={!!target.episode} on:click={() => { tmdbMode = 'tv'; if (!target.episode) target.episode = (sourcePath ? detectEpisode(sourcePath.split('/').pop()) : '') || 'S01E01'; }} title="Mode Série : SxxExx dans le filename">📺</button>
+          <button type="button" class="tmdb-mode-toggle small" class:active={!target.episode} on:click={() => { target.episode = ''; tmdbMode = 'movie'; }} title="Mode Film : année dans le filename"><Icon name="film" /></button>
+          <button type="button" class="tmdb-mode-toggle small" class:active={!!target.episode} on:click={() => { tmdbMode = 'tv'; if (!target.episode) target.episode = (sourcePath ? detectEpisode(sourcePath.split('/').pop()) : '') || 'S01E01'; }} title="Mode Série : SxxExx dans le filename"><Icon name="tv" /></button>
         </span>
       </span>
       {#if target.episode}

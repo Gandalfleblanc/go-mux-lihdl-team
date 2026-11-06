@@ -5,6 +5,7 @@
   Extraite de App.svelte en v7.1.9 (phase 1 découpage).
 -->
 <script>
+  import Icon from './Icon.svelte';
   export let sourcePath = '';
   export let muxMode = 'lihdl';
   export let ocrRunning = false;
@@ -23,7 +24,7 @@
     <div class="empty-hero-badge">{muxMode === 'psa' ? 'CUSTOM PSA · SUPPLY/FW MUX' : 'LiHDL · FILM MUX PIPELINE'}</div>
     <div class="empty-hero-icon">
       <span class="empty-hero-icon-bg" aria-hidden="true"></span>
-      <span class="empty-hero-icon-glyph">{sourcePath ? '✓' : '▶'}</span>
+      <span class="empty-hero-icon-glyph">{#if sourcePath}<Icon name="check" />{:else}<Icon name="play" />{/if}</span>
     </div>
     <div class="empty-hero-title">{sourcePath ? 'Source chargée.' : 'Prêt à muxer.'}</div>
     <div class="empty-hero-sub">
@@ -38,28 +39,28 @@
     {#if !sourcePath}
       <div class="empty-hero-cta-row">
         <button class="btn btn-accent empty-hero-cta" on:click={onPickMkv}>
-          <span>📁</span> Choisir un MKV
+          <span><Icon name="folder" /></span> Choisir un MKV
         </button>
         <button class="btn empty-hero-cta-secondary" on:click={onPickMultipleMkv}>
-          <span>📋</span> Choisir plusieurs (queue)
+          <span><Icon name="queue-list" /></span> Choisir plusieurs (queue)
         </button>
       </div>
       <div class="empty-hero-droptip">↓ Ou glisse plusieurs MKV ici pour les mettre en file ↓</div>
       <div class="empty-hero-hints">
-        <span class="empty-hero-hint">⚡ MUX rapide bit-à-bit</span>
+        <span class="empty-hero-hint"><Icon name="bolt" /> MUX rapide bit-à-bit</span>
         <span class="empty-hero-hint-dot">·</span>
-        <span class="empty-hero-hint">🎬 Fiche TMDB auto</span>
+        <span class="empty-hero-hint"><Icon name="film" /> Fiche TMDB auto</span>
         <span class="empty-hero-hint-dot">·</span>
-        <span class="empty-hero-hint">🔊 Sync audio AC3/EAC3</span>
+        <span class="empty-hero-hint"><Icon name="speaker-wave" /> Sync audio AC3/EAC3</span>
       </div>
 
       <!-- Outils additionnels intégrés -->
       <div class="empty-hero-tools">
-        <div class="empty-hero-tools-title">🔊 Outils additionnels</div>
+        <div class="empty-hero-tools-title"><Icon name="speaker-wave" /> Outils additionnels</div>
         <div class="empty-hero-tools-row">
-          <button class="btn btn-ghost" on:click={onPickAndOCR} disabled={ocrRunning} title="OCR PGS .sup → SRT (Tesseract + regex + LanguageTool)">🔠 OCR PGS → SRT</button>
-          <button class="btn btn-ghost" on:click={onOpenOSModal} title="Chercher un SRT existant sur OpenSubtitles (gain de minutes vs OCR)">🔍 OpenSubtitles</button>
-          <button class="btn btn-ghost" on:click={onOpenSync} title="Synchroniser des pistes audio (.ac3/.mka/.mkv)">🔊 SYNCHRO AUDIOS</button>
+          <button class="btn btn-ghost" on:click={onPickAndOCR} disabled={ocrRunning} title="OCR PGS .sup → SRT (Tesseract + regex + LanguageTool)"><Icon name="language" /> OCR PGS → SRT</button>
+          <button class="btn btn-ghost" on:click={onOpenOSModal} title="Chercher un SRT existant sur OpenSubtitles (gain de minutes vs OCR)"><Icon name="magnifying-glass" /> OpenSubtitles</button>
+          <button class="btn btn-ghost" on:click={onOpenSync} title="Synchroniser des pistes audio (.ac3/.mka/.mkv)"><Icon name="speaker-wave" /> SYNCHRO AUDIOS</button>
         </div>
         {#if ocrTrackId === -2000 && ocrProgress.status}
           <div class="ocr-progress"
@@ -71,16 +72,16 @@
             <div class="ocr-progress-bar" style="width: {ocrProgress.percent}%"></div>
             <div class="ocr-progress-label">
               {#if ocrRunning}
-                🔠 OCR · {ocrProgress.status || '…'} · <b>{ocrProgress.percent}%</b>
+                <Icon name="language" /> OCR · {ocrProgress.status || '…'} · <b>{ocrProgress.percent}%</b>
                 {#if ocrProgress.message}— {ocrProgress.message}{/if}
               {:else if ocrProgress.status === 'done'}
-                ✅ <b>OCR terminé</b> — qualité estimée <b>{ocrProgress.quality_score.toFixed(1)}%</b>
+                <Icon name="check-circle" /> <b>OCR terminé</b> — qualité estimée <b>{ocrProgress.quality_score.toFixed(1)}%</b>
                 ({ocrProgress.subtitles} sous-titres
                 {#if ocrProgress.corrected_lines}· {ocrProgress.corrected_lines} regex{/if}
                 {#if ocrProgress.lt_auto_fixed}· {ocrProgress.lt_auto_fixed} LT auto{/if}
                 {#if ocrProgress.lt_needs_review}· {ocrProgress.lt_needs_review} à vérifier{/if})
               {:else if ocrProgress.status === 'error'}
-                ❌ OCR échoué — {ocrProgress.message}
+                <Icon name="x-circle" /> OCR échoué — {ocrProgress.message}
               {/if}
             </div>
           </div>

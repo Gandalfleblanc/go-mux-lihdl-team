@@ -5,6 +5,7 @@
   par piste. Extraite de App.svelte en v7.1.6 (phase 1 découpage).
 -->
 <script>
+  import Icon from './Icon.svelte';
   export let tracks = [];
   export let externalAudios = [];
   export let externalSubs = [];
@@ -40,7 +41,7 @@
 
 <div class="card card-grow">
   <div class="card-title-row">
-    <div class="card-title">🎞️ Pistes ({videoCount} vidéo · {audioCount} audio · {subCount} subs)</div>
+    <div class="card-title"><Icon name="film" /> Pistes ({videoCount} vidéo · {audioCount} audio · {subCount} subs)</div>
     <div class="card-title-actions">
       <button class="btn btn-ghost btn-tiny" on:click={onPickAudio}>+ audio</button>
       <button class="btn btn-ghost btn-tiny" on:click={onPickSubs}>+ sub</button>
@@ -50,10 +51,10 @@
   <!-- Vidéo -->
   {#if videoCount > 0}
     <div class="tracks-section">
-      <div class="tracks-section-header video"><span class="tracks-section-dot"></span><span class="tracks-section-label">▶ Piste vidéo</span><span class="tracks-section-count">{videoCount}</span></div>
+      <div class="tracks-section-header video"><span class="tracks-section-dot"></span><span class="tracks-section-label"><Icon name="play" /> Piste vidéo</span><span class="tracks-section-count">{videoCount}</span></div>
       {#each tracks.filter(t => t.type === 'video') as t}
         <div class="track">
-          <div class="track-icon video">▶</div>
+          <div class="track-icon video"><Icon name="play" /></div>
           <div class="track-label">#{t.id} · {t.codec} · {t.pixelDims || ''} → {previewVideoName}</div>
           <div class="track-flag">{videoChoice.quality}</div>
         </div>
@@ -71,10 +72,10 @@
       ...secondaryAudios.map((s, i) => ({ kind: 'secondary', idx: i, ref: s, order: s.order ?? 0 })),
     ].filter(item => item.ref.keep).sort((a, b) => a.order - b.order)}
     <div class="tracks-section">
-      <div class="tracks-section-header audio"><span class="tracks-section-dot"></span><span class="tracks-section-label">♪ Pistes audio</span><span class="tracks-section-count">{audioCount}</span><button class="btn-add-inline" title="Ajouter un fichier audio externe" on:click={onPickAudio}>+</button></div>
+      <div class="tracks-section-header audio"><span class="tracks-section-dot"></span><span class="tracks-section-label"><Icon name="musical-note" /> Pistes audio</span><span class="tracks-section-count">{audioCount}</span><button class="btn-add-inline" title="Ajouter un fichier audio externe" on:click={onPickAudio}>+</button></div>
     {#each mergedAudios as item (item.kind + '-' + item.idx)}
       <div class="track track-editable" class:dropped={!item.ref.keep}>
-        <div class="track-icon audio">♪</div>
+        <div class="track-icon audio"><Icon name="musical-note" /></div>
         <div class="track-body">
           <div class="track-label">
             {#if item.kind === 'internal'}
@@ -128,10 +129,10 @@
       ...secondarySubs.map((s, i) => ({ kind: 'secondary', idx: i, ref: s, order: s.order ?? 0 })),
     ].filter(item => item.ref.keep).sort((a, b) => a.order - b.order)}
     <div class="tracks-section">
-      <div class="tracks-section-header sub"><span class="tracks-section-dot"></span><span class="tracks-section-label">A Sous-titres</span><span class="tracks-section-count">{subCount}</span><button class="btn-add-inline" title="Ajouter un fichier sous-titre externe" on:click={onPickSubs}>+</button></div>
+      <div class="tracks-section-header sub"><span class="tracks-section-dot"></span><span class="tracks-section-label"><Icon name="chat-bubble-left-ellipsis" /> Sous-titres</span><span class="tracks-section-count">{subCount}</span><button class="btn-add-inline" title="Ajouter un fichier sous-titre externe" on:click={onPickSubs}>+</button></div>
     {#each mergedSubs as item (item.kind + '-' + item.idx)}
       <div class="track track-editable">
-        <div class="track-icon sub">A</div>
+        <div class="track-icon sub"><Icon name="chat-bubble-left-ellipsis" /></div>
         <div class="track-body">
           <div class="track-label">
             {#if item.kind === 'internal'}
@@ -156,14 +157,14 @@
                 title={ocrRunning ? `OCR en cours…` : 'OCR PGS → SRT (Tesseract)'}
                 disabled={ocrRunning}
                 on:click={() => onRunOCR(item.ref)}
-              >🔠</button>
+              ><Icon name="language" /></button>
             {:else if item.kind === 'external' && isPGSExternal(item.ref)}
               <button
                 class="btn-arrow"
                 title={ocrRunning ? `OCR en cours…` : 'OCR PGS .sup → SRT (Tesseract)'}
                 disabled={ocrRunning}
                 on:click={() => onRunOCRExternalSup(item.idx)}
-              >🔠</button>
+              ><Icon name="language" /></button>
             {/if}
             <button class="btn-arrow" title="Monter" on:click={() => onMoveTrack(item.kind, item.idx, -1)}>↑</button>
             <button class="btn-arrow" title="Descendre" on:click={() => onMoveTrack(item.kind, item.idx, +1)}>↓</button>
@@ -184,16 +185,16 @@
               <div class="ocr-progress-bar" style="width: {ocrProgress.percent}%"></div>
               <div class="ocr-progress-label">
                 {#if ocrRunning}
-                  🔠 OCR · {ocrProgress.status || '…'} · <b>{ocrProgress.percent}%</b>
+                  <Icon name="language" /> OCR · {ocrProgress.status || '…'} · <b>{ocrProgress.percent}%</b>
                   {#if ocrProgress.message}— {ocrProgress.message}{/if}
                 {:else if ocrProgress.status === 'done'}
-                  ✅ <b>OCR terminé</b> — qualité estimée <b>{ocrProgress.quality_score.toFixed(1)}%</b>
+                  <Icon name="check-circle" /> <b>OCR terminé</b> — qualité estimée <b>{ocrProgress.quality_score.toFixed(1)}%</b>
                   ({ocrProgress.subtitles} sous-titres · {ocrProgress.corrected_lines} lignes nettoyées · {ocrProgress.lt_auto_fixed} corrections auto · {ocrProgress.lt_needs_review} à vérifier)
                   {#if ocrProgress.lt_needs_review > 0}
                     <button class="btn btn-ghost btn-tiny" style="margin-left:8px" on:click={() => showLTReview = true}>Voir les {ocrProgress.lt_needs_review} lignes à vérifier</button>
                   {/if}
                 {:else if ocrProgress.status === 'error'}
-                  ❌ OCR échoué — {ocrProgress.message}
+                  <Icon name="x-circle" /> OCR échoué — {ocrProgress.message}
                 {/if}
               </div>
             </div>

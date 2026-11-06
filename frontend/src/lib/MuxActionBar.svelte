@@ -4,6 +4,7 @@
   Extraite de App.svelte en v7.1.2 (phase 1 découpage).
 -->
 <script>
+  import Icon from './Icon.svelte';
   export let updateInfo = null;
   export let installingUpdate = false;
   export let checkingUpdate = false;
@@ -27,21 +28,21 @@
   {#if updateInfo}
     <button class="btn update-pill available" on:click={onInstallUpdate} disabled={installingUpdate}
             title="Installer {updateInfo.version}">
-      {installingUpdate ? '⟳ Installation…' : '⬇ ' + updateInfo.version}
+      {#if installingUpdate}<span class="spin"><Icon name="arrow-path" /></span> Installation…{:else}<Icon name="download" /> {updateInfo.version}{/if}
     </button>
   {:else}
     <button class="btn btn-ghost btn-icon" on:click={onCheckUpdate} disabled={checkingUpdate}
             title="Rechercher une mise à jour">
-      <span class:spin={checkingUpdate}>⟳</span>
+      <span class:spin={checkingUpdate}><Icon name="arrow-path" /></span>
     </button>
   {/if}
-  <button class="btn btn-ghost" on:click={onReset} disabled={muxing} title="Réinitialiser la session">↻ RESET</button>
-  <button class="btn" on:click={onToggleSettings}>⚙ SETTINGS</button>
+  <button class="btn btn-ghost" on:click={onReset} disabled={muxing} title="Réinitialiser la session"><Icon name="arrow-uturn-left" /> RESET</button>
+  <button class="btn" on:click={onToggleSettings}><Icon name="cog" /> SETTINGS</button>
   {#if muxMode === 'psa' && secondaryPath && secondaryTracksCount > 0}
-    <button class="btn btn-accent" on:click={onAutomate} disabled={muxing || !sourcePath}>⚡ MUX MANUEL</button>
-    <button class="btn btn-danger" on:click={onMuxAuto} disabled={muxing || !sourcePath}>🚀 MUX AUTO</button>
+    <button class="btn btn-accent" on:click={onAutomate} disabled={muxing || !sourcePath}><Icon name="bolt" /> MUX MANUEL</button>
+    <button class="btn btn-danger" on:click={onMuxAuto} disabled={muxing || !sourcePath}><Icon name="rocket" /> MUX AUTO</button>
   {:else}
-    <button class="btn btn-accent" on:click={onAutomateLihdl} disabled={muxing || !sourcePath || tracksCount === 0}>⚡ MUX MANUEL</button>
-    <button class="btn btn-danger" on:click={onMuxAutoLihdl} disabled={muxing || !sourcePath || tracksCount === 0}>🚀 MUX AUTO</button>
+    <button class="btn btn-accent" on:click={onAutomateLihdl} disabled={muxing || !sourcePath || tracksCount === 0}><Icon name="bolt" /> MUX MANUEL</button>
+    <button class="btn btn-danger" on:click={onMuxAutoLihdl} disabled={muxing || !sourcePath || tracksCount === 0}><Icon name="rocket" /> MUX AUTO</button>
   {/if}
 </div>

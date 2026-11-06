@@ -13,6 +13,7 @@
   import SourcesCard from './lib/SourcesCard.svelte';
   import HeaderFilmBar from './lib/HeaderFilmBar.svelte';
   import EmptyHero from './lib/EmptyHero.svelte';
+  import Icon from './lib/Icon.svelte';
   import banner from './assets/images/banner.png';
   import logo from './assets/images/logo.png';
   import {
@@ -4300,8 +4301,8 @@
     </div>
 
     <div class="mode-switch">
-      <button class="mode-btn" class:active={muxMode === 'lihdl'} onclick={() => switchMuxMode('lihdl')}>⚡ MUX LiHDL</button>
-      <button class="mode-btn" class:active={muxMode === 'psa'}   onclick={() => switchMuxMode('psa')}>🎬 Custom PSA</button>
+      <button class="mode-btn" class:active={muxMode === 'lihdl'} onclick={() => switchMuxMode('lihdl')}><Icon name="bolt" /> MUX LiHDL</button>
+      <button class="mode-btn" class:active={muxMode === 'psa'}   onclick={() => switchMuxMode('psa')}><Icon name="film" /> Custom PSA</button>
     </div>
 
     <!-- Film-bar : si TMDB sélectionné, on affiche poster + identité ; sinon placeholder -->
@@ -4342,7 +4343,7 @@
   <!-- Mux progress bar : si en cours, on affiche au-dessus du main -->
   {#if muxing}
     <div class="mux-progress-bar">
-      <button class="btn btn-danger btn-stop-small" onclick={stopMux}>⏹ Stop</button>
+      <button class="btn btn-danger btn-stop-small" onclick={stopMux}><Icon name="stop" /> Stop</button>
       <div class="progress-bar"><div class="progress-fill" style:width="{muxPercent}%"></div></div>
       <span class="mono">{muxPercent}% · Mux en cours…</span>
     </div>
@@ -4358,11 +4359,11 @@
       <!-- Bandeau persistant : statut du dernier MUX AUTO (succès / erreur). -->
       {#if autoMuxStatus === 'success' && !muxing}
         <div class="card mux-status-banner success">
-          <div class="auto-status done">✅ Mux terminé avec succès — fichier prêt dans ton dossier de sortie</div>
+          <div class="auto-status done"><Icon name="check-circle" /> Mux terminé avec succès — fichier prêt dans ton dossier de sortie</div>
         </div>
       {:else if autoMuxStatus === 'error' && !muxing}
         <div class="card mux-status-banner error">
-          <div class="auto-status error">❌ Mux échoué — vérifie les logs en bas</div>
+          <div class="auto-status error"><Icon name="x-circle" /> Mux échoué — vérifie les logs en bas</div>
         </div>
       {/if}
 
@@ -4540,7 +4541,7 @@
       <!-- Toggle FR VFi + liens externes (TMDB / Wikipédia / Hydra / UNFR) -->
       {#if lastTmdbResult}
         <div class="card vfq-links-card">
-          <div class="card-title">🌐 Langues, Sous-Titres & Liens</div>
+          <div class="card-title"><Icon name="globe-alt" /> Langues, Sous-Titres & Liens</div>
           {#if muxMode === 'lihdl'}
             <label class="vfq-toggle">
               <input type="checkbox" bind:checked={useVFi} onchange={applyVFiSwap} />
@@ -4548,15 +4549,15 @@
                 {useVFi ? '✓ FR VFi (international)' : '☐ FR VFF (France)'}
               </span>
               {#if lastTmdbResult.tmdb_id}
-                <button class="vfq-link" type="button" onclick={() => OpenURL(`https://www.themoviedb.org/movie/${lastTmdbResult.tmdb_id}/translations`)}>TMDB ↗</button>
-                <button class="vfq-link" type="button" onclick={() => OpenURL(`https://fr.wikipedia.org/w/index.php?title=Special:Search&go=Go&search=${encodeURIComponent(lastTmdbResult.titre_fr || lastTmdbResult.titre_vo || '')}`)}>Wikipédia ↗</button>
+                <button class="vfq-link" type="button" onclick={() => OpenURL(`https://www.themoviedb.org/movie/${lastTmdbResult.tmdb_id}/translations`)}>TMDB <Icon name="arrow-top-right-on-square" /></button>
+                <button class="vfq-link" type="button" onclick={() => OpenURL(`https://fr.wikipedia.org/w/index.php?title=Special:Search&go=Go&search=${encodeURIComponent(lastTmdbResult.titre_fr || lastTmdbResult.titre_vo || '')}`)}>Wikipédia <Icon name="arrow-top-right-on-square" /></button>
               {/if}
             </label>
           {/if}
           {#if lastTmdbResult.tmdb_id}
             <div class="vfq-toggle" style:margin-top="6px">
-              <span class="srt-label">🔍 Sous-titres SRT :</span>
-              <button class="vfq-link" type="button" onclick={() => OpenURL(hydrackerURL || `https://hydracker.com/titles?search=${encodeURIComponent(lastTmdbResult.titre_fr || lastTmdbResult.titre_vo || '')}`)}>Hydra ↗</button>
+              <span class="srt-label"><Icon name="magnifying-glass" /> Sous-titres SRT :</span>
+              <button class="vfq-link" type="button" onclick={() => OpenURL(hydrackerURL || `https://hydracker.com/titles?search=${encodeURIComponent(lastTmdbResult.titre_fr || lastTmdbResult.titre_vo || '')}`)}>Hydra <Icon name="arrow-top-right-on-square" /></button>
             </div>
           {/if}
         </div>
@@ -4616,8 +4617,8 @@
       <div class="card">
         <div class="card-title">Recherche TMDB</div>
         <div class="lang-toggle" style:margin-bottom="8px">
-          <button class:active={tmdbMode === 'movie'} onclick={() => tmdbMode = 'movie'}>🎬 Film</button>
-          <button class:active={tmdbMode === 'tv'}    onclick={() => tmdbMode = 'tv'}>📺 Série</button>
+          <button class:active={tmdbMode === 'movie'} onclick={() => tmdbMode = 'movie'}><Icon name="film" /> Film</button>
+          <button class:active={tmdbMode === 'tv'}    onclick={() => tmdbMode = 'tv'}><Icon name="tv" /> Série</button>
         </div>
         <div class="field-row">
           <input type="text" bind:value={tmdbQuery} placeholder={tmdbMode === 'tv' ? 'Titre de série…' : 'Titre du film…'} onkeydown={(e) => e.key === 'Enter' && searchTmdb()} />
@@ -4628,7 +4629,7 @@
           <button class="btn btn-accent" onclick={searchTmdbById} disabled={tmdbSearching}>{tmdbSearching ? '…' : 'Chercher par ID'}</button>
         </div>
         {#if tmdbMode === 'tv' && !config.tmdb_key}
-          <div class="field-hint">⚠ Clé API TMDB requise pour chercher des séries — Réglages.</div>
+          <div class="field-hint"><Icon name="exclamation-triangle" /> Clé API TMDB requise pour chercher des séries — Réglages.</div>
         {/if}
         <!-- Card de vérification : fiche TMDB sélectionnée -->
         {#if lastTmdbResult}
@@ -4658,7 +4659,7 @@
               {#if lastTmdbResult.overview}
                 <div class="tmdb-picked-overview">{lastTmdbResult.overview}</div>
               {:else if !config.tmdb_key}
-                <div class="field-hint">💡 Renseigne ta clé API TMDB dans Réglages pour afficher la description.</div>
+                <div class="field-hint"><Icon name="light-bulb" /> Renseigne ta clé API TMDB dans Réglages pour afficher la description.</div>
               {/if}
             </div>
           </div>
@@ -4723,8 +4724,8 @@
                 target.episode = '';
               }
             }}>
-              <option value="movie">🎬 Film</option>
-              <option value="tv">📺 Série</option>
+              <option value="movie">Film</option>
+              <option value="tv">Série</option>
             </select>
           </div>
         </div>
@@ -4772,16 +4773,16 @@
           <div class="preview-filename-row">
             {#if filenameOverride}
               <input class="filename-input mono" type="text" bind:value={manualFilename} placeholder="nom-de-fichier.mkv" />
-              <button class="btn-copy" onclick={resetFilenameOverride} title="Revenir à l'auto">↺ Auto</button>
+              <button class="btn-copy" onclick={resetFilenameOverride} title="Revenir à l'auto"><Icon name="arrow-uturn-left" /> Auto</button>
             {:else}
               <div class="preview-value mono">{previewFilename || '—'}</div>
               {#if previewFilename}
-                <button class="btn-copy" onclick={startFilenameOverride} title="Modifier manuellement">✏ Modifier</button>
+                <button class="btn-copy" onclick={startFilenameOverride} title="Modifier manuellement"><Icon name="pencil" /> Modifier</button>
               {/if}
             {/if}
             {#if effectiveFilename}
               <button class="btn-copy" onclick={copyFilename} title="Copier">{filenameCopied ? '✓ Copié' : '📋 Copier'}</button>
-              <button class="btn-copy" onclick={openOutputDir} disabled={!effectiveOutputDir()} title="Ouvrir dossier de sortie">📂 Dossier</button>
+              <button class="btn-copy" onclick={openOutputDir} disabled={!effectiveOutputDir()} title="Ouvrir dossier de sortie"><Icon name="folder-open" /> Dossier</button>
             {/if}
           </div>
         </div>
@@ -4789,7 +4790,7 @@
 
       <div class="actions-row">
         {#if muxing}
-          <button class="btn btn-danger" onclick={stopMux}>⏹ Stop</button>
+          <button class="btn btn-danger" onclick={stopMux}><Icon name="stop" /> Stop</button>
           <div class="progress-bar"><div class="progress-fill" style:width="{muxPercent}%"></div></div>
           <span class="mono">{muxPercent}%</span>
         {:else}
@@ -4801,7 +4802,7 @@
     {:else if screen === 'sync'}
     <div class="fullscreen">
       <div class="card">
-        <div class="card-title">🔊 Synchro des Pistes Audios</div>
+        <div class="card-title"><Icon name="speaker-wave" /> Synchro des Pistes Audios</div>
         <p class="hint">
           Charge un .mkv contenant plusieurs pistes audio (ex : VFF + VFQ).
           Choisis la piste de <strong>référence</strong> et indique pour chaque autre
@@ -4864,11 +4865,11 @@
                     {#if t.id === syncRefId}
                       <span style="opacity:.4;">—</span>
                     {:else if syncDetecting[t.id]}
-                      <span style="opacity:.7;">⏳ analyse…</span>
+                      <span style="opacity:.7;"><Icon name="clock" /> analyse…</span>
                     {:else}
                       <button class="btn-secondary"
                               onclick={() => syncDetectOne(t.id)}
-                              disabled={!syncSourcePath}>🎯 Détecter</button>
+                              disabled={!syncSourcePath}><Icon name="viewfinder-circle" /> Détecter</button>
                       {#if syncResults[t.id]}
                         {@const r = syncResults[t.id]}
                         <div style="font-size:.78em; opacity:.85; margin-top:4px;">
@@ -4877,15 +4878,15 @@
                         </div>
                         {#if r.method === 'drift_linear'}
                           <div style="margin-top:4px; padding:4px 6px; background:#5a3a00; color:#ffd166; border-radius:4px; font-size:.78em;">
-                            ⚠️ FPS différent — resample atempo {r.tempo_factor.toFixed(6)} ({((r.tempo_factor - 1) * 100).toFixed(3)}%) sera appliqué au mux (1 génération AC3/EAC3 perdue).
+                            <Icon name="exclamation-triangle" /> FPS différent — resample atempo {r.tempo_factor.toFixed(6)} ({((r.tempo_factor - 1) * 100).toFixed(3)}%) sera appliqué au mux (1 génération AC3/EAC3 perdue).
                           </div>
                         {:else if r.method === 'drift_unstable'}
                           <div style="margin-top:4px; padding:4px 6px; background:#5a1f1f; color:#ffb3b3; border-radius:4px; font-size:.78em;">
-                            ⚠️ Drift instable — recalage non fiable, vérifier manuellement.
+                            <Icon name="exclamation-triangle" /> Drift instable — recalage non fiable, vérifier manuellement.
                           </div>
                         {:else if r.method === 'low_confidence'}
                           <div style="margin-top:4px; padding:4px 6px; background:#3a3a3a; color:#bbb; border-radius:4px; font-size:.78em;">
-                            ⚠️ Corrélation faible — résultat peu fiable.
+                            <Icon name="exclamation-triangle" /> Corrélation faible — résultat peu fiable.
                           </div>
                         {/if}
                       {/if}
@@ -4897,7 +4898,7 @@
           </table>
 
           <p class="hint" style="margin-top:14px; opacity:.75;">
-            🎯 « Détecter » mesure l'offset par cross-correlation (extraction PCM mono
+            <Icon name="viewfinder-circle" /> « Détecter » mesure l'offset par cross-correlation (extraction PCM mono
             8 kHz via ffmpeg, ~3 min en début de film + vérif drift à 85% sur films
             &gt;20 min). « Appliquer » mux un nouveau .mkv en copiant l'audio bit-à-bit
             (AC3/EAC3 préservés).
@@ -4907,7 +4908,7 @@
             <button class="btn-secondary"
                     onclick={syncDetectAll}
                     disabled={!syncSourcePath || syncRefId === null}>
-              🎯 Détecter toutes les pistes
+              <Icon name="viewfinder-circle" /> Détecter toutes les pistes
             </button>
             {#if syncRunning}
               <div class="progress-bar"><div class="progress-fill" style:width="{syncPercent}%"></div></div>
@@ -4916,7 +4917,7 @@
               <button class="btn-primary"
                       onclick={syncApply}
                       disabled={!syncSourcePath || syncRefId === null}>
-                ✅ Appliquer le recalage
+                <Icon name="check-circle" /> Appliquer le recalage
               </button>
               {#if syncSourcePath}
                 <span class="mono" style="opacity:.7; font-size:.85em;">
@@ -5048,7 +5049,7 @@
 
       <!-- Dropdowns personnalisés de la card « Réglages piste vidéo » -->
       <div class="card">
-        <div class="card-title">🎛️ Dropdowns Réglages piste vidéo (personnalisés)</div>
+        <div class="card-title"><Icon name="adjustments-horizontal" /> Dropdowns Réglages piste vidéo (personnalisés)</div>
         <div class="field-hint" style="margin-bottom:10px;">Ajoute ou retire des valeurs dans chaque dropdown de la card. Mergé avec les valeurs par défaut, visible immédiatement.</div>
         {#each [
           { key: 'custom_video_qualities',     label: 'Qualité',       placeholder: 'ex: HDLight 10bit' },
@@ -5086,25 +5087,25 @@
 
       <div class="card">
         <div class="card-title">Dossiers de sortie</div>
-        <div class="field"><label>⚡ MUX LiHDL (films)</label>
+        <div class="field"><label><Icon name="bolt" /> MUX LiHDL (films)</label>
           <div class="field-row">
             <input type="text" bind:value={config.output_dir_lihdl} placeholder="/Users/…/Mux/LiHDL" readonly />
             <button class="btn-test" onclick={pickOutputDirLihdl}>Choisir…</button>
-            <button class="btn-test" onclick={() => config.output_dir_lihdl && OpenFolder(config.output_dir_lihdl)} disabled={!config.output_dir_lihdl} title="Ouvrir dans le Finder">📂</button>
+            <button class="btn-test" onclick={() => config.output_dir_lihdl && OpenFolder(config.output_dir_lihdl)} disabled={!config.output_dir_lihdl} title="Ouvrir dans le Finder"><Icon name="folder-open" /></button>
           </div>
         </div>
-        <div class="field"><label>🎬 MUX CUSTOM PSA SERIES</label>
+        <div class="field"><label><Icon name="film" /> MUX CUSTOM PSA SERIES</label>
           <div class="field-row">
             <input type="text" bind:value={config.output_dir_psa} placeholder="/Users/…/Mux/PSA" readonly />
             <button class="btn-test" onclick={pickOutputDirPSA}>Choisir…</button>
-            <button class="btn-test" onclick={() => config.output_dir_psa && OpenFolder(config.output_dir_psa)} disabled={!config.output_dir_psa} title="Ouvrir dans le Finder">📂</button>
+            <button class="btn-test" onclick={() => config.output_dir_psa && OpenFolder(config.output_dir_psa)} disabled={!config.output_dir_psa} title="Ouvrir dans le Finder"><Icon name="folder-open" /></button>
           </div>
         </div>
         <div class="field"><label>Dossier fallback (si l'un des 2 ci-dessus est vide)</label>
           <div class="field-row">
             <input type="text" bind:value={config.output_dir} placeholder="/Users/…/Mux" readonly />
             <button class="btn-test" onclick={pickOutputDir}>Choisir…</button>
-            <button class="btn-test" onclick={() => config.output_dir && OpenFolder(config.output_dir)} disabled={!config.output_dir} title="Ouvrir dans le Finder">📂</button>
+            <button class="btn-test" onclick={() => config.output_dir && OpenFolder(config.output_dir)} disabled={!config.output_dir} title="Ouvrir dans le Finder"><Icon name="folder-open" /></button>
           </div>
         </div>
       </div>
@@ -5167,14 +5168,14 @@
         </div>
         <div style="margin-top:8px;display:flex;gap:8px;">
           <button class="btn btn-ghost btn-tiny" onclick={() => { newDictWrong=''; newDictRight=''; showAddDictModal = true; }}>+ Ajouter</button>
-          <button class="btn btn-ghost btn-tiny" onclick={loadCustomDict}>↻ Recharger</button>
+          <button class="btn btn-ghost btn-tiny" onclick={loadCustomDict}><Icon name="arrow-path" /> Recharger</button>
         </div>
       </div>
 
       <div class="card">
         <div class="card-title">Index Discord (admin)</div>
         <div class="field-hint" style="margin-bottom:8px;">
-          Permet aux users de l'app d'ouvrir le post Discord d'un film de la Team via un bouton <b>↗ Discord</b> dans le header film-bar.
+          Permet aux users de l'app d'ouvrir le post Discord d'un film de la Team via un bouton <b><Icon name="arrow-top-right-on-square" /> Discord</b> dans le header film-bar.
           Seul l'admin renseigne le bot et lance le scan ; les users récupèrent l'index public via l'URL JSON.
         </div>
         <div class="field"><label>Token bot Discord</label>
@@ -5192,7 +5193,7 @@
 
         <!-- Push GitHub direct (admin) — verrouillé : config interne LiHDL -->
         <div style="margin-top:14px;padding:12px;border:1px solid rgba(255,255,255,0.06);border-radius:10px;background:rgba(255,255,255,0.02);">
-          <div style="font-size:11.5px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">📤 Push GitHub direct (admin) — verrouillé</div>
+          <div style="font-size:11.5px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;"><Icon name="arrow-up-tray" /> Push GitHub direct (admin) — verrouillé</div>
           <div class="field"><label>Token GitHub</label>
             <input type="password" value={config.github_token} disabled readonly style="opacity:0.6;cursor:not-allowed;" autocomplete="off" />
             <div class="field-hint">Verrouillé (configuration interne LiHDL).</div>
@@ -5258,7 +5259,7 @@
     <div class="lt-review-overlay" onclick={() => showLTReview = false} onkeydown={(e) => e.key === 'Escape' && (showLTReview = false)} role="presentation">
       <div class="lt-review-modal" onclick={stopPropagation(bubble('click'))} role="dialog" aria-modal="true" aria-label="Lignes à vérifier (LanguageTool)">
         <div class="lt-review-header">
-          <h3>🔍 Lignes à vérifier — LanguageTool ({ocrProgress.lt_needs_review})</h3>
+          <h3><Icon name="magnifying-glass" /> Lignes à vérifier — LanguageTool ({ocrProgress.lt_needs_review})</h3>
           <button class="btn btn-ghost btn-tiny" onclick={() => showLTReview = false}>✕</button>
         </div>
         <div class="lt-review-body">
@@ -5274,7 +5275,7 @@
                   {/if}
                 </div>
                 <div class="lt-review-snippet mono">{m.snippet}</div>
-                <div class="lt-review-msg">💬 {m.message}</div>
+                <div class="lt-review-msg"><Icon name="chat-bubble-left-ellipsis" /> {m.message}</div>
                 {#if !(ltReviewState[idx] && ltReviewState[idx].resolved)}
                   {#if m.suggestions && m.suggestions.length > 0}
                     <div class="lt-review-sugg">
@@ -5305,7 +5306,7 @@
                     </button>
                   </div>
                   {#if ltReviewState[idx] && ltReviewState[idx].error}
-                    <div class="lt-review-err">⚠ {ltReviewState[idx].error}</div>
+                    <div class="lt-review-err"><Icon name="exclamation-triangle" /> {ltReviewState[idx].error}</div>
                   {/if}
                 {/if}
               </div>
@@ -5326,13 +5327,13 @@
     <div class="lt-review-overlay" onclick={() => showOSModal = false} onkeydown={(e) => e.key === 'Escape' && (showOSModal = false)} role="presentation">
       <div class="lt-review-modal" onclick={stopPropagation(bubble('click'))} role="dialog" aria-modal="true" aria-label="OpenSubtitles">
         <div class="lt-review-header">
-          <h3>🔍 OpenSubtitles — recherche SRT</h3>
+          <h3><Icon name="magnifying-glass" /> OpenSubtitles — recherche SRT</h3>
           <button class="btn btn-ghost btn-tiny" onclick={() => showOSModal = false}>✕</button>
         </div>
         <div class="lt-review-body">
           {#if !config.opensubtitles_api_key}
             <div class="empty-hint" style="padding:12px;border:1px solid var(--orange);border-radius:8px;background:rgba(255,181,71,0.08);">
-              ⚠ Clé API OpenSubtitles manquante.
+              <Icon name="exclamation-triangle" /> Clé API OpenSubtitles manquante.
               <button class="btn btn-ghost btn-tiny" style="margin-left:8px" onclick={() => { showOSModal = false; screen = 'reglages'; }}>
                 Configurer dans Settings
               </button>
@@ -5356,7 +5357,7 @@
             </button>
           </div>
           {#if osError}
-            <div class="lt-review-err">⚠ {osError}</div>
+            <div class="lt-review-err"><Icon name="exclamation-triangle" /> {osError}</div>
           {/if}
           {#if osResults && osResults.length > 0}
             <div class="os-results-list">
@@ -5372,7 +5373,7 @@
                   <div class="os-result-filename mono">{r.filename || ''}</div>
                   <div class="os-result-actions">
                     {#if r.url}
-                      <button class="btn btn-ghost btn-tiny" onclick={() => OpenURL(r.url)}>↗ Voir</button>
+                      <button class="btn btn-ghost btn-tiny" onclick={() => OpenURL(r.url)}><Icon name="arrow-top-right-on-square" /> Voir</button>
                     {/if}
                     <button class="btn btn-accent btn-tiny" onclick={() => downloadOSResult(r)} disabled={osDownloading === r.id}>
                       {osDownloading === r.id ? '⏳ Téléchargement…' : '⬇ Utiliser'}
