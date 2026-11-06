@@ -20,7 +20,7 @@ jobs:
           npm test
 
   build-macos-arm64:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -43,7 +43,7 @@ jobs:
       - name: Download static ffmpeg (evermeet, Intel — Rosetta sur arm64)
         run: |
           mkdir -p internal/audiosync/binaries/darwin-arm64
-          curl -sSL -o ffmpeg.zip https://evermeet.cx/ffmpeg/getrelease/zip
+          curl -sSL -o ffmpeg.zip https://evermeet.cx/ffmpeg/ffmpeg-7.1.1.zip
           unzip -o ffmpeg.zip
           mv ffmpeg internal/audiosync/binaries/darwin-arm64/ffmpeg
           chmod +x internal/audiosync/binaries/darwin-arm64/ffmpeg
@@ -68,7 +68,7 @@ jobs:
           path: build/bin/GO-Mux-LiHDL-Team-macos-arm64.zip
 
   build-macos-amd64:
-    runs-on: macos-latest
+    runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -88,10 +88,10 @@ jobs:
           mkdir -p internal/mediainfo/binaries/darwin-amd64
           cp "$(which mediainfo)" internal/mediainfo/binaries/darwin-amd64/mediainfo
           chmod +x internal/mediainfo/binaries/darwin-amd64/mediainfo
-      - name: Download static ffmpeg (evermeet Intel)
+      - name: Download static ffmpeg 7.1.1 (evermeet, Intel)
         run: |
           mkdir -p internal/audiosync/binaries/darwin-amd64
-          curl -sSL -o ffmpeg.zip https://evermeet.cx/ffmpeg/getrelease/zip
+          curl -sSL -o ffmpeg.zip https://evermeet.cx/ffmpeg/ffmpeg-7.1.1.zip
           unzip -o ffmpeg.zip
           mv ffmpeg internal/audiosync/binaries/darwin-amd64/ffmpeg
           chmod +x internal/audiosync/binaries/darwin-amd64/ffmpeg
