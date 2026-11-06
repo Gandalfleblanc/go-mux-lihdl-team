@@ -118,7 +118,7 @@ func (a *App) startup(ctx context.Context) {
 
 // AppVersion est lue par le frontend (pill dans le header) et utilisée pour
 // comparer avec la dernière release GitHub lors du check de mise à jour.
-const AppVersion = "v8.2.1"
+const AppVersion = "v8.3.0"
 
 func (a *App) GetVersion() string { return AppVersion }
 
@@ -4162,4 +4162,17 @@ func (a *App) DiscordIndexRefreshRemote() error {
 	_ = os.Remove(path)
 	_, err = discordindex.FetchRemoteIndex(a.ctx, url, path)
 	return err
+}
+
+// Notify affiche une notification système (macOS uniquement) avec un son,
+// pour prévenir de la fin d'un mux ou d'un OCR quand l'app est en arrière-plan.
+func (a *App) Notify(title, message string) {
+	if runtime.GOOS != "darwin" {
+		return
+	}
+	esc := func(s string) string {
+		return strings.ReplaceAll(strings.ReplaceAll(s, `\`, `\\`), `"`, `\"`)
+	}
+	script := fmt.Sprintf(`display notification "%s" with title "%s" sound name "Glass"`, esc(message), esc(title))
+	_ = exec.Command("osascript", "-e", script).Start()
 }

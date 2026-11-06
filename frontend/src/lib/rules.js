@@ -277,3 +277,35 @@ export function langFlag(labels, hasFrSub) {
   if (hasVO)  return 'VO';
   return 'VO';
 }
+
+// Titre normalisé pour comparer nom de fichier et fiches TMDB :
+// minuscules, sans accents, « & » = « and », ponctuation ignorée.
+export function normalizeTitle(s) {
+  return String(s || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+// Année 19xx/20xx isolée dans un nom de fichier (pas « 1080p »).
+export function yearFromFilename(filename) {
+  const m = /(?:^|[\s._-])((?:19|20)\d{2})(?=[\s._-]|$)/.exec(String(filename || ''));
+  return m ? m[1] : '';
+}
+
+// Index du seul résultat TMDB dont le titre (VO ou FR) correspond exactement
+// à la recherche — et à l'année du fichier si elle est connue. -1 si aucun
+// ou plusieurs : dans ce cas on demande confirmation à l'utilisateur.
+export function findUnambiguousTmdbMatch(query, fileYear, results) {
+  const q = normalizeTitle(query);
+  if (!q || !Array.isArray(results)) return -1;
+  const hits = [];
+  results.forEach((r, i) => {
+    const sameTitle = [r.titre_vo, r.titre_fr].some((t) => normalizeTitle(t) === q);
+    const sameYear = !fileYear || String(r.annee_fr || '') === String(fileYear);
+    if (sameTitle && sameYear) hits.push(i);
+  });
+  return hits.length === 1 ? hits[0] : -1;
+}

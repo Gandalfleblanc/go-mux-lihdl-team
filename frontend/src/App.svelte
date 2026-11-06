@@ -14,7 +14,7 @@
   import HeaderFilmBar from './lib/HeaderFilmBar.svelte';
   import EmptyHero from './lib/EmptyHero.svelte';
   import Icon from './lib/Icon.svelte';
-  import { detectEpisode, detectSourceType, parsePsaSourceInfo, parseSupplyInfo, looksLikeAD, inferAudioLabel, inferSubLabel, mapLangCode, dotify, subLabelPriority, cleanQueryFromFilename, langFlag } from './lib/rules.js';
+  import { detectEpisode, detectSourceType, parsePsaSourceInfo, parseSupplyInfo, looksLikeAD, inferAudioLabel, inferSubLabel, mapLangCode, dotify, subLabelPriority, cleanQueryFromFilename, langFlag, findUnambiguousTmdbMatch, yearFromFilename } from './lib/rules.js';
   import banner from './assets/images/banner.png';
   import logo from './assets/images/logo.png';
   import {
@@ -24,7 +24,7 @@
     Mux, CancelMux,
     CheckUpdate, InstallUpdate,
     ListAudioTracksForSync, MuxAudioSync, DetectAudioOffset,
-    OCRPGSTrack, OCRSupFile, GenerateFRSrtFromPGS,
+    OCRPGSTrack, OCRSupFile, GenerateFRSrtFromPGS, Notify,
     TestLanguageToolKey,
     ApplyOCRFix,
     SearchOpenSubtitles, DownloadOpenSubtitle,
@@ -2786,9 +2786,11 @@
       }
       tmdbResults = r || []; tmdbResultIndex = 0;
       if (r && r.length >= 1) {
-        // Auto-pick TOUJOURS le 1er résultat (top match TMDB).
-        // L'utilisateur stoppe le mux via Stop si le match est faux.
-        let picked = r[0];
+        // Correspondance exacte et unique (titre + année du fichier si présente)
+        // → on la prend et on valide sans demander. Sinon : 1er résultat, à confirmer.
+        const exactIdx = findUnambiguousTmdbMatch(cleanedSpaces, yearFromFilename(filename), r);
+        if (exactIdx > 0) tmdbResultIndex = exactIdx;
+        let picked = r[exactIdx >= 0 ? exactIdx : 0];
         if (config.tmdb_key && picked.tmdb_id && !picked.overview) {
           try {
             let detail;
@@ -2803,6 +2805,10 @@
         target.year  = picked.annee_fr || '';
         const suffix = r.length > 1 ? ` (${r.length} résultats — top auto)` : '';
         appendLog('✓ TMDB' + (forceTV ? ' (série)' : '') + ' : ' + target.title + suffix);
+        if (exactIdx >= 0) {
+          tmdbValidated = true;
+          appendLog('✓ Fiche validée automatiquement (titre exact et unique) — bouton « Changer » dans le bandeau si besoin');
+        }
         // Mode LiHDL : si film français → VOF, sinon applique le toggle VFi.
         if (muxMode === 'lihdl') {
           if (picked && picked.original_language === 'fr') applyVOFSwap();
@@ -3417,6 +3423,15 @@
     }
   }
 
+  // Notification système seulement si l'app n'est pas au premier plan
+  // (inutile de sonner quand on regarde déjà l'écran).
+  function notifyIfAway(title, message) {
+    try {
+      if (document.hasFocus()) return;
+      Notify(title, message);
+    } catch (_) { /* best-effort */ }
+  }
+
   async function doMux() {
     if (!sourcePath)        { appendLog('⚠ Aucun .mkv source'); return; }
     const outDir = effectiveOutputDir();
@@ -3509,6 +3524,9 @@
     } finally {
       muxing = false;
     }
+    const outName = outputPath.split('/').pop();
+    if (!success) notifyIfAway('Mux échoué', outName);
+    else if (!(queueAutoContinue && queue.length > 0)) notifyIfAway('Mux terminé', outName);
     return success;
   }
 
@@ -3782,6 +3800,7 @@
       }
     } else if (ok && queueAutoContinue && queue.length === 0) {
       appendLog('✅ Auto-continue : queue vidée — série terminée');
+      notifyIfAway('Série terminée', 'Tous les épisodes de la file sont muxés');
     }
   }
 
@@ -3888,6 +3907,8 @@
       };
       // Quand l'OCR vient de finir (status 'done'), capture le path du SRT
       // pour permettre le patch via ApplyOCRFix, et reset l'état du modal.
+      if (p.status === 'done') notifyIfAway('OCR terminé', (p.message || '').split('/').pop() || 'Sous-titres SRT prêts');
+      else if (p.status === 'error') notifyIfAway('OCR échoué', p.message || '');
       if (p.status === 'done' && p.message) {
         ocrCurrentSRT = p.message;
         const list = ocrProgress.lt_review_list || [];
@@ -4045,7 +4066,9 @@
     </div>
 
     <!-- Film-bar : si TMDB sélectionné, on affiche poster + identité ; sinon placeholder -->
-    <HeaderFilmBar {lastTmdbResult} {discordIndexEntry} openURL={OpenURL} />
+    <HeaderFilmBar {lastTmdbResult} {discordIndexEntry} openURL={OpenURL}
+      canChange={tmdbValidated && !muxing && !!sourcePath}
+      onChange={() => { tmdbValidated = false; }} />
 
     <MuxActionBar
       {updateInfo}

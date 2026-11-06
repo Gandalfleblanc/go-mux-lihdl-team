@@ -76,6 +76,8 @@ export function Mux(arg1:main.MuxRequest):Promise<void>;
 
 export function MuxAudioSync(arg1:main.AudioSyncRequest):Promise<void>;
 
+export function Notify(arg1:string,arg2:string):Promise<void>;
+
 export function OCRCustomDictAdd(arg1:string,arg2:string,arg3:boolean):Promise<void>;
 
 export function OCRCustomDictList():Promise<Array<ocrsubs.CustomDictEntry>>;

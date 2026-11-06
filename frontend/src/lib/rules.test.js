@@ -158,3 +158,35 @@ describe('looksLikeAD / mapLangCode / dotify', () => {
     expect(dotify('jurassic world fallen kingdom')).toBe('Jurassic.World.Fallen.Kingdom');
   });
 });
+
+import { normalizeTitle, yearFromFilename, findUnambiguousTmdbMatch } from './rules.js';
+
+describe('validation TMDB automatique', () => {
+  it('normalise accents, & et ponctuation', () => {
+    expect(normalizeTitle('Law & Order Toronto: Criminal Intent')).toBe('law and order toronto criminal intent');
+    expect(normalizeTitle('Amélie')).toBe('amelie');
+  });
+  it("lit l'année du fichier sans confondre avec 1080p", () => {
+    expect(yearFromFilename('Fortress.2012.1080p.BluRay.mkv')).toBe('2012');
+    expect(yearFromFilename('Show.S01E01.1080p.WEB.mkv')).toBe('');
+  });
+  it('un seul titre exact → validé, même si ce n\'est pas le 1er résultat', () => {
+    const r = [{ titre_vo: 'The Terminal List: Dark Wolf' }, { titre_vo: 'The Terminal List' }];
+    expect(findUnambiguousTmdbMatch('The Terminal List', '', r)).toBe(1);
+  });
+  it('& dans TMDB vs « and » dans le fichier', () => {
+    const r = [{ titre_vo: 'Law & Order Toronto: Criminal Intent', titre_fr: 'Toronto: Section Criminelle' }];
+    expect(findUnambiguousTmdbMatch('Law and Order Toronto Criminal Intent', '', r)).toBe(0);
+  });
+  it("deux remakes du même titre sans année → confirmation demandée", () => {
+    const r = [{ titre_vo: 'The Office', annee_fr: '2005' }, { titre_vo: 'The Office', annee_fr: '2001' }];
+    expect(findUnambiguousTmdbMatch('The Office', '', r)).toBe(-1);
+  });
+  it("l'année du fichier départage", () => {
+    const r = [{ titre_vo: 'Dune', annee_fr: '1984' }, { titre_vo: 'Dune', annee_fr: '2021' }];
+    expect(findUnambiguousTmdbMatch('Dune', '2021', r)).toBe(1);
+  });
+  it('titre seulement approchant → confirmation demandée', () => {
+    expect(findUnambiguousTmdbMatch('Boston Blue', '', [{ titre_vo: 'Boston Legal' }])).toBe(-1);
+  });
+});

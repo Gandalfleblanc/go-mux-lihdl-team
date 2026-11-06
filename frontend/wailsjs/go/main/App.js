@@ -138,6 +138,10 @@ export function MuxAudioSync(arg1) {
   return window['go']['main']['App']['MuxAudioSync'](arg1);
 }
 
+export function Notify(arg1, arg2) {
+  return window['go']['main']['App']['Notify'](arg1, arg2);
+}
+
 export function OCRCustomDictAdd(arg1, arg2, arg3) {
   return window['go']['main']['App']['OCRCustomDictAdd'](arg1, arg2, arg3);
 }

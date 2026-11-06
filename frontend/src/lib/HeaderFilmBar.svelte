@@ -8,6 +8,8 @@
   export let lastTmdbResult = null;
   export let discordIndexEntry = '';
   export let openURL = () => {};
+  export let canChange = false;
+  export let onChange = () => {};
 </script>
 
 {#if lastTmdbResult}
@@ -24,6 +26,7 @@
         {#if discordIndexEntry}<button type="button" class="film-id film-id-link" on:click={() => openURL(discordIndexEntry)} title="Ouvrir le post Discord de la Team"><Icon name="arrow-top-right-on-square" /> Discord</button>{/if}
         {#if lastTmdbResult.duree}<span><Icon name="clock" /> {lastTmdbResult.duree}</span>{/if}
         {#if lastTmdbResult.note > 0}<span>★ {lastTmdbResult.note}</span>{/if}
+        {#if canChange}<button type="button" class="film-id film-id-link" on:click={onChange} title="Mauvaise fiche ? Revenir à la confirmation TMDB"><Icon name="pencil" /> Changer</button>{/if}
       </div>
     </div>
   </div>
