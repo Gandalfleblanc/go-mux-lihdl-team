@@ -1,7 +1,15 @@
 {
   "version": 1,
-  "generated_at": "2026-11-07T22:34:43Z",
+  "generated_at": "2026-11-08T22:42:51Z",
   "entries": {
+    "10007": {
+      "tmdb_id": "10007",
+      "url": "https://discord.com/channels/994006546805694474/1569098793360560340/1569098793360560340",
+      "title": "Le.Regard.Du.Diable.2006.MULTI.VF2.1080p.BluRay.REMUX.DTS.HD.MA.7.1.AVC-Dvdweed",
+      "updated_at": "2026-11-08T21:18:24.783000+00:00",
+      "thread_id": "1569098793360560340",
+      "last_message_id": "1569098793360560340"
+    },
     "10033": {
       "tmdb_id": "10033",
       "url": "https://discord.com/channels/994006546805694474/1532010460784889977/1532010460784889977",
@@ -25,6 +33,14 @@
       "updated_at": "2026-11-04T21:14:21.474000+00:00",
       "thread_id": "1567648221386375189",
       "last_message_id": "1567648221386375189"
+    },
+    "10172": {
+      "tmdb_id": "10172",
+      "url": "https://discord.com/channels/994006546805694474/1569095082437513378/1569095082437513378",
+      "title": "Are.We.Done.Yet.2007.CUSTOM.MULTi.VF2.1080p.BLURAY.REMUX.AC3.5.1.H264.AVC-LiHDL",
+      "updated_at": "2026-11-08T21:03:40.030000+00:00",
+      "thread_id": "1569095082437513378",
+      "last_message_id": "1569095123122393281"
     },
     "10234": {
       "tmdb_id": "10234",
@@ -505,6 +521,14 @@
       "updated_at": "2026-11-04T21:57:37.639000+00:00",
       "thread_id": "1567659110491619349",
       "last_message_id": "1567659110491619349"
+    },
+    "12266": {
+      "tmdb_id": "12266",
+      "url": "https://discord.com/channels/994006546805694474/1569031917444272228/1569031917444272228",
+      "title": "Une.Etrange.Affaire.1981.VOF.Bluray.Remux.1080p.AVC.DTS-HDMA.ZatNik07",
+      "updated_at": "2026-11-08T16:52:40.322000+00:00",
+      "thread_id": "1569031917444272228",
+      "last_message_id": "1569031917444272228"
     },
     "1226863": {
       "tmdb_id": "1226863",
@@ -1122,6 +1146,14 @@
       "thread_id": "1532374237132623912",
       "last_message_id": "1532374299510444264"
     },
+    "157823": {
+      "tmdb_id": "157823",
+      "url": "https://discord.com/channels/994006546805694474/1569092452864761866/1569092452864761866",
+      "title": "Night.Moves.2014.CUSTOM.MULTi.VFi.1080p.BLURAY.REMUX.AC3.2.0.H264.AVC-LiHDL",
+      "updated_at": "2026-11-08T20:53:13.091000+00:00",
+      "thread_id": "1569092452864761866",
+      "last_message_id": "1569092509085204612"
+    },
     "1599": {
       "tmdb_id": "1599",
       "url": "https://discord.com/channels/994006546805694474/1532420290292748398/1532420290292748398",
@@ -1642,6 +1674,14 @@
       "thread_id": "1561381577793998888",
       "last_message_id": "1561388617987793000"
     },
+    "245706": {
+      "tmdb_id": "245706",
+      "url": "https://discord.com/channels/994006546805694474/1569096053091999824/1569096053091999824",
+      "title": "True.Story.2015.CUSTOM.DUAL.VFi.1080p.BLURAY.REMUX.AC3.5.1.H264.AVC-LiHDL",
+      "updated_at": "2026-11-08T21:07:31.452000+00:00",
+      "thread_id": "1569096053091999824",
+      "last_message_id": "1569096129931509923"
+    },
     "24756": {
       "tmdb_id": "24756",
       "url": "https://discord.com/channels/994006546805694474/1542893560226119730/1542893560226119730",
@@ -2001,6 +2041,14 @@
       "updated_at": "2026-05-11T17:35:18.574000+00:00",
       "thread_id": "1503450443857137704",
       "last_message_id": "1503478366987227237"
+    },
+    "330298": {
+      "tmdb_id": "330298",
+      "url": "https://discord.com/channels/994006546805694474/1569094329048367304/1569094329048367304",
+      "title": "The.Lady.In.The.Car.With.Glasses.And.A.Gun.2015.DUAL.1080p.BluRay.Remux-ViVE",
+      "updated_at": "2026-11-08T21:00:40.408000+00:00",
+      "thread_id": "1569094329048367304",
+      "last_message_id": "1569094378125926605"
     },
     "332567": {
       "tmdb_id": "332567",
@@ -2562,6 +2610,14 @@
       "thread_id": "1523904458092707900",
       "last_message_id": "1523904482755350589"
     },
+    "47117": {
+      "tmdb_id": "47117",
+      "url": "https://discord.com/channels/994006546805694474/1568964717710671994/1568964717710671994",
+      "title": "La.Faille.1975.1080p.BluRay.FLAC2.0.x264-PTer",
+      "updated_at": "2026-11-08T12:25:38.657000+00:00",
+      "thread_id": "1568964717710671994",
+      "last_message_id": "1568964717710671994"
+    },
     "475040": {
       "tmdb_id": "475040",
       "url": "https://discord.com/channels/994006546805694474/1567879672472281098/1567879672472281098",
@@ -2913,6 +2969,14 @@
       "updated_at": "2026-08-19T08:40:41.164000+00:00",
       "thread_id": "1539554688008065055",
       "last_message_id": "1539554724624212069"
+    },
+    "598": {
+      "tmdb_id": "598",
+      "url": "https://discord.com/channels/994006546805694474/1569056461957365850/1569056461957365850",
+      "title": "City.of.God.2002.MULTI.VFF.1080p.BluRay.REMUX.DTS.HD.MA.5.1.AVC-Fan2",
+      "updated_at": "2026-11-08T18:30:12.190000+00:00",
+      "thread_id": "1569056461957365850",
+      "last_message_id": "1569056517964169331"
     },
     "60778": {
       "tmdb_id": "60778",
@@ -3313,6 +3377,14 @@
       "updated_at": "2026-06-09T17:18:03.218000+00:00",
       "thread_id": "1513955349361594420",
       "last_message_id": "1513955442534121543"
+    },
+    "85020": {
+      "tmdb_id": "85020",
+      "url": "https://discord.com/channels/994006546805694474/1568965556391120977/1568965556391120977",
+      "title": "Slaughter.In.San.Francisco.1974 .BluRay.ReMuX.VFF.X264.1080p.MULTi-Raf66",
+      "updated_at": "2026-11-08T12:28:58.614000+00:00",
+      "thread_id": "1568965556391120977",
+      "last_message_id": "1568965556391120977"
     },
     "88005": {
       "tmdb_id": "88005",
