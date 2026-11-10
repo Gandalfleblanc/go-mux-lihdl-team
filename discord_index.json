@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-11-08T22:42:51Z",
+  "generated_at": "2026-11-10T01:56:02Z",
   "entries": {
     "10007": {
       "tmdb_id": "10007",
@@ -1810,6 +1810,14 @@
       "thread_id": "1567842752799055963",
       "last_message_id": "1567842752799055963"
     },
+    "27717": {
+      "tmdb_id": "27717",
+      "url": "https://discord.com/channels/994006546805694474/1569411135550132254/1569411135550132254",
+      "title": "The.Phantom.Planet.1961.CUSTOM.MULTi.VFi.1080p.BluRay.REMUX.AC3.2.0.PCM.2.0.H264-LiHDL",
+      "updated_at": "2026-11-09T17:59:32.964000+00:00",
+      "thread_id": "1569411135550132254",
+      "last_message_id": "1569411186787623125"
+    },
     "277597": {
       "tmdb_id": "277597",
       "url": "https://discord.com/channels/994006546805694474/1493678968359092395/1493678968359092395",
@@ -1977,6 +1985,14 @@
       "updated_at": "2026-10-19T15:07:46.911000+00:00",
       "thread_id": "1561757763653075054",
       "last_message_id": "1561757958558453885"
+    },
+    "3173": {
+      "tmdb_id": "3173",
+      "url": "https://discord.com/channels/994006546805694474/1569429389572182108/1569429389572182108",
+      "title": "Bangkok.Dangerous.2000.CUSTOM.MULTi.VFi.1080p.BluRay.REMUX.DTS.5.1.AC3.5.1.AVC-LiHDL",
+      "updated_at": "2026-11-09T19:12:05.062000+00:00",
+      "thread_id": "1569429389572182108",
+      "last_message_id": "1569429389572182108"
     },
     "317442": {
       "tmdb_id": "317442",
@@ -2202,6 +2218,14 @@
       "thread_id": "1567653354878804099",
       "last_message_id": "1567653354878804099"
     },
+    "37316": {
+      "tmdb_id": "37316",
+      "url": "https://discord.com/channels/994006546805694474/1569490390904737963/1569490390904737963",
+      "title": "A.Bullet.for.the.General.1966.CUSTOM.MULTi.VFi.1080p.BluRay.REMUX.AC3.2.0..DTS-HD.MA.2.0.AVC-LiHDL",
+      "updated_at": "2026-11-09T23:14:28.913000+00:00",
+      "thread_id": "1569490390904737963",
+      "last_message_id": "1569490390904737963"
+    },
     "37673": {
       "tmdb_id": "37673",
       "url": "https://discord.com/channels/994006546805694474/1566195613564150001/1566195613564150001",
@@ -2361,6 +2385,14 @@
       "updated_at": "2026-05-26T21:22:49.679000+00:00",
       "thread_id": "1508943518725312522",
       "last_message_id": "1508943518725312522"
+    },
+    "40775": {
+      "tmdb_id": "40775",
+      "url": "https://discord.com/channels/994006546805694474/1569429468840202251/1569429468840202251",
+      "title": "The.Bostonians.1984.CUSTOM.MULTi.VFi.1080p.BluRay.REMUX.AC3.2.0.PCM.2.0.AVC-LiHDL",
+      "updated_at": "2026-11-09T19:12:23.961000+00:00",
+      "thread_id": "1569429468840202251",
+      "last_message_id": "1569490263737372763"
     },
     "41166": {
       "tmdb_id": "41166",
