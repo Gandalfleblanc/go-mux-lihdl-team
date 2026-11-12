@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-11-10T23:56:50Z",
+  "generated_at": "2026-11-12T01:23:49Z",
   "entries": {
     "10007": {
       "tmdb_id": "10007",
@@ -554,6 +554,14 @@
       "thread_id": "1492183150611402803",
       "last_message_id": "1492183162825085128"
     },
+    "1239481": {
+      "tmdb_id": "1239481",
+      "url": "https://discord.com/channels/994006546805694474/1570120886734946465/1570120886734946465",
+      "title": "Raqa.2024.CUSTOM.MULTi.VFi.1080p.BLURAY.REMUX.AC3.5.1.H264.AVC-LiHDL",
+      "updated_at": "2026-11-11T16:59:50.833000+00:00",
+      "thread_id": "1570120886734946465",
+      "last_message_id": "1570120886734946465"
+    },
     "1242332": {
       "tmdb_id": "1242332",
       "url": "https://discord.com/channels/994006546805694474/1561418551749906522/1561418551749906522",
@@ -785,6 +793,14 @@
       "updated_at": "2026-10-29T19:59:42.415000+00:00",
       "thread_id": "1565455107657695292",
       "last_message_id": "1565455107657695292"
+    },
+    "13389": {
+      "tmdb_id": "13389",
+      "url": "https://discord.com/channels/994006546805694474/1570180146881757404/1570180146881757404",
+      "title": "Righteous.Kill.2008.CUSTOM.MULTi.VF2.1080p.BluRay.REMUX.DTS.5.1.AC3.5.1.DTS-HD.MA.5.1.H264-LiHDL",
+      "updated_at": "2026-11-11T20:55:19.553000+00:00",
+      "thread_id": "1570180146881757404",
+      "last_message_id": "1570180173163266048"
     },
     "13523": {
       "tmdb_id": "13523",
@@ -1297,6 +1313,14 @@
       "updated_at": "2026-04-08T07:52:03.850000+00:00",
       "thread_id": "1491344865781612625",
       "last_message_id": "1491344898891186256"
+    },
+    "17635": {
+      "tmdb_id": "17635",
+      "url": "https://discord.com/channels/994006546805694474/1570159528174026813/1570159528174026813",
+      "title": "Daylight Robbery.2008.CUSTOM.MULTi.VFi.1080p.WEB.AC3.2.0.H264-LiHDL",
+      "updated_at": "2026-11-11T19:33:23.670000+00:00",
+      "thread_id": "1570159528174026813",
+      "last_message_id": "1570159528174026813"
     },
     "177494": {
       "tmdb_id": "177494",
@@ -2506,6 +2530,14 @@
       "thread_id": "1532310477240139986",
       "last_message_id": "1532310515605573672"
     },
+    "44690": {
+      "tmdb_id": "44690",
+      "url": "https://discord.com/channels/994006546805694474/1570187552789364736/1570187552789364736",
+      "title": "J.D.s.Revenge.1976.CUSTOM.MULTi.VFi.1080p.BluRay.REMUX.AC3.2.0.FLAC.2.0.AVC-LiHDL",
+      "updated_at": "2026-11-11T21:24:45.259000+00:00",
+      "thread_id": "1570187552789364736",
+      "last_message_id": "1570187552789364736"
+    },
     "44829": {
       "tmdb_id": "44829",
       "url": "https://discord.com/channels/994006546805694474/1561056299691671562/1561056299691671562",
@@ -3466,6 +3498,14 @@
       "thread_id": "1501262445300289747",
       "last_message_id": "1501262495963418697"
     },
+    "88564": {
+      "tmdb_id": "88564",
+      "url": "https://discord.com/channels/994006546805694474/1570201111409725551/1570201111409725551",
+      "title": "The.Destiny.of.a.Man.1959.CUSTOM.MULTi.VFi.1080p.BluRay.REMUX.AC3.2.0.DTS-HD.MA.2.0.AVC-LiHDL",
+      "updated_at": "2026-11-11T22:18:37.886000+00:00",
+      "thread_id": "1570201111409725551",
+      "last_message_id": "1570201111409725551"
+    },
     "888195": {
       "tmdb_id": "888195",
       "url": "https://discord.com/channels/994006546805694474/1529185416157073629/1529185416157073629",
@@ -3537,6 +3577,14 @@
       "updated_at": "2026-10-01T20:01:43.341000+00:00",
       "thread_id": "1555308754621436005",
       "last_message_id": "1555308754621436005"
+    },
+    "9504": {
+      "tmdb_id": "9504",
+      "url": "https://discord.com/channels/994006546805694474/1570176107754561699/1570176107754561699",
+      "title": "Glengarry.Glen.Ross.1992.CUSTOM.MULTi.VF2.1080p.BluRay.REMUX.AC3.2.0.FLAC.2.0.AVC-LiHDL",
+      "updated_at": "2026-11-11T20:39:16.550000+00:00",
+      "thread_id": "1570176107754561699",
+      "last_message_id": "1570176107754561699"
     },
     "9567": {
       "tmdb_id": "9567",
