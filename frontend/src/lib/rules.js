@@ -347,3 +347,14 @@ export function pairSeasonFiles(paths, mode) {
   });
   return { episodes, ignored };
 }
+
+// Nom de sortie modifié à la main : au passage à l'épisode suivant, on garde
+// la retouche (ex. VOSTFR) mais on remplace le SxxExx par le nouvel épisode.
+// Renvoie '' si ce n'est pas possible (pas de SxxExx dans le nom ou nouvel
+// épisode inconnu) → l'appelant revient alors au nom automatique.
+export function carryManualFilename(manual, newEpisode) {
+  if (!manual || !newEpisode) return '';
+  const re = /(^|[\s._-])S\d{1,2}E\d{1,3}(?=[\s._-]|$)/i;
+  if (!re.test(manual)) return '';
+  return manual.replace(re, (_, sep) => sep + newEpisode);
+}

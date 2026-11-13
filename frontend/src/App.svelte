@@ -15,7 +15,7 @@
   import HeaderFilmBar from './lib/HeaderFilmBar.svelte';
   import EmptyHero from './lib/EmptyHero.svelte';
   import Icon from './lib/Icon.svelte';
-  import { detectEpisode, detectSourceType, parsePsaSourceInfo, parseSupplyInfo, looksLikeAD, inferAudioLabel, inferSubLabel, mapLangCode, dotify, subLabelPriority, cleanQueryFromFilename, langFlag, findUnambiguousTmdbMatch, yearFromFilename, pairSeasonFiles } from './lib/rules.js';
+  import { detectEpisode, detectSourceType, parsePsaSourceInfo, parseSupplyInfo, looksLikeAD, inferAudioLabel, inferSubLabel, mapLangCode, dotify, subLabelPriority, cleanQueryFromFilename, langFlag, findUnambiguousTmdbMatch, yearFromFilename, pairSeasonFiles, carryManualFilename } from './lib/rules.js';
   import banner from './assets/images/banner.png';
   import logo from './assets/images/logo.png';
   import {
@@ -2218,6 +2218,18 @@
     target.video_codec = ''; // reset pour que l'auto-suggest se réapplique
     // Auto-detect SxxExx → mode série
     target.episode = detectEpisode(filename);
+    // Nom modifié à la main sur l'épisode précédent : on garde la retouche
+    // (ex. VOSTFR) en remplaçant le SxxExx, sinon retour au nom automatique.
+    if (filenameOverride) {
+      const carried = carryManualFilename(manualFilename, target.episode);
+      if (carried) {
+        manualFilename = carried;
+        appendLog('✎ Nom modifié à la main conservé, épisode mis à jour : ' + target.episode);
+      } else {
+        filenameOverride = false;
+        manualFilename = '';
+      }
+    }
     // Mode PSA : auto-fill complet depuis le nom du fichier PSA.
     if (muxMode === 'psa') {
       const psa = parsePsaSourceInfo(filename);

@@ -221,3 +221,18 @@ describe('pairSeasonFiles (mode Saison)', () => {
     expect(r.episodes[0].issues[0]).toMatch(/plusieurs fichiers/);
   });
 });
+
+import { carryManualFilename } from './rules.js';
+
+describe('carryManualFilename (nom modifié à la main, épisode suivant)', () => {
+  it('garde la retouche et met à jour le SxxExx', () => {
+    expect(carryManualFilename('American.Horror.Story.S13E04.VOSTFR.1080p.WEB.EAC3.5.1.H264-LiHDL.mkv', 'S13E08'))
+      .toBe('American.Horror.Story.S13E08.VOSTFR.1080p.WEB.EAC3.5.1.H264-LiHDL.mkv');
+  });
+  it('sans SxxExx dans le nom → retour au nom auto', () => {
+    expect(carryManualFilename('Film.2024.VOSTFR.1080p.mkv', 'S01E02')).toBe('');
+  });
+  it('nouvel épisode inconnu → retour au nom auto', () => {
+    expect(carryManualFilename('Show.S01E01.VOSTFR.mkv', '')).toBe('');
+  });
+});
