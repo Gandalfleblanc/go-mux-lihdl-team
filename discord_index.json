@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-11-12T01:23:49Z",
+  "generated_at": "2026-11-13T00:00:17Z",
   "entries": {
     "10007": {
       "tmdb_id": "10007",
@@ -25,6 +25,14 @@
       "updated_at": "2026-09-24T19:21:12.683000+00:00",
       "thread_id": "1552761844643528845",
       "last_message_id": "1552761874364375130"
+    },
+    "1007631": {
+      "tmdb_id": "1007631",
+      "url": "https://discord.com/channels/994006546805694474/1570484485043265596/1570484485043265596",
+      "title": "Les.Algues.Vertes.2023.FRENCH.VOF.1080p.BluRay.REMUX.AVC.DTS-HD.MA.5.1-FAFiTNA",
+      "updated_at": "2026-11-12T17:04:39.425000+00:00",
+      "thread_id": "1570484485043265596",
+      "last_message_id": "1570484485043265596"
     },
     "101421": {
       "tmdb_id": "101421",
@@ -402,6 +410,22 @@
       "thread_id": "1562532824563851334",
       "last_message_id": "1562532824563851334"
     },
+    "1165366": {
+      "tmdb_id": "1165366",
+      "url": "https://discord.com/channels/994006546805694474/1570516018940612649/1570516018940612649",
+      "title": "La.Bataille.de.Gaulle.L.Age.de.Fer.2026.1080p.Blu-ray.Remux.AVC.TrueHD.Atmos.7.1-SPHD",
+      "updated_at": "2026-11-12T19:09:57.692000+00:00",
+      "thread_id": "1570516018940612649",
+      "last_message_id": "1570516018940612649"
+    },
+    "1165369": {
+      "tmdb_id": "1165369",
+      "url": "https://discord.com/channels/994006546805694474/1570516591110791389/1570516591110791389",
+      "title": "La.Bataille.de.Gaulle.J.Ecris.Ton.Nom.2026.1080p.Blu-ray.Remux.AVC.TrueHD.Atmos.7.1-SPHD",
+      "updated_at": "2026-11-12T19:12:14.108000+00:00",
+      "thread_id": "1570516591110791389",
+      "last_message_id": "1570516591110791389"
+    },
     "1167307": {
       "tmdb_id": "1167307",
       "url": "https://discord.com/channels/994006546805694474/1513958956425547926/1513958956425547926",
@@ -633,6 +657,14 @@
       "updated_at": "2026-06-09T16:40:09.141000+00:00",
       "thread_id": "1513945811191468163",
       "last_message_id": "1513945811191468163"
+    },
+    "1266826": {
+      "tmdb_id": "1266826",
+      "url": "https://discord.com/channels/994006546805694474/1570524964581548243/1570524964581548243",
+      "title": "La.petite.cuisine.de.Mehdi.2025.1080p.Blu-ray.Remux.MPEG-2.DTS-HD.MA.5.1-HDT.",
+      "updated_at": "2026-11-12T19:45:30.499000+00:00",
+      "thread_id": "1570524964581548243",
+      "last_message_id": "1570524964581548243"
     },
     "12715": {
       "tmdb_id": "12715",
@@ -1578,6 +1610,22 @@
       "thread_id": "1566454381296091196",
       "last_message_id": "1566454381296091196"
     },
+    "221731": {
+      "tmdb_id": "221731",
+      "url": "https://discord.com/channels/994006546805694474/1570568916667859104/1570568916667859104",
+      "title": "Rurouni.Kenshin.Kyoto.Inferno.2014.CUSTOM.MULTi.VFi.1080p.BLURAY.REMUX.AC3.5.1.H264.AVC-LiHDL",
+      "updated_at": "2026-11-12T22:40:09.493000+00:00",
+      "thread_id": "1570568916667859104",
+      "last_message_id": "1570568916667859104"
+    },
+    "221732": {
+      "tmdb_id": "221732",
+      "url": "https://discord.com/channels/994006546805694474/1570568737638318130/1570568737638318130",
+      "title": "Rurouni.Kenshin.The.Legend.Ends.2014.CUSTOM.MULTi.VFi.1080p.BLURAY.REMUX.AC3.5.1.H264.AVC-LiHDL",
+      "updated_at": "2026-11-12T22:39:26.809000+00:00",
+      "thread_id": "1570568737638318130",
+      "last_message_id": "1570568737638318130"
+    },
     "22240": {
       "tmdb_id": "22240",
       "url": "https://discord.com/channels/994006546805694474/1314904609709494282/1314904609709494282",
@@ -1849,6 +1897,14 @@
       "updated_at": "2026-04-14T18:26:57.270000+00:00",
       "thread_id": "1493678968359092395",
       "last_message_id": "1497503367294095431"
+    },
+    "279874": {
+      "tmdb_id": "279874",
+      "url": "https://discord.com/channels/994006546805694474/1570498071198957681/1570498071198957681",
+      "title": "La.legione.dei.dannati.1969.CUSTOM.MULTi.VFi.1080p.BLURAY.REMUX.AC3.2.0.H264.AVC-LiHDL",
+      "updated_at": "2026-11-12T17:58:38.617000+00:00",
+      "thread_id": "1570498071198957681",
+      "last_message_id": "1570498071198957681"
     },
     "28489": {
       "tmdb_id": "28489",
@@ -2722,6 +2778,14 @@
       "thread_id": "1521011695991001168",
       "last_message_id": "1521011728903569468"
     },
+    "47866": {
+      "tmdb_id": "47866",
+      "url": "https://discord.com/channels/994006546805694474/1570456846865539122/1570456846865539122",
+      "title": "Gas.Food.Lodging.1992.Multi.VFF.1080p.BluRay.Rip.PCM.AVC-NoTag",
+      "updated_at": "2026-11-12T15:14:49.970000+00:00",
+      "thread_id": "1570456846865539122",
+      "last_message_id": "1570456846865539122"
+    },
     "479355": {
       "tmdb_id": "479355",
       "url": "https://discord.com/channels/994006546805694474/1532709630202089654/1532709630202089654",
@@ -3106,6 +3170,14 @@
       "thread_id": "1538084408685232148",
       "last_message_id": "1538084443602952212"
     },
+    "62116": {
+      "tmdb_id": "62116",
+      "url": "https://discord.com/channels/994006546805694474/1570439972941725756/1570439972941725756",
+      "title": "Nannerl.la.soeur.de.Mozart.2010.1080p.Blu-ray.Remux.AVC.DTS-HD.MA.5.1-KRaLiMaRKo",
+      "updated_at": "2026-11-12T14:07:46.913000+00:00",
+      "thread_id": "1570439972941725756",
+      "last_message_id": "1570457024993566801"
+    },
     "621876": {
       "tmdb_id": "621876",
       "url": "https://discord.com/channels/994006546805694474/1491346516810666054/1491346516810666054",
@@ -3177,6 +3249,14 @@
       "updated_at": "2026-05-26T21:05:27.891000+00:00",
       "thread_id": "1508939149149732935",
       "last_message_id": "1508939149149732935"
+    },
+    "672322": {
+      "tmdb_id": "672322",
+      "url": "https://discord.com/channels/994006546805694474/1570427306651164762/1570427306651164762",
+      "title": "Rurouni.Kenshin.The.Beginning.2021.CUSTOM.MULTi.VFi.1080p.BluRay.REMUX.AC3.5.1.TrueHD.7.1.AVC-LiHDL",
+      "updated_at": "2026-11-12T13:17:27.034000+00:00",
+      "thread_id": "1570427306651164762",
+      "last_message_id": "1570427306651164762"
     },
     "684139": {
       "tmdb_id": "684139",
@@ -3265,6 +3345,14 @@
       "updated_at": "2026-06-12T04:52:26.402000+00:00",
       "thread_id": "1514854873152360530",
       "last_message_id": "1514854901534949527"
+    },
+    "74371": {
+      "tmdb_id": "74371",
+      "url": "https://discord.com/channels/994006546805694474/1570525936103727124/1570525936103727124",
+      "title": "La.chute.d.un.corps.1973.FRENCH.VOF.1080p.BluRay.AVC.DTS-HD.2.0-GORDI",
+      "updated_at": "2026-11-12T19:49:22.128000+00:00",
+      "thread_id": "1570525936103727124",
+      "last_message_id": "1570525936103727124"
     },
     "74447": {
       "tmdb_id": "74447",
@@ -3569,6 +3657,14 @@
       "updated_at": "2026-10-28T22:38:48.590000+00:00",
       "thread_id": "1565132759352221796",
       "last_message_id": "1565132759352221796"
+    },
+    "947502": {
+      "tmdb_id": "947502",
+      "url": "https://discord.com/channels/994006546805694474/1570515350229876847/1570515350229876847",
+      "title": "In.Waves.2026.FRENCH.1080p.BluRay.x264-Ulysse",
+      "updated_at": "2026-11-12T19:07:18.259000+00:00",
+      "thread_id": "1570515350229876847",
+      "last_message_id": "1570515350229876847"
     },
     "950028": {
       "tmdb_id": "950028",
