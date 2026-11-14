@@ -2488,6 +2488,10 @@
     }
     applyLihdlTrackOrder();
     applySubForcedRule();
+    // Les règles auto ci-dessus recalculent Default/Forced (ex. Default retiré
+    // d'un FR Full) : on rejoue les choix de l'épisode précédent par-dessus
+    // pour qu'ils aient le dernier mot.
+    if (res.applied > 0) applySeriesOverrides();
     if (sourcePath) maybeAutoFillTitle(sourcePath);
   }
 
