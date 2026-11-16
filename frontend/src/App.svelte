@@ -15,6 +15,7 @@
   import HeaderFilmBar from './lib/HeaderFilmBar.svelte';
   import EmptyHero from './lib/EmptyHero.svelte';
   import Icon from './lib/Icon.svelte';
+  import { currentZoom, setZoom, resetZoom } from './lib/zoom.js';
   import { detectEpisode, detectSourceType, parsePsaSourceInfo, parseSupplyInfo, looksLikeAD, inferAudioLabel, inferSubLabel, mapLangCode, dotify, subLabelPriority, cleanQueryFromFilename, langFlag, findUnambiguousTmdbMatch, yearFromFilename, pairSeasonFiles, carryManualFilename } from './lib/rules.js';
   import banner from './assets/images/banner.png';
   import logo from './assets/images/logo.png';
@@ -35,6 +36,9 @@
   import { EventsOn } from '../wailsjs/runtime/runtime.js';
 
   let screen = $state('source');
+  // Zoom de l'interface (lib/zoom.js) : suit aussi Ctrl + / Ctrl − / Ctrl 0.
+  let uiZoom = $state(currentZoom());
+  window.addEventListener('ui-zoom-change', (e) => { uiZoom = e.detail; });
   let muxMode = $state('lihdl');   // 'lihdl' | 'psa'
 
   function switchMuxMode(mode) {
@@ -4871,6 +4875,19 @@
 
     {:else if screen === 'reglages'}
     <div class="fullscreen">
+      <div class="card">
+        <div class="card-title">Affichage</div>
+        <div class="field">
+          <span class="field-label">Taille de l'interface</span>
+          <div class="field-row zoom-row">
+            <button class="btn" onclick={() => setZoom(uiZoom - 0.05)} title="Plus petit (Ctrl −)">−</button>
+            <span class="zoom-value mono">{Math.round(uiZoom * 100)} %</span>
+            <button class="btn" onclick={() => setZoom(uiZoom + 0.05)} title="Plus grand (Ctrl +)">+</button>
+            <button class="btn btn-ghost" onclick={() => resetZoom()} title="Taille adaptée à l'écran (Ctrl 0)">Auto</button>
+          </div>
+          <div class="field-hint">Raccourcis : Ctrl + / Ctrl − / Ctrl 0 (auto). Mémorisé sur cet ordinateur.</div>
+        </div>
+      </div>
       <div class="card">
         <div class="card-title">TMDB</div>
         <div class="field"><label>Clé API TMDB</label>

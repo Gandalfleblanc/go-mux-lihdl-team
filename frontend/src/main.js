@@ -7,6 +7,9 @@ import './app.css'
 import './theme.css'
 import { mount } from 'svelte'
 import App from './App.svelte'
+import { initZoom } from './lib/zoom.js'
+
+initZoom();
 
 // Attend les polices avant le premier rendu : sinon le texte s'affiche dans
 // une police de secours puis se redimensionne (les cartes « sautent »).

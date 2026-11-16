@@ -722,3 +722,11 @@ html, body, #app {
 .app .season-log { padding: 10px 14px; background: #0a0a0c; }
 .app .season-log .journal-line { font-family: var(--font-mono); font-size: 11px; }
 .app .empty-hero-cta-row .season-cta { padding: 12px 20px; }
+
+/* ─── ZOOM DE L'INTERFACE (lib/zoom.js) ─────────────────────────────────
+   Le zoom CSS réduit aussi les tailles en vh/vw : on les compense pour que
+   l'app remplisse toujours toute la fenêtre. */
+html, body, #app, .app { height: calc(100vh / var(--ui-zoom, 1)); }
+.app .lt-review-modal { width: min(640px, calc(92vw / var(--ui-zoom, 1))); max-height: calc(80vh / var(--ui-zoom, 1)); }.app .zoom-row { display: flex; align-items: center; gap: 8px; }
+.app .zoom-row .btn { min-width: 38px; }
+.app .zoom-value { min-width: 64px; text-align: center; font-size: 15px; color: var(--accent); }
