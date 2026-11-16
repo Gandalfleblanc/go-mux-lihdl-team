@@ -236,3 +236,14 @@ describe('carryManualFilename (nom modifié à la main, épisode suivant)', () =
     expect(carryManualFilename('Show.S01E01.VOSTFR.mkv', '')).toBe('');
   });
 });
+
+describe('chemins Windows', () => {
+  it('pairSeasonFiles lit le nom de fichier derrière des « \\ »', () => {
+    const r = pairSeasonFiles([
+      'C:\\Users\\ganda\\Downloads\\Show.S01E01.1080p.WEBRip.x265-PSA.mkv',
+      'C:\\Users\\ganda\\Downloads\\Show.S01E01.MULTi.1080p.WEB.H264-SUPPLY.mkv',
+    ], 'psa');
+    expect(r.episodes).toHaveLength(1);
+    expect(r.episodes[0].issues).toEqual([]);
+  });
+});

@@ -18,7 +18,7 @@
   export let ocrTrackId = -1;
   export let ocrProgress = { status: '', percent: 0, message: '', subtitles: 0, corrected_lines: 0, lt_auto_fixed: 0, lt_needs_review: 0, quality_score: 0 };
   export let showLTReview = false;
-  export let basename = (s) => (s || '').split('/').pop();
+  export let basename = (s) => (s || '').split(/[\\/]/).pop();
   export let formatBytes = (n) => String(n);
   export let isPGSTrack = () => false;
   export let isPGSExternal = () => false;

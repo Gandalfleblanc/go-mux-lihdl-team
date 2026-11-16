@@ -30,7 +30,7 @@
     <div class="empty-hero-title">{sourcePath ? 'Source chargée.' : 'Prêt à muxer.'}</div>
     <div class="empty-hero-sub">
       {#if sourcePath}
-        <b class="mono">{sourcePath.split('/').pop()}</b><br>
+        <b class="mono">{sourcePath.split(/[\\/]/).pop()}</b><br>
         Confirme la fiche TMDB ci-dessous pour passer aux pistes & réglages.
       {:else}
         Charge un fichier <b class="mono">.mkv</b> source pour démarrer.<br>

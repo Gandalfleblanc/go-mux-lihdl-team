@@ -45,14 +45,14 @@
       videoChoice.team = 'ASTROBOY';
       if (!target.source || target.source === 'HDLight') target.source = 'WEBRip';
       if (sourcePath && !target.episode) {
-        target.episode = detectEpisode(sourcePath.split('/').pop()) || 'S01E01';
+        target.episode = detectEpisode(sourcePath.split(/[\\/]/).pop()) || 'S01E01';
       }
       // Si une source est déjà chargée, re-jouer l'auto-config PSA :
       // - Codec H265/H264 → x265/x264 (norme GANDALF)
       // - Audios PSA décochés (remplacés par SUPPLY)
       // - Subs non-FR décochés
       if (sourcePath) {
-        const psaName = sourcePath.split('/').pop() || '';
+        const psaName = sourcePath.split(/[\\/]/).pop() || '';
         const psa = parsePsaSourceInfo(psaName);
         if (psa.isPSA) {
           videoChoice.quality = 'Custom PSA';
@@ -425,7 +425,7 @@
     if (!p) return;
     referencePath = p;
     referenceMkvInfo = await GetMkvBasicInfo(p).catch(() => null);
-    appendLog('🔍 Référence : ' + p.split('/').pop() + (referenceMkvInfo ? ` (${formatDuration(referenceMkvInfo.duration_seconds)}, ${referenceMkvInfo.framerate} fps)` : ''));
+    appendLog('🔍 Référence : ' + p.split(/[\\/]/).pop() + (referenceMkvInfo ? ` (${formatDuration(referenceMkvInfo.duration_seconds)}, ${referenceMkvInfo.framerate} fps)` : ''));
   }
 
   async function runRefSubsExtraction() {
@@ -862,8 +862,13 @@
           }
         }
       } else {
-        const lihdlEnCoursDir = '/Users/gandalf/Downloads/LiHDL en cours';
-        try {
+        // Dossier de la source, vidé uniquement s'il s'appelle « LiHDL en cours »
+        // (marche sur Mac et PC, sans chemin en dur).
+        const srcDir = (sourcePath || '').replace(/[\\/][^\\/]*$/, '');
+        const lihdlEnCoursDir = /[\\/]LiHDL en cours$/i.test(srcDir) ? srcDir : '';
+        if (!lihdlEnCoursDir) {
+          appendLog('ℹ Source hors du dossier « LiHDL en cours » : rien envoyé à la corbeille');
+        } else try {
           const n = await MoveDirContentsToTrash(lihdlEnCoursDir);
           if (n > 0) {
             appendLog(`🗑 ${n} élément(s) du dossier "LiHDL en cours" envoyé(s) à la corbeille`);
@@ -991,7 +996,7 @@
       episodes: episodes.map((e) => ({ ...e, status: 'pending', step: '', output: '', notes: [] })),
       running: false, stopRequested: false, currentIdx: -1,
     };
-    appendLog(`📺 Mode Saison : ${episodes.length} épisode(s) trouvé(s) dans ${dir.split('/').pop()}`);
+    appendLog(`📺 Mode Saison : ${episodes.length} épisode(s) trouvé(s) dans ${dir.split(/[\\/]/).pop()}`);
     screen = 'saison';
   }
 
@@ -1409,7 +1414,7 @@
       ocrTrackId = -2000; // marqueur "outil autonome"
       ocrProgress = { status: 'init', percent: 0, message: '',
         total_lines: 0, corrected_lines: 0, suspicious_lines: 0, quality_score: 0, subtitles: 0 };
-      appendLog(`🔠 OCR PGS .sup → SRT (autonome, ${p.split('/').pop()}, lang=${lang})…`);
+      appendLog(`🔠 OCR PGS .sup → SRT (autonome, ${p.split(/[\\/]/).pop()}, lang=${lang})…`);
       try {
         const srtPath = await OCRSupFile(p, lang);
         if (srtPath) appendLog('✓ OCR PGS .sup → SRT : ' + srtPath);
@@ -1507,7 +1512,7 @@
     psaSyncOffsetMs = 0;
     psaSyncTempoRatio = 1.0;
     supplyExtraFlag = ''; // reset
-    const filename = p.split('/').pop() || '';
+    const filename = p.split(/[\\/]/).pop() || '';
     // Détecte un flag "FiNAL" dans le nom SUPPLY → sera inséré dans le filename.
     if (/\bFiNAL\b/i.test(filename)) {
       supplyExtraFlag = 'FiNAL';
@@ -1520,7 +1525,7 @@
 
     // Auto-fill depuis le nom de fichier SUPPLY/FW.
     const supply = parseSupplyInfo(filename);
-    const psaName = (sourcePath || '').split('/').pop() || '';
+    const psaName = (sourcePath || '').split(/[\\/]/).pop() || '';
     const psa = parsePsaSourceInfo(psaName);
     // sourceType combiné PSA + SUPPLY (ex: "WEBRip PSA Audio Supply").
     // Whitelist des teams "officielles" affichées dans le nom : SUPPLY, FW,
@@ -1949,7 +1954,7 @@
     } else {
       videoChoice.team = 'ASTROBOY';
       if (!target.episode) {
-        target.episode = detectEpisode((sourcePath || '').split('/').pop()) || 'S01E01';
+        target.episode = detectEpisode((sourcePath || '').split(/[\\/]/).pop()) || 'S01E01';
       }
     }
     // 4. Norme LiHDL : swap FR VFF ↔ FR VFi selon useVFi (true par défaut sauf
@@ -2163,7 +2168,7 @@
       const hdr = vt
         ? ((vt.mi_hdr_format || '') + ' ' + (vt.mi_hdr_compat || '') + ' ' + (vt.mi_hdr_string || '') + ' ' + (vt.mi_hdr_profile || '')).toLowerCase()
         : '';
-      const fname = (sourcePath || '').split('/').pop() || '';
+      const fname = (sourcePath || '').split(/[\\/]/).pop() || '';
       const fnameUp = fname.toUpperCase();
       const hasDV = /dolby ?vision|dvhe|dvh1/.test(hdr) || /\bDV\b/.test(fnameUp);
       const hasHDR10Plus = /hdr10\+/.test(hdr) || /\bHDR10\+|\bHDR10PLUS\b/.test(fnameUp);
@@ -2211,7 +2216,7 @@
     lastSyncedSrtPathsHash = '';
     // Si des SRT externes sont déjà chargés, déclenche la vérif après init.
     setTimeout(maybeAutoSubSyncCheck, 1500);
-    const filename = path.split('/').pop() || '';
+    const filename = path.split(/[\\/]/).pop() || '';
     // Auto-fill la team de la source depuis le nom de fichier.
     const st = extractSourceTeam(path);
     if (st) videoChoice.sourceTeam = st;
@@ -2532,7 +2537,7 @@
   }
 
   function basename(path) {
-    return String(path || '').split('/').pop().split('\\').pop();
+    return String(path || '').split(/[\\/]/).pop().split('\\').pop();
   }
 
   function formatBytes(n) {
@@ -2904,7 +2909,7 @@
   //   In.the.Name.of.Ben.Hur.2016... → "In.the.Name.of.Ben.Hur"
 
   async function maybeAutoFillTitle(path) {
-    const filename = path.split('/').pop() || '';
+    const filename = path.split(/[\\/]/).pop() || '';
     const cleanedDotted = cleanQueryFromFilename(filename);          // "The.Boys" — pour l'index
     const cleanedSpaces = cleanedDotted.replace(/\./g, ' ').trim();  // "The Boys" — pour l'API TMDB
     // Détection auto série uniquement via pattern SxxExx — le mode PSA n'impose
@@ -3064,7 +3069,7 @@
     if (newMode === 'movie') {
       target.episode = '';
     } else if (newMode === 'tv' && !target.episode && sourcePath) {
-      target.episode = detectEpisode(sourcePath.split('/').pop()) || 'S01E01';
+      target.episode = detectEpisode(sourcePath.split(/[\\/]/).pop()) || 'S01E01';
     }
     if (tmdbQuery && tmdbQuery.trim()) {
       lastTmdbResult = null;
@@ -3436,8 +3441,8 @@
       let dst;
       if (osContext === 'post-source' && sourcePath) {
         // Sauve à côté du .mkv source pour cohérence avec OCRPGSTrack.
-        const dir = sourcePath.substring(0, sourcePath.lastIndexOf('/'));
-        const base = sourcePath.split('/').pop().replace(/\.mkv$/i, '');
+        const dir = sourcePath.replace(/[\\/][^\\/]*$/, '');
+        const base = sourcePath.split(/[\\/]/).pop().replace(/\.mkv$/i, '');
         dst = `${dir}/${base}.opensubtitles.${r.language || 'fr'}.srt`;
       } else {
         // Standalone : demande un dossier de sortie.
@@ -3456,7 +3461,7 @@
         for (const s of externalSubs) maxOrder = Math.max(maxOrder, s.order ?? 0);
         externalSubs = [...externalSubs, {
           path: finalPath,
-          name: finalPath.split('/').pop(),
+          name: finalPath.split(/[\\/]/).pop(),
           size,
           keep: true,
           default: false,
@@ -3658,7 +3663,8 @@
       Order: t.order ?? 0,
     }));
 
-    const outputPath = outDir.replace(/\/$/, '') + '/' + effectiveFilename;
+    const sep = outDir.includes('\\') ? '\\' : '/';
+    const outputPath = outDir.replace(/[\\/]$/, '') + sep + effectiveFilename;
 
     muxing = true;
     muxPercent = 0;
@@ -3682,7 +3688,7 @@
     } finally {
       muxing = false;
     }
-    const outName = outputPath.split('/').pop();
+    const outName = outputPath.split(/[\\/]/).pop();
     if (!success) notifyIfAway('Mux échoué', outName);
     else if (!(queueAutoContinue && queue.length > 0)) notifyIfAway('Mux terminé', outName);
     return success;
@@ -3844,7 +3850,7 @@
     if (tmdbMode === 'movie') {
       target.episode = '';
     } else if (!target.episode) {
-      target.episode = detectEpisode((sourcePath || '').split('/').pop()) || 'S01E01';
+      target.episode = detectEpisode((sourcePath || '').split(/[\\/]/).pop()) || 'S01E01';
     }
 
     // Norme LiHDL : ré-applique l'ordre des pistes (FR VFi/VFF avant FR VFQ)
@@ -3902,7 +3908,7 @@
       }
       externalSubs = [...externalSubs, {
         path: srtPath,
-        name: srtPath.split('/').pop(),
+        name: srtPath.split(/[\\/]/).pop(),
         size,
         keep: true,
         default: !!pgsTrack.default,
@@ -3941,7 +3947,7 @@
       queue = queue.slice(1);
       // Mémorise la validation TMDB avant openMkv (qui la reset).
       const prevTmdb = lastTmdbResult;
-      appendLog(`🤖 Auto-continue : chargement de ${nextPath.split('/').pop()} (${queue.length} restant(s))…`);
+      appendLog(`🤖 Auto-continue : chargement de ${nextPath.split(/[\\/]/).pop()} (${queue.length} restant(s))…`);
       openMkv(nextPath);
       try {
         await waitForAnalyzeComplete();
@@ -4065,7 +4071,7 @@
       };
       // Quand l'OCR vient de finir (status 'done'), capture le path du SRT
       // pour permettre le patch via ApplyOCRFix, et reset l'état du modal.
-      if (p.status === 'done') notifyIfAway('OCR terminé', (p.message || '').split('/').pop() || 'Sous-titres SRT prêts');
+      if (p.status === 'done') notifyIfAway('OCR terminé', (p.message || '').split(/[\\/]/).pop() || 'Sous-titres SRT prêts');
       else if (p.status === 'error') notifyIfAway('OCR échoué', p.message || '');
       if (p.status === 'done' && p.message) {
         ocrCurrentSRT = p.message;
@@ -4652,7 +4658,7 @@
           <div class="field" style:flex="1"><label>Mode</label>
             <select value={target.episode ? 'tv' : 'movie'} onchange={(e) => {
               if (e.currentTarget.value === 'tv' && !target.episode) {
-                target.episode = detectEpisode((sourcePath || '').split('/').pop()) || 'S01E01';
+                target.episode = detectEpisode((sourcePath || '').split(/[\\/]/).pop()) || 'S01E01';
               } else if (e.currentTarget.value === 'movie') {
                 target.episode = '';
               }

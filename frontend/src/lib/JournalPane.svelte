@@ -63,7 +63,7 @@
           {#each queue as p, i}
             <li class="queue-row" class:current={p === sourcePath}>
               <span class="queue-idx">{i + 1}</span>
-              <span class="queue-name mono" title={p}>{p.split('/').pop()}</span>
+              <span class="queue-name mono" title={p}>{p.split(/[\\/]/).pop()}</span>
               <button class="btn btn-ghost btn-tiny" on:click={() => onQueueLoad(i)} disabled={muxing}>Charger</button>
               <button class="btn btn-ghost btn-icon" on:click={() => onQueueRemove(i)} title="Retirer">✕</button>
             </li>

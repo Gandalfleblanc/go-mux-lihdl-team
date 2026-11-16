@@ -17,7 +17,7 @@
     skipped: { label: 'Ignoré', icon: 'stop' },
   };
 
-  const name = (p) => String(p || '').split('/').pop();
+  const name = (p) => String(p || '').split(/[\\/]/).pop();
   let total = $derived(season.episodes.length);
   let finished = $derived(season.episodes.filter((e) => ['done', 'review', 'error', 'skipped'].includes(e.status)).length);
   let doneCount = $derived(season.episodes.filter((e) => e.status === 'done').length);

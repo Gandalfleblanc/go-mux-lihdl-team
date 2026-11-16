@@ -50,7 +50,7 @@
   export let frAudioConvertPercent = 0;
   export let frAudioConvertedSummary = '';
   // Helpers
-  export let basename = (s) => (s || '').split('/').pop();
+  export let basename = (s) => (s || '').split(/[\\/]/).pop();
   export let formatDuration = (s) => String(s);
   export let checkCompat = () => ({ duration_ok: false, framerate_ok: false });
   // Callbacks
@@ -80,7 +80,7 @@
     <div class="source-info">
       <div class="source-label">{muxMode === 'psa' ? 'Source PSA (vidéo gardée)' : 'Source encodée (vidéo gardée)'}</div>
       {#if sourcePath}
-        <div class="source-value">{sourcePath.split('/').pop()}</div>
+        <div class="source-value">{sourcePath.split(/[\\/]/).pop()}</div>
         {#if sourceMkvInfo}
           <div class="source-value" style="opacity:0.7;font-size:11px;"><Icon name="clock" /> {formatDuration(sourceMkvInfo.duration_seconds)} · <Icon name="film" /> {sourceMkvInfo.framerate || '?'} fps</div>
         {/if}
@@ -100,7 +100,7 @@
       <div class="source-info">
         <div class="source-label">Source SUPPLY / FW / Super U (audios + subs)</div>
         {#if secondaryPath}
-          <div class="source-value">{secondaryPath.split('/').pop()} · {secondaryTracks.length} piste(s)</div>
+          <div class="source-value">{secondaryPath.split(/[\\/]/).pop()} · {secondaryTracks.length} piste(s)</div>
           {#if secondaryMkvInfo}
             <div class="source-value" style="opacity:0.7;font-size:11px;"><Icon name="clock" /> {formatDuration(secondaryMkvInfo.duration_seconds)} · <Icon name="film" /> {secondaryMkvInfo.framerate || '?'} fps</div>
           {/if}

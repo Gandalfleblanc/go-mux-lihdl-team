@@ -88,7 +88,7 @@
         <span>{target.episode ? 'Épisode' : 'Année'}</span>
         <span style="display:flex;gap:3px;">
           <button type="button" class="tmdb-mode-toggle small" class:active={!target.episode} on:click={() => { target.episode = ''; tmdbMode = 'movie'; }} title="Mode Film : année dans le filename"><Icon name="film" /></button>
-          <button type="button" class="tmdb-mode-toggle small" class:active={!!target.episode} on:click={() => { tmdbMode = 'tv'; if (!target.episode) target.episode = (sourcePath ? detectEpisode(sourcePath.split('/').pop()) : '') || 'S01E01'; }} title="Mode Série : SxxExx dans le filename"><Icon name="tv" /></button>
+          <button type="button" class="tmdb-mode-toggle small" class:active={!!target.episode} on:click={() => { tmdbMode = 'tv'; if (!target.episode) target.episode = (sourcePath ? detectEpisode(sourcePath.split(/[\\/]/).pop()) : '') || 'S01E01'; }} title="Mode Série : SxxExx dans le filename"><Icon name="tv" /></button>
         </span>
       </span>
       {#if target.episode}

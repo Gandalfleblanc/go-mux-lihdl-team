@@ -320,7 +320,7 @@ export function pairSeasonFiles(paths, mode) {
   const byEp = new Map();
   const ignored = [];
   for (const p of paths || []) {
-    const name = String(p).split('/').pop();
+    const name = String(p).split(/[\\/]/).pop();
     const ep = detectEpisode(name);
     if (!ep) { ignored.push(p); continue; }
     if (!byEp.has(ep)) byEp.set(ep, []);
@@ -331,7 +331,7 @@ export function pairSeasonFiles(paths, mode) {
     const issues = [];
     let source = '', supply = '';
     if (mode === 'psa') {
-      const isPsa = (f) => parsePsaSourceInfo(String(f).split('/').pop()).isPSA;
+      const isPsa = (f) => parsePsaSourceInfo(String(f).split(/[\\/]/).pop()).isPSA;
       const psas = files.filter(isPsa);
       const others = files.filter((f) => !isPsa(f));
       source = psas[0] || '';
