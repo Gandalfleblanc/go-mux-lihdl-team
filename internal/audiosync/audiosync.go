@@ -56,6 +56,12 @@ func Locate(appBinDir string) (string, error) {
 			return candidate, nil
 		}
 	}
+	// Embed vide (build locale sans binaires) : copie déjà extraite par une version précédente.
+	if appBinDir != "" {
+		if p, err := exec.LookPath(filepath.Join(appBinDir, embeddedName)); err == nil {
+			return p, nil
+		}
+	}
 	if p, err := exec.LookPath("ffmpeg"); err == nil {
 		return p, nil
 	}
@@ -75,6 +81,11 @@ func LocateFfprobe(appBinDir string) (string, error) {
 			}
 		} else {
 			return candidate, nil
+		}
+	}
+	if appBinDir != "" {
+		if p, err := exec.LookPath(filepath.Join(appBinDir, embeddedFfprobeName)); err == nil {
+			return p, nil
 		}
 	}
 	if p, err := exec.LookPath("ffprobe"); err == nil {
