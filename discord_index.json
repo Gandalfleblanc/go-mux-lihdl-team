@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-11-26T02:05:50Z",
+  "generated_at": "2026-11-27T02:03:52Z",
   "entries": {
     "10007": {
       "tmdb_id": "10007",
@@ -689,6 +689,14 @@
       "updated_at": "2026-11-05T09:09:38.098000+00:00",
       "thread_id": "1567828226754089041",
       "last_message_id": "1567828226754089041"
+    },
+    "1248893": {
+      "tmdb_id": "1248893",
+      "url": "https://discord.com/channels/994006546805694474/1575621141223964822/1575621141223964822",
+      "title": "De.Break.Up.Club.2024.CUSTOM.DUAL.VFi.1080p.WEB-DL.AC3.5.1.H264-LiHDL",
+      "updated_at": "2026-11-26T21:15:53.693000+00:00",
+      "thread_id": "1575621141223964822",
+      "last_message_id": "1575621265824419903"
     },
     "1249508": {
       "tmdb_id": "1249508",
@@ -4049,6 +4057,14 @@
       "updated_at": "2026-08-08T13:22:39.263000+00:00",
       "thread_id": "1535639381136777216",
       "last_message_id": "1535639429065220168"
+    },
+    "93910": {
+      "tmdb_id": "93910",
+      "url": "https://discord.com/channels/994006546805694474/1575624346917928990/1575624346917928990",
+      "title": "The.Bermuda.Triangle.1979.DOC.CUSTOM.MULTI.VFF.1080p.BluRay.REMUX.DTS.HD.MA.2.0.AVC-SYNKOID",
+      "updated_at": "2026-11-26T21:28:37.990000+00:00",
+      "thread_id": "1575624346917928990",
+      "last_message_id": "1575653545892647084"
     },
     "93934": {
       "tmdb_id": "93934",
